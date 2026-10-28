@@ -1,0 +1,76 @@
+{
+  "baseline_local_commit": "247b957d7525033f4d602a0c3242eaad96d977ab",
+  "source_local_commit": "7067ddec551561c7624f51e2a3e5e43ddf366445",
+  "base_upstream": "337186cf3ce778dd1b89092e8958652cb4d7ceb3",
+  "base_fork": "59492c868416d82cdd5b57fbbf78753d044412d9",
+  "applies_after": "host-fixes.patch",
+  "patch_sha256": "6692acca59de4d5731450a6edba8c33844988f5d683c34afb88c4f2ce4eafbf5",
+  "unchanged_cache_interfaces": [
+    "dm/gfx/nvn/dm_shell_msl.h",
+    "dm/gfx/nvn/dmsh_chain.h",
+    "dm/gfx/nvn/nvn_pso_skey.h"
+  ],
+  "files": [
+    {
+      "path": "dm/games/0100000000010000/README.md",
+      "normalized_sha256": "56072e2964a2278e868b5fe56cbd009d74a4d36024e9c18e0f4c5dcc67f2d16d"
+    },
+    {
+      "path": "dm/gfx/nvn/nvn_mtl.m",
+      "normalized_sha256": "1fa58c75636c29169f624561d0a1b61aaff3b73176b17bd5466ee0dfa48ab979"
+    },
+    {
+      "path": "dm/gfx/nvn/nvn_rt_survey.h",
+      "normalized_sha256": "1139f53dbfcc19087e2bff2606da17bab1d4f9b48f7e7b769f48449716000ff9"
+    },
+    {
+      "path": "dm/gfx/tests/run_nvn_text_lines_native.py",
+      "normalized_sha256": "89c18579aa9a18f3a6461ea5a61c8527aab45eb554a553dfabe0d64b840a3afa"
+    },
+    {
+      "path": "dm/gfx/tests/t_rt_survey.c",
+      "normalized_sha256": "b3869b19ff67f1ed15a173242f6701bda64ab9310972d69823294c2228418349"
+    },
+    {
+      "path": "dm/gfx/tests/test_nvn_text_lines.py",
+      "normalized_sha256": "eadeb44534a389b5757d214f47af11878cb7d12e7591c60882e160141b0291fd"
+    },
+    {
+      "path": "dm/gfx/tests/test_rt_survey.py",
+      "normalized_sha256": "0fcd0b9d547ca730a1ddbf247776f33af9afd06fc517469cd51c140a0c18251d"
+    },
+    {
+      "path": "dm/ios/Sources/dm_shader_prep.m",
+      "normalized_sha256": "43e5a0f08841a3a81d360fb11e4ec101fa3de1c07f06e5a6ac5872cf528d19de"
+    },
+    {
+      "path": "dm/ios/Sources/dm_shell_identity.h",
+      "normalized_sha256": "b1ccca1e85e4a024a4a5b477bfb190688c8b2a34b8216276996cce5f0fc8e868"
+    },
+    {
+      "path": "dm/ios/Sources/main.m",
+      "normalized_sha256": "d19635e7ef150444dbc659de3cda02d85ba9e383d25ad8a0c5556f5de6fcd427"
+    },
+    {
+      "path": "dm/tools/tests/run_shell_identity_native.py",
+      "normalized_sha256": "7f394f69406075c1f2507144b701d0fceae219c19cfec2b5686e9e4143c67127"
+    },
+    {
+      "path": "dm/tools/tests/test_shell_identity_policy.py",
+      "normalized_sha256": "6584426b0ee99cfa4f2d581419ce75b9024cfbd27446b2086dc2a8abd7ad94a0"
+    },
+    {
+      "path": "docs/agents/04-graphics.md",
+      "normalized_sha256": "b7a2bc63cd63d4bc3aa5c8583b14eee260620d0c11447adba0d2d70814ea1012"
+    },
+    {
+      "path": "docs/agents/symptoms.md",
+      "normalized_sha256": "9641e8949ce9db8081ec624aaf13bf627182579896ad65971567a6d2cdb17b24"
+    },
+    {
+      "path": "docs/reference/shaders.md",
+      "normalized_sha256": "223b7d24e58a4b6171ae10822657199885c92039e7c6f8eaa717e75824fabdde"
+    }
+  ],
+  "scope": "game-free host source, synthetic tests, public source documentation; no game payload or device captures"
+}

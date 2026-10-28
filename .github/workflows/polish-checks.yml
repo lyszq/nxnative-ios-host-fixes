@@ -1,0 +1,81 @@
+name: Check game-free polish changes
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - polish-fixes.patch
+      - polish-source-manifest.json
+      - .github/workflows/polish-checks.yml
+permissions:
+  contents: read
+concurrency:
+  group: polish-checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  checks:
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: xinerqu/ns2ios-shell
+          ref: 59492c868416d82cdd5b57fbbf78753d044412d9
+          path: fork
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: seedds/nxnative
+          ref: 337186cf3ce778dd1b89092e8958652cb4d7ceb3
+          path: shell
+          persist-credentials: false
+      - name: Assemble the pinned F1 release and polish source
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          fork, shell = Path('fork'), Path('shell')
+          for raw in (fork / '.shell-overlay.txt').read_text().splitlines():
+              if not raw.startswith('+ '): continue
+              name = raw[1:].split('#', 1)[0].strip()
+              if not name: continue
+              source, target = fork / name, shell / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              if source.is_dir(): shutil.copytree(source, target, dirs_exist_ok=True)
+              else: shutil.copy2(source, target)
+          PY
+          for patch in "$GITHUB_WORKSPACE/fork/.shell-patches/"*.patch; do
+            git -C shell apply --whitespace=nowarn "$patch"
+          done
+          git -C shell apply --check "$GITHUB_WORKSPACE/host-fixes.patch"
+          git -C shell apply "$GITHUB_WORKSPACE/host-fixes.patch"
+          git -C shell apply --check "$GITHUB_WORKSPACE/polish-fixes.patch"
+          git -C shell apply "$GITHUB_WORKSPACE/polish-fixes.patch"
+      - name: Verify exported source identities
+        run: |
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          manifest = json.loads(Path('polish-source-manifest.json').read_text())
+          assert hashlib.sha256(Path('polish-fixes.patch').read_bytes()).hexdigest() == manifest['patch_sha256']
+          for entry in manifest['files']:
+              data = (Path('shell') / entry['path']).read_bytes().replace(b'\r\n', b'\n')
+              assert hashlib.sha256(data).hexdigest() == entry['normalized_sha256'], entry['path']
+          print('PASS: all reviewed polish source hashes match the local committed source')
+          PY
+      - name: Source guards and CPU-only render-target census
+        working-directory: shell
+        run: |
+          python3 -m unittest dm.tools.tests.test_shell_msl_policy dm.tools.tests.test_shell_identity_policy dm.gfx.tests.test_nvn_text_lines dm.gfx.tests.test_rt_survey -v
+      - name: Actual source-loading ownership and Foundation identity tests
+        working-directory: shell
+        run: |
+          python3 dm/tools/tests/run_shell_msl_native.py
+          python3 dm/tools/tests/run_shell_identity_native.py
+      # Native Foundation row parsing also runs through test_nvn_text_lines above.
+      # This workflow intentionally makes no host binary or IPA.

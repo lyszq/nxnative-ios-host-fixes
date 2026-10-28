@@ -1,0 +1,832 @@
+diff --git a/dm/games/0100000000010000/README.md b/dm/games/0100000000010000/README.md
+index fe83bf3..7a086f6 100644
+--- a/dm/games/0100000000010000/README.md
++++ b/dm/games/0100000000010000/README.md
+@@ -58,6 +58,8 @@ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in
+ 
+ General host and tool changes first needed here; each applies to every game:
+ 
++- **CRLF prewarm parsing (source audit; device validation pending):** [CRLF prewarm rows retain a carriage return](../../../docs/reference/shaders.md#crlf-prewarm-rows-retain-a-carriage-return). The observed iPad list was LF; this hardening preserves its cache format and does not explain the recorded first-use hitches.
++
+ - **BAHS pairs omitted from vertex padding:** [Pixel shader inputs the vertex shader does not write](../../../docs/reference/shaders.md#pixel-shader-inputs-the-vertex-shader-does-not-write).
+ - **Front end at `-O1`** (`dmsh_build.py` and `ios_metal.py`): [Front end at -O1: Apple's control-flow lowering](../../../docs/reference/shaders.md#front-end-at--o1-apples-control-flow-lowering).
+ - **Pipeline archive flush periods** (no compile waits for a flush; the prepare step stops at the last pair handed out): [A compile that does not return stalls every flush and draw](../../../docs/reference/shaders.md#a-compile-that-does-not-return-stalls-every-flush-and-draw).
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+index c5d269c..ebc4973 100644
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -29,6 +29,7 @@
+ #include "nvn_cover.h"
+ #include "nvn_primitive.h"
+ #include "nvn_timestamp.h"
++#include "nvn_rt_survey.h"
+ #include "dmsh_chain.h"   // DMSH_CHAIN: the translation chain version of the B shader library expected by this source tree, one for every game (beside this file, tools/dmsh_chain.py --header)
+ #include "game_profile.h"   // game profile constants (profile id, the profile's switches)
+ #ifdef DM_SHELL
+@@ -2776,6 +2777,57 @@ static void pass_dims(MTL4RenderPassDescriptor *pd, NSUInteger nc, NSUInteger *w
+     if (!*w) { *w = MAX(pd.renderTargetWidth, 1); *h = MAX(pd.renderTargetHeight, 1); }   // attachment-less pass (rp_begin_ex_): its explicit size
+ }
+ 
++// DM_NVN_RT_SURVEY=1: first 128 unique attachment layouts, without readback or addresses.
++// This is a size census, not proof that a target is the scene colour buffer. Use PASSDUMP to trace its consumers.
++static int rt_survey_on(void) {
++    static int enabled = -1;
++    if (enabled < 0) { const char *e = getenv("DM_NVN_RT_SURVEY"); enabled = e && !strcmp(e, "1"); }
++    return enabled;
++}
++static void rt_survey_note(MTL4RenderPassDescriptor *pd, NSUInteger nc) {
++    static nvn_rt_survey survey;
++    static uint64_t first_frame;
++    static int initialized, full;
++    if (!rt_survey_on() || full) return;
++    if (!initialized) {
++        initialized = 1;
++        const char *e = getenv("DM_NVN_RT_SURVEY_FROM");
++        if (e && *e >= '0' && *e <= '9') { char *end = NULL; unsigned long long f = strtoull(e, &end, 10); if (end && !*end) first_frame = f; }
++        MLOG("render-target survey: first_frame=%llu limit=%u (diagnostic logging; not a performance run)", (unsigned long long)first_frame, NVN_RT_SURVEY_LIMIT);
++    }
++    uint64_t frame = atomic_load(&g_cur_frame);
++    if (frame < first_frame) return;
++    NSUInteger pw, ph; pass_dims(pd, nc, &pw, &ph);
++    for (NSUInteger i = 0; i < MIN(nc, 8u) + 2; i++) {
++        NSUInteger colors = MIN(nc, 8u);
++        unsigned role = i < colors ? 0 : i == colors ? 1 : 2;
++        MTLRenderPassAttachmentDescriptor *a = role == 0 ? pd.colorAttachments[i] : role == 1 ? pd.depthAttachment : pd.stencilAttachment;
++        id<MTLTexture> t = a.texture;
++        if (!t) continue;
++        const tex_t *logical = role == 0 ? R.rt.color[i] : R.rt.depth;
++        const view_t *view = role == 0 ? &R.rt.cview[i] : &R.rt.dview;
++        int has_view = role == 0 ? R.rt.has_cview[i] : R.rt.has_dview;
++        nvn_rt_survey_key k = {0};
++        k.role = role; k.slot = role == 0 ? (uint32_t)i : 0;
++        if (logical) { k.nvn_w = logical->d.width; k.nvn_h = logical->d.height; k.nvn_format = logical->d.format; k.nvn_target = logical->d.target; }
++        k.nvn_level = has_view && view->set_levels ? view->base_level : 0;
++        k.nvn_view_format = has_view && view->set_format ? view->format : k.nvn_format;
++        k.mtl_w = (uint32_t)t.width; k.mtl_h = (uint32_t)t.height; k.mtl_format = (uint32_t)t.pixelFormat; k.mtl_type = (uint32_t)t.textureType;
++        k.level = (uint32_t)a.level; k.samples = (uint32_t)t.sampleCount; k.layers = (uint32_t)t.arrayLength;
++        k.effective_w = (uint32_t)mip_extent(t.width, a.level); k.effective_h = (uint32_t)mip_extent(t.height, a.level);
++        k.pass_w = (uint32_t)pw; k.pass_h = (uint32_t)ph;
++        int added = nvn_rt_survey_add(&survey, &k);
++        if (added < 0) { full = 1; break; }
++        if (!added) continue;
++        MLOG("[rt-survey] F%llu pass=%llu role=%c%u logical=%ux%u nvn_fmt=%u nvn_target=%u nvn_level=%u nvn_view_fmt=%u metal_base=%ux%u metal_fmt=%u metal_type=%u level=%u effective=%ux%u samples=%u layers=%u pass_size=%ux%u",
++             (unsigned long long)frame, (unsigned long long)(g_stat_pass + 1), role == 0 ? 'c' : role == 1 ? 'd' : 's', k.slot,
++             k.nvn_w, k.nvn_h, k.nvn_format, k.nvn_target, k.nvn_level, k.nvn_view_format,
++             k.mtl_w, k.mtl_h, k.mtl_format, k.mtl_type, k.level, k.effective_w, k.effective_h, k.samples, k.layers, k.pass_w, k.pass_h);
++        if (survey.count == NVN_RT_SURVEY_LIMIT) { full = 1; break; }
++    }
++    if (full) MLOG("render-target survey: limit reached; restart with DM_NVN_RT_SURVEY_FROM to sample a later scene");
++}
++
+ // ---------- DM_NVN_PASSGPU=<file>: per-pass GPU time (stage-boundary timestamp counters) ----------
+ // Each render pass samples 4 points (vertex start/end, fragment start/end), a compute pass 2 points; resolved after the command buffer completes and accumulated by 'index of the pass within the frame'.
+ // Each line: frame idx kind gpu_ms inc_ms w h fmt0 dfmt load draws t0_ns t1_ns (kind: R render / C compute; load: L load / C clear for each color attachment + depth)
+@@ -3397,6 +3449,7 @@ static id<MTL4RenderCommandEncoder> rp_begin_ex_(int clear_only) {
+         if (pd.depthAttachment.texture) { id<MTLTexture> t = pd.depthAttachment.texture; NSUInteger have = t.arrayLength * (t.textureType == MTLTextureTypeCube || t.textureType == MTLTextureTypeCubeArray ? 6 : 1) - pd.depthAttachment.slice; if (have < nl) nl = have; }
+         if (nl != NSUIntegerMax && nl > 1) { pd.renderTargetArrayLength = nl; PD("L %llu layered pass: %lu layers", g_stat_pass + 1, (unsigned long)nl); }
+     }
++    rt_survey_note(pd, (NSUInteger)R.rt.n);
+     pg_render(pd, (NSUInteger)R.rt.n);
+     { void td_note(id pd, NSUInteger nc); td_note(pd, (NSUInteger)R.rt.n);
+       void ts_note(id pd, NSUInteger nc); ts_note(pd, (NSUInteger)R.rt.n);
+@@ -3622,6 +3675,16 @@ static FILE *pso_user_file(void) {
+     if (path) g_pso_user = fopen(path.fileSystemRepresentation, "a");
+     return g_pso_user;
+ }
++// Remove the one CR that can remain when an LF-delimited text row came from a CRLF file.
++static NSString *nvn_line_without_cr(NSString *line) {
++    return [line hasSuffix:@"\r"] ? [line substringToIndex:line.length - 1] : line;
++}
++static void pso_user_add_existing_lines(NSMutableSet<NSString *> *lines, NSString *txt) {
++    for (NSString *raw in [txt componentsSeparatedByString:@"\n"]) {
++        NSString *line = nvn_line_without_cr(raw);
++        if (line.length && ![line hasPrefix:@"#"]) [lines addObject:line];
++    }
++}
+ static void pso_user_record(const char *fmt, ...) {
+     FILE *f = pso_user_file();
+     if (!f) return;
+@@ -3631,7 +3694,7 @@ static void pso_user_record(const char *fmt, ...) {
+         NSString *seed = g_shmap_path ? [g_shmap_path.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"pso_manifest.tsv"] : nil;
+         NSMutableArray<NSString *> *paths = [NSMutableArray array]; if (seed) [paths addObject:seed]; NSString *user = pso_user_path(); if (user) [paths addObject:user];
+         for (NSString *path in paths) { NSString *txt = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+-            for (NSString *old in [txt componentsSeparatedByString:@"\n"]) if (old.length && ![old hasPrefix:@"#"]) [g_pso_user_seen addObject:old]; }
++            pso_user_add_existing_lines(g_pso_user_seen, txt); }
+     }
+     size_t ll = strlen(line); NSString *s = [[NSString alloc] initWithBytes:line length:ll && line[ll - 1] == '\n' ? ll - 1 : ll encoding:NSUTF8StringEncoding];   // Compared with the manifest file line by line (without the newline)
+     if (!s || [g_pso_user_seen containsObject:s]) return;
+@@ -5841,7 +5904,7 @@ static NSString *pre_stamp(NSString *txt, int zero) {
+ }
+ static NSArray<NSArray<NSString *> *> *pre_parse(NSString *txt) {   // (vertex key, pixel key) per line, without empty lines, comments and repeated lines
+     NSMutableArray<NSArray<NSString *> *> *pairs = [NSMutableArray array]; NSMutableSet<NSString *> *seen = [NSMutableSet set];
+-    for (NSString *l in [txt componentsSeparatedByString:@"\n"]) { if (!l.length || [l hasPrefix:@"#"] || [seen containsObject:l]) continue; [seen addObject:l]; NSArray *c = [l componentsSeparatedByString:@"\t"]; if (c.count >= 2) [pairs addObject:c]; }
++    for (NSString *raw in [txt componentsSeparatedByString:@"\n"]) { NSString *l = nvn_line_without_cr(raw); if (!l.length || [l hasPrefix:@"#"] || [seen containsObject:l]) continue; [seen addObject:l]; NSArray *c = [l componentsSeparatedByString:@"\t"]; if (c.count >= 2) [pairs addObject:c]; }
+     return pairs;
+ }
+ // Whether the archive bundled with the app (pso_bundle_open) holds this run's prebuild: its prebuilt.tsv is the stamp the device would write for these pairs and this depth mode,
+@@ -6108,9 +6171,10 @@ static NSArray<WarmTask *> *warm_parse(NSArray<NSString *> *paths, long *lines)
+     for (NSString *path in paths) {
+         NSString *txt = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
+         if (!txt) { MLOG("[RED] cannot read prewarm list: %s", path.UTF8String); continue; }
+-        { unsigned long nl = 0; for (NSString *l in [txt componentsSeparatedByString:@"\n"]) nl += l.length && ![l hasPrefix:@"#"];
++        { unsigned long nl = 0; for (NSString *raw in [txt componentsSeparatedByString:@"\n"]) { NSString *l = nvn_line_without_cr(raw); nl += l.length && ![l hasPrefix:@"#"]; }
+           MLOG("pipeline prewarm list %s: %lu lines", path.UTF8String, nl); }   // Diagnostics: how many lines each manifest gave (when a device warms up 0, shows which one was missing)
+-        for (NSString *line in [txt componentsSeparatedByString:@"\n"]) {
++        for (NSString *raw in [txt componentsSeparatedByString:@"\n"]) {
++            NSString *line = nvn_line_without_cr(raw);
+             if (!line.length || [line hasPrefix:@"#"] || [seen containsObject:line]) continue;
+             [seen addObject:line];
+             NSArray<NSString *> *c = [line componentsSeparatedByString:@"\t"];
+diff --git a/dm/gfx/nvn/nvn_rt_survey.h b/dm/gfx/nvn/nvn_rt_survey.h
+new file mode 100644
+index 0000000..773e9d9
+--- /dev/null
++++ b/dm/gfx/nvn/nvn_rt_survey.h
+@@ -0,0 +1,23 @@
++// Bounded, allocation-free keys for the optional render-target census.
++#ifndef NVN_RT_SURVEY_H
++#define NVN_RT_SURVEY_H
++#include <stdint.h>
++#include <string.h>
++
++enum { NVN_RT_SURVEY_LIMIT = 128 };
++typedef struct {
++    uint32_t role, slot, nvn_w, nvn_h, nvn_format, nvn_target, nvn_level, nvn_view_format;
++    uint32_t mtl_w, mtl_h, mtl_format, mtl_type, level, samples, layers, effective_w, effective_h, pass_w, pass_h;
++} nvn_rt_survey_key;
++_Static_assert(sizeof(nvn_rt_survey_key) == 19 * sizeof(uint32_t), "survey keys have no padding");
++typedef struct { nvn_rt_survey_key keys[NVN_RT_SURVEY_LIMIT]; unsigned count; } nvn_rt_survey;
++
++// 1: new configuration; 0: already seen; -1: full. The caller logs only new keys.
++static inline int nvn_rt_survey_add(nvn_rt_survey *survey, const nvn_rt_survey_key *key) {
++    for (unsigned i = 0; i < survey->count; i++)
++        if (!memcmp(&survey->keys[i], key, sizeof *key)) return 0;
++    if (survey->count >= NVN_RT_SURVEY_LIMIT) return -1;
++    survey->keys[survey->count++] = *key;
++    return 1;
++}
++#endif
+diff --git a/dm/gfx/tests/run_nvn_text_lines_native.py b/dm/gfx/tests/run_nvn_text_lines_native.py
+new file mode 100644
+index 0000000..bafef3c
+--- /dev/null
++++ b/dm/gfx/tests/run_nvn_text_lines_native.py
+@@ -0,0 +1,155 @@
++#!/usr/bin/env python3
++"""Exercise the actual NVN text parsers with LF and CRLF fixtures on macOS."""
++from pathlib import Path
++import subprocess
++import sys
++import tempfile
++
++
++ROOT = Path(__file__).resolve().parents[3]
++SOURCE = ROOT / "dm/gfx/nvn/nvn_mtl.m"
++
++
++def extract_function(source: str, signature: str) -> str:
++    start = source.index(signature)
++    brace = source.index("{", start)
++    depth = 0
++    quote = None
++    line_comment = False
++    block_comment = False
++    escaped = False
++    i = brace
++    while i < len(source):
++        ch = source[i]
++        nxt = source[i + 1] if i + 1 < len(source) else ""
++        if line_comment:
++            if ch == "\n":
++                line_comment = False
++        elif block_comment:
++            if ch == "*" and nxt == "/":
++                block_comment = False
++                i += 1
++        elif quote:
++            if escaped:
++                escaped = False
++            elif ch == "\\":
++                escaped = True
++            elif ch == quote:
++                quote = None
++        elif ch == "/" and nxt == "/":
++            line_comment = True
++            i += 1
++        elif ch == "/" and nxt == "*":
++            block_comment = True
++            i += 1
++        elif ch in ('"', "'"):
++            quote = ch
++        elif ch == "{":
++            depth += 1
++        elif ch == "}":
++            depth -= 1
++            if depth == 0:
++                return source[start:i + 1]
++        i += 1
++    raise ValueError(f"unclosed function body: {signature}")
++
++
++def main() -> int:
++    if sys.platform != "darwin":
++        print("SKIP: native Foundation parser test requires macOS/Xcode")
++        return 77
++
++    text = SOURCE.read_text(encoding="utf-8")
++    signatures = (
++        "static NSString *nvn_line_without_cr(NSString *line)",
++        "static void pso_user_add_existing_lines(NSMutableSet<NSString *> *lines, NSString *txt)",
++        "static NSString *warm_key(const char *s, size_t n)",
++        "static int warm_stale(NSString *key, NSMutableSet<NSString *> *stale)",
++        "static NSArray<NSArray<NSString *> *> *pre_parse(NSString *txt)",
++        "static NSArray<WarmTask *> *warm_parse(NSArray<NSString *> *paths, long *lines)",
++    )
++    functions = "\n\n".join(extract_function(text, signature) for signature in signatures)
++    harness = r'''
++#import <Foundation/Foundation.h>
++#include <assert.h>
++#include <stdio.h>
++#include <string.h>
++#include "nvn_pso_skey.h"
++
++static NSMutableDictionary<NSString *, NSString *> *g_shmap;
++static uint64_t g_warm_skip_stale;
++@interface WarmTask : NSObject { @public int kind, stage; NSString *key, *vkey, *fkey; NSMutableArray<NSData *> *rs; }
++@end
++@implementation WarmTask @end
++#define MLOG(...) ((void)0)
++
++/* ACTUAL_PARSER_FUNCTIONS */
++
++static void check_tasks(NSArray<WarmTask *> *tasks, long lines) {
++    assert(lines == 3 && tasks.count == 3);
++    WarmTask *shader = nil, *compute = nil, *render = nil;
++    for (WarmTask *task in tasks) {
++        if (task->kind == 0) shader = task;
++        else if (task->kind == 2) compute = task;
++        else if (task->kind == 1) render = task;
++    }
++    assert(shader && [shader->key isEqualToString:@"shader-a"] && shader->stage == 0);
++    assert(compute && [compute->key isEqualToString:@"compute-a"] && compute->stage == 5);
++    assert(render && [render->vkey isEqualToString:@"shader-a"] && [render->fkey isEqualToString:@"shader-b"]);
++    assert(render->rs.count == 1);
++}
++
++static void check_warm_file(NSString *text, NSString *name) {
++    NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:name];
++    assert([text writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil]);
++    long lines = 0;
++    NSArray<WarmTask *> *tasks = warm_parse(@[path], &lines);
++    check_tasks(tasks, lines);
++    [NSFileManager.defaultManager removeItemAtPath:path error:nil];
++}
++
++int main(void) { @autoreleasepool {
++    assert([nvn_line_without_cr(@"row \r") isEqualToString:@"row "]);
++    assert([nvn_line_without_cr(@"row\r\r") isEqualToString:@"row\r"]);
++    assert([nvn_line_without_cr(@"row ") isEqualToString:@"row "]);
++
++    NSString *pairText = @"vs-a\tfs-a\nvs-a\tfs-a\r\nvs-b \tfs-b\r\n# comment\r\n\r\n";
++    NSArray<NSArray<NSString *> *> *pairs = pre_parse(pairText);
++    assert(pairs.count == 2);
++    assert([pairs[0][0] isEqualToString:@"vs-a"] && [pairs[0][1] isEqualToString:@"fs-a"]);
++    assert([pairs[1][0] isEqualToString:@"vs-b "] && [pairs[1][1] isEqualToString:@"fs-b"]);
++
++    NSString *records = @"# manifest\nS\tshader-a\t0\nS\tshader-a\t0\nC\tcompute-a\nC\tcompute-a\nR\t%s\nR\t%s\n";
++    pso_skey key = {0}; strcpy(key.vs, "shader-a"); strcpy(key.fs, "shader-b");
++    char hex[sizeof key * 2 + 1]; pso_skey_hex(&key, hex);
++    NSString *lf = [NSString stringWithFormat:records, hex, hex];
++    NSString *crlf = [lf stringByReplacingOccurrencesOfString:@"\n" withString:@"\r\n"];
++    g_shmap = [@{@"shader-a": @"lib", @"shader-b": @"lib", @"compute-a": @"lib"} mutableCopy];
++    check_warm_file(lf, @"nvn-lines-lf.tsv");
++    check_warm_file(crlf, @"nvn-lines-crlf.tsv");
++
++    NSString *userCRLF = @"# prior seed\r\nS\tshader-a\t0\r\nS\tshader-a\t0\r\nC\tcompute-a \r\n";
++    NSString *userLF = [userCRLF stringByReplacingOccurrencesOfString:@"\r\n" withString:@"\n"];
++    NSMutableSet<NSString *> *a = [NSMutableSet set], *b = [NSMutableSet set];
++    pso_user_add_existing_lines(a, userCRLF); pso_user_add_existing_lines(b, userLF);
++    assert([a isEqualToSet:b] && a.count == 2);
++    assert([a containsObject:@"S\tshader-a\t0"] && [a containsObject:@"C\tcompute-a "]);
++    puts("PASS: actual pre_parse, pso_user row extraction, and warm_parse accept equivalent LF/CRLF S/R/C rows; pair and row dedup preserve spaces");
++} return 0; }
++'''.replace("/* ACTUAL_PARSER_FUNCTIONS */", functions)
++
++    with tempfile.TemporaryDirectory(prefix="nvn-text-lines-") as td:
++        source = Path(td) / "test.m"
++        executable = Path(td) / "test"
++        source.write_text(harness, encoding="utf-8", newline="\n")
++        subprocess.run([
++            "xcrun", "clang", "-fobjc-arc", "-Wall", "-Wextra",
++            "-I", str(ROOT / "dm/gfx/nvn"), "-framework", "Foundation",
++            str(source), "-o", str(executable),
++        ], check=True)
++        subprocess.run([str(executable)], check=True)
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/dm/gfx/tests/t_rt_survey.c b/dm/gfx/tests/t_rt_survey.c
+new file mode 100644
+index 0000000..6c45665
+--- /dev/null
++++ b/dm/gfx/tests/t_rt_survey.c
+@@ -0,0 +1,35 @@
++#include "../nvn/nvn_rt_survey.h"
++#undef NDEBUG
++#include <assert.h>
++#include <stdio.h>
++
++int main(void) {
++    nvn_rt_survey survey = {0};
++    nvn_rt_survey_key key = {0};
++    key.nvn_w = key.mtl_w = 1600; key.nvn_h = key.mtl_h = 900;
++    key.effective_w = key.pass_w = 1600; key.effective_h = key.pass_h = 900;
++    key.samples = key.layers = 1;
++    assert(nvn_rt_survey_add(&survey, &key) == 1);
++    assert(nvn_rt_survey_add(&survey, &key) == 0 && survey.count == 1);
++
++    // Every independently reported property must distinguish otherwise identical configurations.
++    uint32_t fields[19]; memcpy(fields, &key, sizeof fields);
++    for (unsigned i = 0; i < 19; i++) {
++        uint32_t changed[19]; memcpy(changed, fields, sizeof fields); changed[i]++;
++        nvn_rt_survey_key other; memcpy(&other, changed, sizeof other);
++        assert(nvn_rt_survey_add(&survey, &other) == 1);
++        assert(nvn_rt_survey_add(&survey, &other) == 0);
++    }
++    assert(survey.count == 20);
++    while (survey.count < NVN_RT_SURVEY_LIMIT) {
++        key.mtl_format = 1000 + survey.count;
++        assert(nvn_rt_survey_add(&survey, &key) == 1);
++    }
++    nvn_rt_survey before = survey;
++    key.mtl_format = 999999;
++    assert(nvn_rt_survey_add(&survey, &key) == -1);
++    assert(!memcmp(&survey, &before, sizeof survey));
++    assert(nvn_rt_survey_add(&survey, &survey.keys[0]) == 0);
++    puts("PASS: RT survey distinguishes logical/Metal/mip/pass layouts, deduplicates, and saturates without mutation");
++    return 0;
++}
+diff --git a/dm/gfx/tests/test_nvn_text_lines.py b/dm/gfx/tests/test_nvn_text_lines.py
+new file mode 100644
+index 0000000..7d0f1e0
+--- /dev/null
++++ b/dm/gfx/tests/test_nvn_text_lines.py
+@@ -0,0 +1,81 @@
++"""Windows-runnable source guards for the NVN LF/CRLF parser fix."""
++from pathlib import Path
++import subprocess
++import sys
++import unittest
++
++
++ROOT = Path(__file__).resolve().parents[3]
++SOURCE = ROOT / "dm/gfx/nvn/nvn_mtl.m"
++NATIVE = ROOT / "dm/gfx/tests/run_nvn_text_lines_native.py"
++
++
++def function_body(source: str, signature: str) -> str:
++    start = source.index(signature)
++    brace = source.index("{", start)
++    depth = 0
++    quote = None
++    escaped = False
++    i = brace
++    while i < len(source):
++        ch = source[i]
++        if quote:
++            if escaped:
++                escaped = False
++            elif ch == "\\":
++                escaped = True
++            elif ch == quote:
++                quote = None
++        elif ch in ('"', "'"):
++            quote = ch
++        elif ch == "{":
++            depth += 1
++        elif ch == "}":
++            depth -= 1
++            if depth == 0:
++                return source[start:i + 1]
++        i += 1
++    raise AssertionError(f"unclosed function body: {signature}")
++
++
++class NVNTextLineTests(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.source = SOURCE.read_text(encoding="utf-8")
++        cls.helper = function_body(cls.source, "static NSString *nvn_line_without_cr(NSString *line)")
++
++    def test_normalizer_removes_only_one_final_cr(self):
++        self.assertIn('[line hasSuffix:@"\\r"]', self.helper)
++        self.assertIn("[line substringToIndex:line.length - 1]", self.helper)
++        self.assertNotRegex(self.helper, r"[Tt]rim|whitespace|newlineCharacterSet")
++
++    def test_pair_parser_normalizes_before_dedup_and_field_split(self):
++        body = function_body(self.source, "static NSArray<NSArray<NSString *> *> *pre_parse(NSString *txt)")
++        normalize = body.index("NSString *l = nvn_line_without_cr(raw)")
++        self.assertLess(normalize, body.index("[seen containsObject:l]"))
++        self.assertLess(normalize, body.index('[l componentsSeparatedByString:@"\\t"]'))
++
++    def test_warm_parser_normalizes_rows_before_dedup_and_dispatch(self):
++        body = function_body(self.source, "static NSArray<WarmTask *> *warm_parse(NSArray<NSString *> *paths, long *lines)")
++        self.assertGreaterEqual(body.count("nvn_line_without_cr(raw)"), 2)  # count and task passes
++        normalize = body.index("NSString *line = nvn_line_without_cr(raw)")
++        self.assertLess(normalize, body.index("[seen containsObject:line]"))
++        self.assertLess(normalize, body.index('[line componentsSeparatedByString:@"\\t"]'))
++        for kind in ('[c[0] isEqualToString:@"S"]', '[c[0] isEqualToString:@"C"]', '[c[0] isEqualToString:@"R"]'):
++            self.assertIn(kind, body)
++
++    def test_pso_user_dedup_normalizes_existing_rows_without_rewriting_them(self):
++        rows = function_body(self.source, "static void pso_user_add_existing_lines(NSMutableSet<NSString *> *lines, NSString *txt)")
++        record = function_body(self.source, "static void pso_user_record(const char *fmt, ...)")
++        self.assertIn("NSString *line = nvn_line_without_cr(raw)", rows)
++        self.assertIn("pso_user_add_existing_lines(g_pso_user_seen, txt)", record)
++        self.assertNotIn("unionSet:", record)
++        self.assertIn("fputs(line, f)", record)  # newly observed bytes retain their existing format
++
++    @unittest.skipUnless(sys.platform == "darwin", "native Foundation parser harness requires macOS/Xcode")
++    def test_native_foundation_fixture(self):
++        subprocess.run([sys.executable, str(NATIVE)], cwd=ROOT, check=True)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/dm/gfx/tests/test_rt_survey.py b/dm/gfx/tests/test_rt_survey.py
+new file mode 100644
+index 0000000..f135eb3
+--- /dev/null
++++ b/dm/gfx/tests/test_rt_survey.py
+@@ -0,0 +1,48 @@
++"""CPU-only census key tests and guards on the optional Metal integration."""
++from pathlib import Path
++import os
++import shlex
++import shutil
++import subprocess
++import sys
++import tempfile
++import unittest
++
++ROOT = Path(__file__).resolve().parents[3]
++
++
++class RTSurveyTests(unittest.TestCase):
++    def test_actual_c_keys_and_saturation(self):
++        if os.environ.get("CC"):
++            compiler = shlex.split(os.environ["CC"])
++        elif shutil.which("clang"):
++            compiler = [shutil.which("clang")]
++        elif shutil.which("zig"):
++            compiler = [shutil.which("zig"), "cc"]
++        elif shutil.which("cc"):
++            compiler = [shutil.which("cc")]
++        else:
++            self.skipTest("a C compiler is required")
++        with tempfile.TemporaryDirectory(prefix="nvn-rt-survey-") as td:
++            exe = Path(td) / ("survey.exe" if sys.platform == "win32" else "survey")
++            subprocess.run(compiler + ["-std=c11", "-Wall", "-Wextra", "-Werror", "-O2",
++                                      str(ROOT / "dm/gfx/tests/t_rt_survey.c"), "-o", str(exe)], check=True, timeout=120)
++            subprocess.run([str(exe)], check=True, timeout=15)
++
++    def test_disabled_path_precedes_attachment_queries(self):
++        text = (ROOT / "dm/gfx/nvn/nvn_mtl.m").read_text(encoding="utf-8")
++        begin = text.index("static void rt_survey_note(")
++        end = text.index("// ---------- DM_NVN_PASSGPU", begin)
++        body = text[begin:end]
++        self.assertLess(body.index("if (!rt_survey_on() || full) return"), body.index("pass_dims(pd"))
++        self.assertIn('enabled = e && !strcmp(e, "1")', text)
++        self.assertIn("rt_survey_note(pd, (NSUInteger)R.rt.n)", text)
++        for forbidden in ("newTexture", "newBuffer", "waitUntil", "getBytes:", "setTexture:", "a.texture =", "R.rt ="):
++            self.assertNotIn(forbidden, body)
++        self.assertIn("mip_extent(t.width, a.level)", body)
++        self.assertIn("g_stat_pass + 1", body)
++        self.assertNotIn("%p", body)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/dm/ios/Sources/dm_shader_prep.m b/dm/ios/Sources/dm_shader_prep.m
+index ccc3559..f924276 100644
+--- a/dm/ios/Sources/dm_shader_prep.m
++++ b/dm/ios/Sources/dm_shader_prep.m
+@@ -78,9 +78,17 @@ static NSString *marker(NSArray<NSString *> *src, NSString *dir) {
+ // Whether it needs to run: returns 1 = taken over (shows the progress page, calls done when finished); 0 = nothing to do (no source shaders, or already finished last time)
+ int dm_shader_prep_begin(void (^done)(void)) {
+     NSString *dir = libdir();   // NVN 的版本目录；GL 包没有，源码在 msl/gl/src | the chain version's directory; a GL package has none, its sources are in msl/gl/src
++    NSString *policy = dir ? DM_SHELL_NVN_MSL_EPOCH : @"default";
+     NSMutableArray<NSString *> *src = [shader_sources() mutableCopy];
+-    if (!src.count) return 0;
+-    NSString *mk = marker(src, dir); if ([NSFileManager.defaultManager fileExistsAtPath:mk]) return 0;
++    if (!src.count) {
++        pl([NSString stringWithFormat:@"shader prep status: policy=%@ sources=0 marker=not-applicable action=skip", policy]);
++        return 0;
++    }
++    NSString *mk = marker(src, dir);
++    BOOL markerHit = [NSFileManager.defaultManager fileExistsAtPath:mk];
++    pl([NSString stringWithFormat:@"shader prep status: policy=%@ sources=%lu marker=%@ action=%@",
++        policy, (unsigned long)src.count, markerHit ? @"hit" : @"miss", markerHit ? @"skip" : @"compile"]);
++    if (markerHit) return 0;
+     UIWindow *win = nil;
+     for (UIScene *s in UIApplication.sharedApplication.connectedScenes) if ([s isKindOfClass:UIWindowScene.class]) for (UIWindow *w in ((UIWindowScene *)s).windows) if (!win || w.isKeyWindow) win = w;
+     UIView *host = win.rootViewController.view ?: win; if (!host) { pl(@"【红】着色器准备：没有窗口可放进度页，跳过（进游戏后会边玩边编，第一次进新场景会顿）"); return 0; }
+diff --git a/dm/ios/Sources/dm_shell_identity.h b/dm/ios/Sources/dm_shell_identity.h
+new file mode 100644
+index 0000000..b3f88f9
+--- /dev/null
++++ b/dm/ios/Sources/dm_shell_identity.h
+@@ -0,0 +1,64 @@
++// Small, path-free identity diagnostics for shell builds.
++#ifndef DM_SHELL_IDENTITY_H
++#define DM_SHELL_IDENTITY_H
++
++#import <Foundation/Foundation.h>
++#import <CommonCrypto/CommonDigest.h>
++
++static BOOL dm_shell_identity_is_source_sha(NSString *value) {
++    if (value.length != 40) return NO;
++    NSCharacterSet *nonHex = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet];
++    return [value rangeOfCharacterFromSet:nonHex].location == NSNotFound;
++}
++
++// Return the single strict 40-hex SOURCE_SHA value, or nil for missing or malformed metadata.
++static NSString *dm_shell_identity_source_sha(NSString *metadataPath) {
++    if (!metadataPath.length) return nil;
++    NSString *contents = [NSString stringWithContentsOfFile:metadataPath encoding:NSUTF8StringEncoding error:nil];
++    if (!contents) return nil;
++    NSString *found = nil;
++    for (NSString *line in [contents componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
++        if (![line hasPrefix:@"SOURCE_SHA="]) continue;
++        if (found) return nil;
++        NSString *value = [line substringFromIndex:11];
++        if (!dm_shell_identity_is_source_sha(value)) return nil;
++        found = value.lowercaseString;
++    }
++    return found;
++}
++
++// Hash a regular file incrementally so boot diagnostics do not read the executable into one large allocation.
++static NSString *dm_shell_identity_sha256_file(NSURL *url) {
++    if (!url || !url.isFileURL) return nil;
++    NSInputStream *stream = [NSInputStream inputStreamWithURL:url];
++    if (!stream) return nil;
++    [stream open];
++    if (stream.streamStatus == NSStreamStatusError) { [stream close]; return nil; }
++
++    CC_SHA256_CTX context;
++    CC_SHA256_Init(&context);
++    uint8_t buffer[64 * 1024];
++    NSInteger count = 0;
++    do {
++        count = [stream read:buffer maxLength:sizeof buffer];
++        if (count > 0 && CC_SHA256_Update(&context, buffer, (CC_LONG)count) != 1) {
++            [stream close];
++            return nil;
++        }
++    } while (count > 0);
++    BOOL ok = count == 0 && stream.streamError == nil;
++    [stream close];
++    if (!ok) return nil;
++
++    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
++    if (!CC_SHA256_Final(digest, &context)) return nil;
++    static const char hex[] = "0123456789abcdef";
++    char encoded[CC_SHA256_DIGEST_LENGTH * 2];
++    for (NSUInteger i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
++        encoded[i * 2] = hex[digest[i] >> 4];
++        encoded[i * 2 + 1] = hex[digest[i] & 0x0f];
++    }
++    return [[NSString alloc] initWithBytes:encoded length:sizeof encoded encoding:NSASCIIStringEncoding];
++}
++
++#endif
+diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
+index 9c681fe..288bdf8 100644
+--- a/dm/ios/Sources/main.m
++++ b/dm/ios/Sources/main.m
+@@ -7,12 +7,15 @@
+ #include <string.h>
+ #include <sys/stat.h>
+ #include <unistd.h>
+-#include <os/proc.h>          // os_proc_available_memory: the line at boot saying whether the memory entitlement took effect
++#include <os/proc.h>
+ #include "game_profile.h"   // game profile constants (the RomFS marker path)
+ #include "front.h"
+ #include "romfs_image.h"
+ #include "romfs_identity.h"
+ #include "player_env.h"
++#ifdef DM_SHELL
++#include "dm_shell_identity.h"
++#endif
+ #ifndef DM_PLAYER_BUILD
+ #define DM_PLAYER_BUILD 0
+ #endif
+@@ -139,13 +142,16 @@ static int boot_env(void) {
+     NSString *lang = [NSBundle.mainBundle objectForInfoDictionaryKey:@"DMLanguage"];
+     if (!getenv("DM_LANG") && [lang isKindOfClass:NSString.class] && lang.length) setenv("DM_LANG", lang.UTF8String, 0);
+     fprintf(stderr, "boot: game language %s\n", getenv("DM_LANG") ?: "en-US");
+-    // How much memory iOS will let this process keep. With com.apple.developer.kernel.increased-memory-limit in the package's
+-    // signature it is several GB (6-8 on a 12 GB phone); without it, about 3,375 MB, which the bigger games fill exactly to the
+-    // limit and are then killed for, with no crash log to explain it. One line, so that case can be told apart from a crash.
+-    { unsigned long long av = os_proc_available_memory();
+-      fprintf(stderr, "boot: memory limit %llu MB (%s)\n", av >> 20,
+-              av < (5ull << 30) ? "no increased-memory-limit entitlement: the bigger games will be killed for memory"
+-                                : "entitlement in effect"); }
++    // This API reports currently available process memory, not the signed memory entitlement or its limit.
++    { unsigned long long available = os_proc_available_memory();
++      fprintf(stderr, "boot: process memory available %llu MiB (current headroom; entitlement not queried)\n", available >> 20); }
++#ifdef DM_SHELL
++    NSString *shellInfo = [res stringByAppendingPathComponent:@"dm/shell_info.txt"];
++    NSString *sourceSHA = dm_shell_identity_source_sha(shellInfo);
++    fprintf(stderr, "boot: shell source SHA %s\n", sourceSHA.UTF8String ?: "unknown (missing or invalid)");
++    NSString *hostSHA = dm_shell_identity_sha256_file(NSBundle.mainBundle.executableURL);
++    fprintf(stderr, "boot: host executable SHA256 %s\n", hostSHA.UTF8String ?: "unavailable");
++#endif
+     NSString *romfs = romfs_locate();
+     if (!romfs) { romfs_identity_report(doc); fprintf(stderr, "boot: game files not found (Documents/romfs.img, Documents/romfs or <App>/romfs)\n"); return 0; }
+     fprintf(stderr, "boot: game files %s\n", romfs.fileSystemRepresentation);
+diff --git a/dm/tools/tests/run_shell_identity_native.py b/dm/tools/tests/run_shell_identity_native.py
+new file mode 100644
+index 0000000..0928dfb
+--- /dev/null
++++ b/dm/tools/tests/run_shell_identity_native.py
+@@ -0,0 +1,78 @@
++#!/usr/bin/env python3
++"""Exercise shell identity parsing and file hashing with Foundation and synthetic files."""
++from pathlib import Path
++import subprocess
++import sys
++import tempfile
++
++
++ROOT = Path(__file__).resolve().parents[3]
++
++
++def main():
++    if sys.platform != "darwin":
++        print("SKIP: native Foundation identity test requires macOS/Xcode")
++        return 77
++    harness = r'''
++#import <Foundation/Foundation.h>
++#include <assert.h>
++#include <stdio.h>
++#include <string.h>
++#include "dm_shell_identity.h"
++
++static void write_text(NSString *path, NSString *text) {
++    NSError *error = nil;
++    BOOL ok = [text writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&error];
++    assert(ok && error == nil);
++}
++
++int main(void) { @autoreleasepool {
++    NSString *root = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
++    NSString *dir = [root stringByAppendingPathComponent:@"dm"];
++    assert([[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil]);
++    NSString *metadata = [dir stringByAppendingPathComponent:@"shell_info.txt"];
++    NSString *valid = @"KIND=ios\nSOURCE_SHA=ABCDEF0123456789abcdef0123456789ABCDEF01\nMEM=1\n";
++    write_text(metadata, valid);
++    assert([dm_shell_identity_source_sha(metadata) isEqualToString:@"abcdef0123456789abcdef0123456789abcdef01"]);
++    write_text(metadata, [valid stringByReplacingOccurrencesOfString:@"\n" withString:@"\r\n"]);
++    assert([dm_shell_identity_source_sha(metadata) isEqualToString:@"abcdef0123456789abcdef0123456789abcdef01"]);
++
++    write_text(metadata, @"SOURCE_SHA=0123456789abcdef0123456789abcdef0123456\n");
++    assert(dm_shell_identity_source_sha(metadata) == nil);
++    write_text(metadata, @"SOURCE_SHA=0123456789abcdef0123456789abcdef0123456g\n");
++    assert(dm_shell_identity_source_sha(metadata) == nil);
++    write_text(metadata, @"SOURCE_SHA=0123456789abcdef0123456789abcdef01234567\nSOURCE_SHA=0123456789abcdef0123456789abcdef01234567\n");
++    assert(dm_shell_identity_source_sha(metadata) == nil);
++    write_text(metadata, @"KIND=ios\nMEM=1\n");
++    assert(dm_shell_identity_source_sha(metadata) == nil);
++    assert(dm_shell_identity_source_sha([dir stringByAppendingPathComponent:@"missing.txt"]) == nil);
++
++    NSString *payload = [root stringByAppendingPathComponent:@"synthetic-host.bin"];
++    NSData *abc = [@"abc" dataUsingEncoding:NSUTF8StringEncoding];
++    assert([abc writeToFile:payload atomically:YES]);
++    assert([dm_shell_identity_sha256_file([NSURL fileURLWithPath:payload]) isEqualToString:@"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"]);
++    NSMutableData *large = [NSMutableData dataWithLength:200000];
++    memset(large.mutableBytes, 'a', large.length);
++    assert([large writeToFile:payload atomically:YES]);
++    assert([dm_shell_identity_sha256_file([NSURL fileURLWithPath:payload]) isEqualToString:@"2287d207f24a941ff3b56c04c8a25ad56b63e3023207b3bb5b4ac0c9869d74be"]);
++    assert([[NSData data] writeToFile:payload atomically:YES]);
++    assert([dm_shell_identity_sha256_file([NSURL fileURLWithPath:payload]) isEqualToString:@"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"]);
++    assert(dm_shell_identity_sha256_file([NSURL fileURLWithPath:[root stringByAppendingPathComponent:@"missing.bin"]]) == nil);
++    assert(dm_shell_identity_sha256_file(nil) == nil);
++
++    [[NSFileManager defaultManager] removeItemAtPath:root error:nil];
++    puts("PASS: strict shell source stamp parsing and incremental SHA-256 synthetic-file cases");
++} return 0; }
++'''
++    with tempfile.TemporaryDirectory(prefix="shell-identity-native-") as td:
++        source, executable = Path(td) / "test.m", Path(td) / "test"
++        source.write_text(harness, encoding="utf-8", newline="\n")
++        subprocess.run(["xcrun", "clang", "-fobjc-arc", "-Wall", "-Wextra", "-Werror", "-Wno-error=deprecated-declarations",
++                        "-mmacosx-version-min=15.0", "-I", str(ROOT / "dm/ios/Sources"),
++                        "-framework", "Foundation", str(source), "-o", str(executable)], check=True)
++        subprocess.run([str(executable)], check=True)
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/dm/tools/tests/test_shell_identity_policy.py b/dm/tools/tests/test_shell_identity_policy.py
+new file mode 100644
+index 0000000..58744fb
+--- /dev/null
++++ b/dm/tools/tests/test_shell_identity_policy.py
+@@ -0,0 +1,49 @@
++"""Guard path-free shell identity diagnostics and the F1 shader cache key."""
++from hashlib import sha256
++from pathlib import Path
++import unittest
++
++
++ROOT = Path(__file__).resolve().parents[3]
++F1_MARKER_SHA256 = "b038d5e788d3e50207eb4b1e3ff72aa2b278d00e5923afc46254a5533b79ab9f"
++
++
++class ShellIdentityPolicyTests(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.main = (ROOT / "dm/ios/Sources/main.m").read_text(encoding="utf-8")
++        cls.prep = (ROOT / "dm/ios/Sources/dm_shader_prep.m").read_text(encoding="utf-8")
++        cls.identity = (ROOT / "dm/ios/Sources/dm_shell_identity.h").read_text(encoding="utf-8")
++        cls.msl = (ROOT / "dm/gfx/nvn/dm_shell_msl.h").read_text(encoding="utf-8")
++
++    def test_memory_log_reports_available_headroom_without_entitlement_claim(self):
++        self.assertIn("os_proc_available_memory()", self.main)
++        self.assertIn("current headroom; entitlement not queried", self.main)
++        self.assertNotIn("memory limit", self.main)
++        self.assertNotIn("5ull << 30", self.main)
++
++    def test_shell_identity_logs_only_validated_sha_or_safe_fallback(self):
++        self.assertIn('@"dm/shell_info.txt"', self.main)
++        self.assertIn("dm_shell_identity_source_sha(shellInfo)", self.main)
++        self.assertIn("NSBundle.mainBundle.executableURL", self.main)
++        self.assertIn('"unknown (missing or invalid)"', self.main)
++        self.assertIn('"unavailable"', self.main)
++        self.assertIn("value.length != 40", self.identity)
++        self.assertIn("0123456789abcdefABCDEF", self.identity)
++        self.assertIn("CC_SHA256_Update", self.identity)
++        self.assertNotIn("fileSystemRepresentation", self.identity)
++
++    def test_prep_emits_one_path_free_status_line_and_keeps_f1_marker_identity(self):
++        start = self.prep.index("static NSString *marker(")
++        end = self.prep.index("int dm_shader_prep_begin(", start)
++        marker = self.prep[start:end].encode("utf-8")
++        self.assertEqual(sha256(marker).hexdigest(), F1_MARKER_SHA256)
++        self.assertIn('#define DM_SHELL_NVN_MSL_EPOCH @"nvn-inv1"', self.msl)
++        self.assertEqual(self.prep.count("shader prep status:"), 2)  # empty-source and marker hit/miss branches
++        self.assertIn("sources=%lu marker=%@ action=%@", self.prep)
++        self.assertIn("DM_SHELL_NVN_MSL_EPOCH", self.prep)
++        self.assertNotIn("mk.UTF8String", self.prep)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/docs/agents/04-graphics.md b/docs/agents/04-graphics.md
+index 187f28b..6e40b47 100644
+--- a/docs/agents/04-graphics.md
++++ b/docs/agents/04-graphics.md
+@@ -62,6 +62,7 @@ What earlier titles needed beyond sections 1–5 is filed by mechanism: textures
+ 
+ | Switch | Output |
+ |---|---|
++| `DM_NVN_RT_SURVEY=1` (+ `DM_NVN_RT_SURVEY_FROM=f`) | First 128 unique render-attachment layouts from frame f (default 0): logical NVN base size/format and view level/format, actual Metal base size/format/type, attached mip's effective size, samples, layers and pass bounds. No readback or addresses; disabled by default. This identifies candidate scene/postprocess sizes, not their semantic role. Use the reported frame/pass with `PASSDUMP` to trace writers and consumers; logging runs are separate from frame-pacing measurements. |
+ | `DM_NVN_SHOT=f1,f2:path_%d.png` | Window screenshots at those presented frames |
+ | `DM_NVN_PASSDUMP=f`, `f1-f2` or `every:n` (+ `DM_NVN_PASSDUMP_ALL=1`) | Every render pass of those frames (`every:n`: one frame in every n, halfway between two `DM_NVN_GPUPROF=every:n` frames): `P` attachments (with `mtl=` the Metal texture behind them), `C` clear colours, `K` shader keys, `B` each binding's actual source (also with `mtl=`), `d`/`D` draw state (`b0`–`b3` the blend states of targets 0–3; on `d`, `po=` the polygon offset enables / factor, units, clamp and `dc=` depth clamp), `Y` inline updates, `X` texture clears, `T` texture copies, `Z` the game's barriers (their bits, and whether one ended the pass), `N` passes skipped because no attachment could be attached, `C` buffer-to-texture copies (target, size, format, region, source address, row and image strides), `W` image bindings of compute dispatches; a buffer texture's `B` line gives its format, element count and storage address (for the Mac's `DM_CTL` `memdump`). Without `_ALL` the `K` / `B` / `R` lines cover only the first draw of each pass |
+ | `DM_NVN_TEXDUMP=f:path_%d.png` (+ `DM_NVN_TEXSNAP=i,…`) | Every colour render target of frame f, as PNG (`%d` = serial × 100 + layer × 10 + level; 2D arrays by the attached layer). `TEXSNAP` copies the attachments of in-frame pass i (2D, or slice 0 of a 2D array) in a separate command buffer, which does not run at the pass's position in the GPU timeline: a snapshot taken right after a clearing pass showed a complete image, so read it as "what this target holds around the frame", not "right after pass i" |
+diff --git a/docs/agents/symptoms.md b/docs/agents/symptoms.md
+index 0358e52..4898e85 100644
+--- a/docs/agents/symptoms.md
++++ b/docs/agents/symptoms.md
+@@ -480,6 +480,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+ - SPIRV-Cross can't parse the SPIR-V (`nullptr` exception). → [SPIRV-Cross parse failures](../reference/shaders.md#spirv-cross-parse-failures)
+ - `Fragment input(s) user(locnN) mismatching vertex shader output type(s) or not written by vertex shader` and the draw is skipped; the host reports `[RED] failed to create render pipeline (vertex … fragment …)`. Offline packing fails with `pso_offline: metal-tt failed` for the same reason. → [Pixel shader inputs the vertex shader does not write](../reference/shaders.md#pixel-shader-inputs-the-vertex-shader-does-not-write)
+ - outdoors dim and nothing casts a sun shadow (every shadow-map lookup fails). → [Unwritten components of a written output start as (0, 0, 0, 1)](../reference/shaders.md#unwritten-components-of-a-written-output-start-as-0-0-0-1)
++- a Windows-authored pair list gives a pixel key ending in a carriage return, or equivalent LF and CRLF learned pipeline rows are not deduplicated. → [CRLF prewarm rows retain a carriage return](../reference/shaders.md#crlf-prewarm-rows-retain-a-carriage-return)
+ - the ground kept stale 32×32 blocks where the G-buffer draw failed the depth test: blocks of a stale image where a depth pre-pass and a later pass with other vertex shaders meet (Odyssey: 32×32 blocks on every fourth frame). → [Position invariance across shaders](../reference/shaders.md#position-invariance-across-shaders)
+ - making a pipeline archive prints `Max Unstruct ID 758 in function agc.main in shader 13941 exceeds supported limit`, and one pipeline takes many minutes, in `metal-tt` offline or in the host's prebuild on the device (`Preparing pipelines` holding one count for minutes). The line is a note, not an error: `metal-tt` goes on, exits 0 and writes that pipeline into the archive. → [Front end at -O1: Apple's control-flow lowering](../reference/shaders.md#front-end-at--o1-apples-control-flow-lowering)
+ - the half of Mario facing the camera's left was white (GitHub issue 72, on an iPhone). → [min, max and clamp with a NaN operand](../reference/shaders.md#min-max-and-clamp-with-a-nan-operand)
+diff --git a/docs/reference/shaders.md b/docs/reference/shaders.md
+index 7dbec3c..ea04cbf 100644
+--- a/docs/reference/shaders.md
++++ b/docs/reference/shaders.md
+@@ -402,6 +402,14 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
+ - **Fix:** general: `dmsh_build.py` (`vs_init`) sets every `float4` output to (0, 0, 0, 1) right after it, and the translated body overwrites what it writes.
+ - **Found on:** [The Legend of Zelda: Link's Awakening](../../dm/games/01006BB00C6F0000/README.md) (Mac and iPhone): 12,281 of 18,410 vertex outputs never write w. The sun's shadow map (2048×2048, depth 32-bit float) was correct; the surface shaders compute the lookup from a world position the vertex shader passes in `locn24`, divided by its w. Found with `DM_NVN_TEXRAW` on the shadow map, the light matrices from `DM_NVN_CBDUMP`, and a hand-edited copy of one surface shader that wrote the compare value and the stored depth as its colour. Compared with forcing the compare to pass (`compareFunction` always): the same brightness, plus shadows from the fences, the house and the trees.
+ 
++### CRLF prewarm rows retain a carriage return
++
++- **Symptom:** a Windows-authored pair list gives a pixel key ending in a carriage return, or equivalent LF and CRLF learned pipeline rows are not deduplicated.
++- **Cause:** splitting only at LF leaves one trailing CR in the last field and in the text deduplication key. Shader-map keys and newly recorded pipeline rows have no such terminator.
++- **Fix:** `nvn_line_without_cr` removes exactly one final CR before pair parsing, warm-list parsing and user-row deduplication. Spaces, the binary render-key format, existing files and cache markers remain unchanged. This is separate from the shell input-stamp trim in the F1 host.
++- **Check:** `run_nvn_text_lines_native.py` extracts the actual parsers and exercises synthetic LF/CRLF S/R/C rows, pair keys and mixed-line-ending deduplication with Foundation. Windows source guards do not substitute for that native test.
++- **Found on:** the [Odyssey iPad polish audit](../../dm/games/0100000000010000/README.md#found-on-this-game). Its supplied learned list used LF, so this portability bug is not an explanation for that run's remaining hitches. Gameplay validation is pending.
++
+ ### Position invariance across shaders
+ 
+ - **Symptom:** the ground kept stale 32×32 blocks where the G-buffer draw failed the depth test: blocks of a stale image where a depth pre-pass and a later pass with other vertex shaders meet (Odyssey: 32×32 blocks on every fourth frame).
