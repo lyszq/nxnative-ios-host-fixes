@@ -77,5 +77,10 @@ jobs:
         run: |
           python3 dm/tools/tests/run_shell_msl_native.py
           python3 dm/tools/tests/run_shell_identity_native.py
+      - name: Regression harness source-only portability and unit tests
+        working-directory: shell
+        env:
+          PYTHONUTF8: '1'
+        run: python3 -m unittest dm.tools.tests.test_regress -v
       # Native Foundation row parsing also runs through test_nvn_text_lines above.
       # This workflow intentionally makes no host binary or IPA.

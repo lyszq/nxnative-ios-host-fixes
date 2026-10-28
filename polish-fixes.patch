@@ -168,10 +168,10 @@ index 0000000..773e9d9
 +#endif
 diff --git a/dm/gfx/tests/run_nvn_text_lines_native.py b/dm/gfx/tests/run_nvn_text_lines_native.py
 new file mode 100644
-index 0000000..bafef3c
+index 0000000..203b706
 --- /dev/null
 +++ b/dm/gfx/tests/run_nvn_text_lines_native.py
-@@ -0,0 +1,155 @@
+@@ -0,0 +1,156 @@
 +#!/usr/bin/env python3
 +"""Exercise the actual NVN text parsers with LF and CRLF fixtures on macOS."""
 +from pathlib import Path
@@ -319,6 +319,7 @@ index 0000000..bafef3c
 +        subprocess.run([
 +            "xcrun", "clang", "-fobjc-arc", "-Wall", "-Wextra",
 +            "-I", str(ROOT / "dm/gfx/nvn"), "-framework", "Foundation",
++            "-I", str(ROOT / "dm/gfx/nvn/include"),
 +            str(source), "-o", str(executable),
 +        ], check=True)
 +        subprocess.run([str(executable)], check=True)
@@ -732,6 +733,41 @@ index 0000000..0928dfb
 +
 +if __name__ == "__main__":
 +    raise SystemExit(main())
+diff --git a/dm/tools/tests/test_regress.py b/dm/tools/tests/test_regress.py
+index ba4ab00..117a5a9 100644
+--- a/dm/tools/tests/test_regress.py
++++ b/dm/tools/tests/test_regress.py
+@@ -50,8 +50,22 @@ fragment main0_out main0(main0_in in [[stage_in]], constant spvDescriptorSetBuff
+ 
+ 
+ class Regress(unittest.TestCase):
++    def test_footprint_loads_mac_sampler_only_when_used(self):
++        def sample(pid, flavor, buffer):
++            self.assertEqual((pid, flavor), (123, 4))
++            values = [0] * 35
++            values[7], values[28] = 100, 200
++            regress.struct.pack_into('<16x35Q', buffer, 0, *values)
++            return 0
++        sampler = NS(proc_pid_rusage=sample)
++        with patch.object(regress, '_libproc', None), patch.object(regress.ctypes, 'CDLL', return_value=sampler) as load:
++            self.assertEqual(regress.footprint(123), (100, 200))
++            self.assertEqual(regress.footprint(123), (100, 200))
++            load.assert_called_once_with('/usr/lib/libproc.dylib')
++
+     def test_impact_without_machine_paths(self):
+         env = {k: v for k, v in regress.os.environ.items() if k not in ('REGRESS_ROOT', 'REGRESS_GAMES')}
++        env['PYTHONUTF8'] = '1'   # the child and the captured stream use the same encoding on Windows
+         with tempfile.TemporaryDirectory() as td:
+             root = Path(td)
+             command = [regress.sys.executable, REPO / 'scripts/regress.py']
+@@ -210,6 +224,7 @@ class Regress(unittest.TestCase):
+         bad = dict(good, shots={'8': {'dhash': 'f' * 16, 'rgb16': 'ff' * 768}})
+         self.assertTrue(regress.smoke_diff([good], [good, bad], route)[0]['REGRESSION'])
+ 
++    @unittest.skipUnless(hasattr(regress.os, 'killpg'), 'process-group suspension requires POSIX')
+     def test_shader_build_pauses_for_unknown_lock_owner(self):
+         with tempfile.TemporaryDirectory() as td:
+             with patch.object(regress.subprocess, 'Popen') as spawn, patch.object(regress.bench, 'lock_holder', return_value=0), patch.object(regress.os, 'killpg') as kill, patch.object(regress.time, 'sleep'), patch.object(regress, 'say'):
 diff --git a/dm/tools/tests/test_shell_identity_policy.py b/dm/tools/tests/test_shell_identity_policy.py
 new file mode 100644
 index 0000000..58744fb
@@ -799,6 +835,19 @@ index 187f28b..6e40b47 100644
  | `DM_NVN_SHOT=f1,f2:path_%d.png` | Window screenshots at those presented frames |
  | `DM_NVN_PASSDUMP=f`, `f1-f2` or `every:n` (+ `DM_NVN_PASSDUMP_ALL=1`) | Every render pass of those frames (`every:n`: one frame in every n, halfway between two `DM_NVN_GPUPROF=every:n` frames): `P` attachments (with `mtl=` the Metal texture behind them), `C` clear colours, `K` shader keys, `B` each binding's actual source (also with `mtl=`), `d`/`D` draw state (`b0`–`b3` the blend states of targets 0–3; on `d`, `po=` the polygon offset enables / factor, units, clamp and `dc=` depth clamp), `Y` inline updates, `X` texture clears, `T` texture copies, `Z` the game's barriers (their bits, and whether one ended the pass), `N` passes skipped because no attachment could be attached, `C` buffer-to-texture copies (target, size, format, region, source address, row and image strides), `W` image bindings of compute dispatches; a buffer texture's `B` line gives its format, element count and storage address (for the Mac's `DM_CTL` `memdump`). Without `_ALL` the `K` / `B` / `R` lines cover only the first draw of each pass |
  | `DM_NVN_TEXDUMP=f:path_%d.png` (+ `DM_NVN_TEXSNAP=i,…`) | Every colour render target of frame f, as PNG (`%d` = serial × 100 + layer × 10 + level; 2D arrays by the attached layer). `TEXSNAP` copies the attachments of in-frame pass i (2D, or slice 0 of a 2D array) in a separate command buffer, which does not run at the pass's position in the GPU timeline: a snapshot taken right after a clearing pass showed a complete image, so read it as "what this target holds around the frame", not "right after pass i" |
+diff --git a/docs/agents/06-dev-loop.md b/docs/agents/06-dev-loop.md
+index 29912b1..2b7981b 100644
+--- a/docs/agents/06-dev-loop.md
++++ b/docs/agents/06-dev-loop.md
+@@ -49,6 +49,8 @@ Reading the report (`report.md` beside `report.json` in `<root>/reports/`): one
+ 
+ ## 5. Which games a change can reach: usage manifests and `regress.py impact`
+ 
++The source-only `impact` command can run on Windows; the macOS physical-footprint sampler is loaded only when a game run requests it. Use Python UTF-8 mode when capturing the report on a Windows machine whose locale is not UTF-8. This does not make the Mac gameplay or GPU regression checks available on Windows.
++
+ `regress.py` checks only the games on your Mac. For the others, each profile can carry a usage manifest, `dm/games/<id>/usage.tsv`, written by someone who owns the game with `python3 scripts/regress.py usage --games <id> --write`: the features of its translated shaders (stages, binding kinds, image and buffer atomics, transform feedback, layer and integer outputs, translator notes, texture types), and from one run of its smoke route the NVN functions, HLE functions and SVCs it called, its present path and its profile keys. It holds names and counts only.
+ 
+ `python3 scripts/regress.py impact <base>..<head>` (or one commit) maps a change to those names: the functions around its changed lines, followed through the host's callers to the NVN entry points and HLE functions they serve, and the rules of `dm/tools/impact_map.tsv` (a file, or functions in it, to manifest rows: `dmsh_atomic.py` to the image atomic features, the prepare-step functions of `nvn_mtl.m` to the games that run it). It lists the games that use what the change touches, those reached only through a broad rule (every game of the API), and the profiles without a manifest as unknown. It reads only git and the committed manifests, so it needs neither game files nor a harness root: the report is printed, and written as `impact.md` and `impact.json` to `--out` or, when there is one, `<root>/reports/`. Run it before a change to the chain or host, and run `regress.py check` on the games it names that you have; ask their owners for the others. A changed file no rule maps is listed: add a rule for it.
 diff --git a/docs/agents/symptoms.md b/docs/agents/symptoms.md
 index 0358e52..4898e85 100644
 --- a/docs/agents/symptoms.md
@@ -830,3 +879,24 @@ index 7dbec3c..ea04cbf 100644
  ### Position invariance across shaders
  
  - **Symptom:** the ground kept stale 32×32 blocks where the G-buffer draw failed the depth test: blocks of a stale image where a depth pre-pass and a later pass with other vertex shaders meet (Odyssey: 32×32 blocks on every fourth frame).
+diff --git a/scripts/regress.py b/scripts/regress.py
+index 3bdad23..df0109d 100644
+--- a/scripts/regress.py
++++ b/scripts/regress.py
+@@ -600,10 +600,15 @@ def run_heavy(cmd, log, cwd, env, a, what):
+ 
+ # ---------------------------------------------------------------- one game run
+ 
+-_libproc = ctypes.CDLL('/usr/lib/libproc.dylib')
++# The source-only impact command also runs on Windows. Load the Mac sampler only
++# when a game run actually requests a process footprint, not at module import.
++_libproc = None
+ 
+ 
+ def footprint(pid):   # (current, lifetime peak) physical footprint in bytes (proc_pid_rusage, RUSAGE_INFO_V4)
++    global _libproc
++    if _libproc is None:
++        _libproc = ctypes.CDLL('/usr/lib/libproc.dylib')
+     buf = ctypes.create_string_buffer(512)
+     if _libproc.proc_pid_rusage(pid, 4, buf) != 0: return None
+     v = struct.unpack_from('<16x35Q', buf.raw)

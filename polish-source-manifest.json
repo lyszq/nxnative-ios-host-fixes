@@ -1,10 +1,10 @@
 {
   "baseline_local_commit": "247b957d7525033f4d602a0c3242eaad96d977ab",
-  "source_local_commit": "7067ddec551561c7624f51e2a3e5e43ddf366445",
+  "source_local_commit": "28872f3159a2dfaaff43f2ca67d6ab6d555edc9d",
   "base_upstream": "337186cf3ce778dd1b89092e8958652cb4d7ceb3",
   "base_fork": "59492c868416d82cdd5b57fbbf78753d044412d9",
   "applies_after": "host-fixes.patch",
-  "patch_sha256": "5192785b536ab8efc4ac06658a5cc2bcb159fee64c9818f90d406064d983ef14",
+  "patch_sha256": "d6c6905e3640b853555256d8943d9ecfd83dfeacf14056c6e00eeae555a684c6",
   "unchanged_cache_interfaces": [
     "dm/gfx/nvn/dm_shell_msl.h",
     "dm/gfx/nvn/dmsh_chain.h",
@@ -25,7 +25,7 @@
     },
     {
       "path": "dm/gfx/tests/run_nvn_text_lines_native.py",
-      "normalized_sha256": "89c18579aa9a18f3a6461ea5a61c8527aab45eb554a553dfabe0d64b840a3afa"
+      "normalized_sha256": "a2930401f3e31342fba4d3a91a88fc242b79beda8e22ef87685a13e09623cce6"
     },
     {
       "path": "dm/gfx/tests/t_rt_survey.c",
@@ -56,6 +56,10 @@
       "normalized_sha256": "7f394f69406075c1f2507144b701d0fceae219c19cfec2b5686e9e4143c67127"
     },
     {
+      "path": "dm/tools/tests/test_regress.py",
+      "normalized_sha256": "f02fef2e715a7f08109ea89a57a53cfdb5adad1f7bf65c8d9a519607bf766df5"
+    },
+    {
       "path": "dm/tools/tests/test_shell_identity_policy.py",
       "normalized_sha256": "6584426b0ee99cfa4f2d581419ce75b9024cfbd27446b2086dc2a8abd7ad94a0"
     },
@@ -64,12 +68,20 @@
       "normalized_sha256": "b7a2bc63cd63d4bc3aa5c8583b14eee260620d0c11447adba0d2d70814ea1012"
     },
     {
+      "path": "docs/agents/06-dev-loop.md",
+      "normalized_sha256": "7020c298e494a41565db81a525faeacea2449f5598b2b5bb4683c3acd2a3198f"
+    },
+    {
       "path": "docs/agents/symptoms.md",
       "normalized_sha256": "9641e8949ce9db8081ec624aaf13bf627182579896ad65971567a6d2cdb17b24"
     },
     {
       "path": "docs/reference/shaders.md",
       "normalized_sha256": "223b7d24e58a4b6171ae10822657199885c92039e7c6f8eaa717e75824fabdde"
+    },
+    {
+      "path": "scripts/regress.py",
+      "normalized_sha256": "0e1f133cc3a4b8937979b5acb7a34b57bc9e8e898a33855a7a5e538041af5ab5"
     }
   ],
   "scope": "game-free host source, synthetic tests, public source documentation; no game payload or device captures"
