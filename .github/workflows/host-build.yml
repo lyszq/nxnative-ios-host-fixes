@@ -1,0 +1,57 @@
+name: Build reviewed game-free host
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - host-fixes.patch
+      - .github/workflows/host-build.yml
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: xinerqu/ns2ios-shell
+          ref: 59492c868416d82cdd5b57fbbf78753d044412d9
+          path: shell
+          persist-credentials: false
+      - name: Apply the reviewed host changes
+        run: |
+          set -euo pipefail
+          git -C shell apply --check "$GITHUB_WORKSPACE/host-fixes.patch"
+          git -C shell apply "$GITHUB_WORKSPACE/host-fixes.patch"
+          cd shell
+          python3 -m unittest dm.tools.tests.test_shell_msl_policy -v
+          python3 dm/tools/tests/run_shell_msl_native.py
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          python3 -m pip install --quiet --break-system-packages fonttools
+      - name: Build only the game-free shell
+        env:
+          DM_ROOT: ${{ runner.temp }}/dm-work
+        run: |
+          set -euo pipefail
+          cd shell
+          SDK=$(xcrun --sdk iphoneos --show-sdk-version)
+          test "${SDK%%.*}" -ge 26
+          bash dm/ios/tools/shell_build.sh 2>&1 | tee "$RUNNER_TEMP/shell.out"
+      - name: Upload shell input and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reviewed-game-free-shell
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/dm-work/build/shell/nxnative-shell-build-input.zip
+            ${{ runner.temp }}/dm-work/build/shell/build.log
+            ${{ runner.temp }}/dm-work/build/shell/sign.log
+            ${{ runner.temp }}/dm-work/build/shell/entitlements.txt
+            ${{ runner.temp }}/shell.out
+            source-manifest.json

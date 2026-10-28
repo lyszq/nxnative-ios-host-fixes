@@ -1,0 +1,35 @@
+{
+  "base_fork": "59492c868416d82cdd5b57fbbf78753d044412d9",
+  "files": [
+    {
+      "path": "dm/gfx/nvn/nvn_mtl.m",
+      "bytes": 1080024,
+      "sha256": "1d83c6e52a89f8b201a6792e2d5cfe1cdddc58f15b3138b83fbeae2014d86c1b"
+    },
+    {
+      "path": "dm/ios/Sources/dm_shader_prep.m",
+      "bytes": 16340,
+      "sha256": "991a7cd57c34b293fff445e078be58535990d41974e7d98494c2f80ff298b96c"
+    },
+    {
+      "path": "dm/gfx/nvn/dm_shell_msl.h",
+      "bytes": 705,
+      "sha256": "81f8f8c3ae593e86299b3dc436bc35c589c4f60dc38a1f246016a66a947c4c38"
+    },
+    {
+      "path": "dm/tools/tests/test_shell_msl_policy.py",
+      "bytes": 3578,
+      "sha256": "6fbfd4f129d82675ed7956fa42165bcb9694351524997ac57a66239e30859109"
+    },
+    {
+      "path": "dm/tools/tests/run_shell_msl_native.py",
+      "bytes": 3924,
+      "sha256": "dbe1e4fe4efb66169555e5fe5dff0aae265ef8ee3a9438d692914b55dd88c803"
+    },
+    {
+      "path": ".shell-overlay.txt",
+      "bytes": 5366,
+      "sha256": "b10894a675a31bfc2b700b02a99d7ff5475f66abc4afbb03801497d95cdee30c"
+    }
+  ]
+}

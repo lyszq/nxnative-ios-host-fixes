@@ -1,0 +1,297 @@
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -32,6 +32,7 @@
+ #include "dmsh_chain.h"   // DMSH_CHAIN: the translation chain version of the B shader library expected by this source tree, one for every game (beside this file, tools/dmsh_chain.py --header)
+ #include "game_profile.h"   // game profile constants (profile id, the profile's switches)
+ #ifdef DM_SHELL
++#include "dm_shell_msl.h"
+ // The shell serves any game, so the B library's translation chain version cannot be a compile-time constant: it is the name of the one
+ // library directory under msl/ (b-<version>), which the packer writes there. Falls back to the compiled-in value (diagnostics only).
+ static const char *shell_chain(void) {
+@@ -3486,7 +3487,11 @@
+     NSString *stamp = [NSString stringWithContentsOfFile:[g_msl_dir stringByAppendingPathComponent:@"inputs.tsv"] encoding:NSUTF8StringEncoding error:nil], *st_game = nil, *st_inputs = nil;
+     for (NSString *ln in [stamp componentsSeparatedByString:@"\n"]) {
+         NSArray *c = [ln componentsSeparatedByString:@"\t"];
+-        if (c.count == 2 && [c[0] isEqual:@"game"]) st_game = c[1]; else if (c.count == 2 && [c[0] isEqual:@"inputs"]) st_inputs = c[1];
++        if (c.count == 2) {
++            // Windows-generated stamps may end each value with CRLF.
++            NSString *value = [c[1] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
++            if ([c[0] isEqual:@"game"]) st_game = value; else if ([c[0] isEqual:@"inputs"]) st_inputs = value;
++        }
+     }
+     if (!st_inputs) MLOG("[RED] shader library %s has no stamp (inputs.tsv): no full dmsh_build.py run made it as it is, so c1_full.tsv and cb_extent.tsv are not taken", g_msl_dir.UTF8String);
+     else if (st_game && ![st_game isEqual:@DM_GAME_ID]) MLOG("[RED] shader library %s was built for game %s, not " DM_GAME_ID, g_msl_dir.UTF8String, st_game.UTF8String);
+@@ -3647,7 +3652,11 @@
+     // once and the game does not compile anything again. Without this every library is rejected as "Invalid library file".
+     if (m != MAP_FAILED && len >= 4 && memcmp(m, "MTLB", 4) != 0) {
+         NSString *src = [[NSString alloc] initWithBytes:m length:len encoding:NSUTF8StringEncoding];
+-        id<MTLLibrary> lib = src ? [g_dev newLibraryWithSource:src options:nil error:err] : nil;
++        id<MTLLibrary> lib = src ? [g_dev newLibraryWithSource:src options:dm_shell_nvn_compile_options() error:err] : nil;
++        // initWithBytes copies the source. The binary path transfers this mapping
++        // to dispatch_data below; a source load must release its own mapping on
++        // both successful and failed decode/compile paths.
++        munmap(m, len);
+         if (!lib && err) *err = [NSError errorWithDomain:@"dm" code:1 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"not a compiled library and not readable source: %@", path]}];
+         return lib;
+     }
+@@ -5557,7 +5566,7 @@
+     free(w);
+     if (!t2) { MLOG("[RED] shader %s: the rewritten source is not text", fs->key); return nil; }
+     NSError *ce = nil;
+-    id<MTLLibrary> lib = [g_dev newLibraryWithSource:t2 options:nil error:&ce];   // the same call dm_shader_prep makes: the cache answers at once
++    id<MTLLibrary> lib = [g_dev newLibraryWithSource:t2 options:dm_shell_nvn_compile_options() error:&ce];   // identical to the NVN prep options
+     if (!lib) { MLOG("[RED] shader %s: the rewritten source does not compile: %s", fs->key, ce.localizedDescription.UTF8String); return nil; }
+     id<MTLFunction> fn = fn4_note([lib newFunctionWithName:fs->ventry], lib, fs->ventry, nil);
+     if (!fn) { MLOG("[RED] shader %s: the rewritten source has no %s", fs->key, fs->ventry.UTF8String); return nil; }
+diff --git a/dm/ios/Sources/dm_shader_prep.m b/dm/ios/Sources/dm_shader_prep.m
+--- a/dm/ios/Sources/dm_shader_prep.m
++++ b/dm/ios/Sources/dm_shader_prep.m
+@@ -18,6 +18,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include "dm_shader_learn.h"
++#include "dm_shell_msl.h"
+ 
+ static void pl(NSString *s) { fprintf(stderr, "[dm] %s\n", s.UTF8String); }
+ static int lg(void) { NSString *l = NSLocale.preferredLanguages.firstObject; return [l hasPrefix:@"zh"] ? 1 : [l hasPrefix:@"es"] ? 2 : 0; }   // 系统首选语言：1 中文 / 2 西语 / 0 其余英文 | System preferred language: 1 Chinese / 2 Spanish / 0 English otherwise
+@@ -60,10 +61,12 @@
+     // (inputs.tsv: the game and the digest of the profile inputs) is what distinguishes one package from another; a package
+     // without it falls back to a digest of the directory's contents.
+     NSString *tag = dir.lastPathComponent ?: @"gl";
++    if (dir) tag = [tag stringByAppendingFormat:@"-%@", DM_SHELL_NVN_MSL_EPOCH];
+     NSString *stamp = [NSString stringWithContentsOfFile:[(dir ?: [msldir() stringByAppendingPathComponent:@"gl"]) stringByAppendingPathComponent:@"inputs.tsv"] encoding:NSUTF8StringEncoding error:nil];
+     for (NSString *ln in [stamp componentsSeparatedByString:@"\n"]) {
+         NSArray *c = [ln componentsSeparatedByString:@"\t"];
+-        if (c.count == 2 && ([c[0] isEqual:@"inputs"] || [c[0] isEqual:@"game"])) tag = [tag stringByAppendingFormat:@"-%@", c[1]];
++        if (c.count == 2 && ([c[0] isEqual:@"inputs"] || [c[0] isEqual:@"game"]))
++            tag = [tag stringByAppendingFormat:@"-%@", [c[1] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]];
+     }
+     unsigned long long n = 0, bytes = 0;
+     for (NSString *p in src) { n++; bytes += [NSFileManager.defaultManager attributesOfItemAtPath:p error:nil].fileSize; }
+@@ -112,7 +115,10 @@
+         for (NSString *p in src) { dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+             dispatch_group_async(g, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ @autoreleasepool {
+                 NSString *txt = [NSString stringWithContentsOfFile:p encoding:NSUTF8StringEncoding error:nil]; NSError *e = nil;
+-                id<MTLLibrary> l = txt ? [dev newLibraryWithSource:txt options:nil error:&e] : nil;   // 与游戏里建库用的是同一个调用、同样的参数：缓存才对得上 | the same call with the same arguments as the game uses to build the library: only then does the cache match
++                // GL/VK .metal files retain their loaders' nil options. Only the
++                // NVN .metallib sources use the versioned guest shader policy.
++                MTLCompileOptions *options = [p.pathExtension isEqual:@"metallib"] ? dm_shell_nvn_compile_options() : nil;
++                id<MTLLibrary> l = txt ? [dev newLibraryWithSource:txt options:options error:&e] : nil;
+                 if (!l && atomic_fetch_add(&bad, 1) < 5) pl([NSString stringWithFormat:@"【红】着色器准备：%@ 编不过：%@", p.lastPathComponent, e.localizedDescription ?: @"读不了"]);
+                 // 这个着色器以前被拒过管线：把它「输出声明成整数」的版本也编一遍（同一个调用、同样的文本，游戏里建库时缓存直接命中，不再卡）
+                 // This shader had a pipeline refused before, so the version with those outputs declared integer is compiled here
+@@ -123,7 +129,7 @@
+                     char *w = dm_shader_learn_rewrite(cs, strlen(cs), lm, &on);
+                     NSString *t2 = w ? [[NSString alloc] initWithBytes:w length:on encoding:NSUTF8StringEncoding] : nil;
+                     free(w);
+-                    NSError *e2 = nil; id<MTLLibrary> l2 = t2 ? [dev newLibraryWithSource:t2 options:nil error:&e2] : nil;
++                    NSError *e2 = nil; id<MTLLibrary> l2 = t2 ? [dev newLibraryWithSource:t2 options:options error:&e2] : nil;
+                     if (!l2 && atomic_fetch_add(&bad, 1) < 5) pl([NSString stringWithFormat:@"【红】着色器准备：%@ 的整数输出版本编不过：%@", p.lastPathComponent, e2.localizedDescription ?: @"改写没做成"]);
+                 }
+                 int n = atomic_fetch_add(&fin, 1) + 1; if (n % 500 == 0) pl([NSString stringWithFormat:@"着色器准备：%d / %d，已用 %.0f 秒，温控档位 %ld", n, total, CFAbsoluteTimeGetCurrent() - t0, (long)NSProcessInfo.processInfo.thermalState]);
+diff --git a/dm/gfx/nvn/dm_shell_msl.h b/dm/gfx/nvn/dm_shell_msl.h
+new file mode 100644
+--- /dev/null
++++ b/dm/gfx/nvn/dm_shell_msl.h
+@@ -0,0 +1,17 @@
++// Runtime options for source-form NVN guest shaders in the game-free shell.
++// Keep prep, ordinary loads and learned variants identical for Metal cache reuse.
++#ifndef DM_SHELL_MSL_H
++#define DM_SHELL_MSL_H
++#import <Metal/Metal.h>
++
++// Changing the policy requires a new epoch so old prep markers cannot skip it.
++#define DM_SHELL_NVN_MSL_EPOCH @"nvn-inv1"
++
++static inline MTLCompileOptions *dm_shell_nvn_compile_options(void) {
++    MTLCompileOptions *options = [MTLCompileOptions new];
++    // [[position, invariant]] only guarantees agreement when this is enabled.
++    // Leave math and optimization defaults unchanged in this isolated fix.
++    options.preserveInvariance = YES;
++    return options;
++}
++#endif
+diff --git a/dm/tools/tests/test_shell_msl_policy.py b/dm/tools/tests/test_shell_msl_policy.py
+new file mode 100644
+--- /dev/null
++++ b/dm/tools/tests/test_shell_msl_policy.py
+@@ -0,0 +1,62 @@
++"""Guard the shell's prep/runtime cache parity and source-map ownership.
++
++These source integration checks run on Windows; they are not an iOS Metal or
++gameplay test. A macOS shell build and an on-device A/B remain required.
++"""
++from pathlib import Path
++import re
++import unittest
++
++ROOT = Path(__file__).resolve().parents[3]
++
++
++class ShellMslPolicyTests(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.nvn = (ROOT / "dm/gfx/nvn/nvn_mtl.m").read_text(encoding="utf-8")
++        cls.prep = (ROOT / "dm/ios/Sources/dm_shader_prep.m").read_text(encoding="utf-8")
++        cls.policy = (ROOT / "dm/gfx/nvn/dm_shell_msl.h").read_text(encoding="utf-8")
++
++    def test_one_policy_for_base_and_learned_nvn_sources(self):
++        self.assertRegex(self.nvn, r"newLibraryWithSource:src options:dm_shell_nvn_compile_options\(\)")
++        self.assertRegex(self.nvn, r"newLibraryWithSource:t2 options:dm_shell_nvn_compile_options\(\)")
++        self.assertEqual(self.nvn.count("options:dm_shell_nvn_compile_options()"), 2)
++        self.assertIn('#include "dm_shell_msl.h"', self.nvn)
++
++    def test_prep_keeps_gl_vk_at_default_and_reuses_nvn_options(self):
++        self.assertIn('[p.pathExtension isEqual:@"metallib"] ? dm_shell_nvn_compile_options() : nil', self.prep)
++        self.assertIn("newLibraryWithSource:txt options:options", self.prep)
++        self.assertIn("newLibraryWithSource:t2 options:options", self.prep)
++        self.assertNotIn("newLibraryWithSource:txt options:nil", self.prep)
++        for backend in ("gl", "vk"):
++            source = (ROOT / f"dm/gfx/{backend}/hle_{backend}.m").read_text(encoding="utf-8")
++            self.assertIn("newLibraryWithSource:txt options:nil", source)
++
++    def test_only_invariance_changes_and_epoch_invalidates_old_marker(self):
++        self.assertIn("options.preserveInvariance = YES;", self.policy)
++        self.assertNotRegex(self.policy, r"\.(mathMode|fastMathEnabled|optimizationLevel)\s*=")
++        self.assertIn('#define DM_SHELL_NVN_MSL_EPOCH @"nvn-inv1"', self.policy)
++        self.assertIn("if (dir) tag = [tag stringByAppendingFormat:@\"-%@\", DM_SHELL_NVN_MSL_EPOCH]", self.prep)
++        self.assertIn("dm/gfx/nvn/dm_shell_msl.h", (ROOT / ".shell-overlay.txt").read_text(encoding="utf-8"))
++
++    def test_source_load_releases_mapping_before_every_return(self):
++        start = self.nvn.index('if (m != MAP_FAILED && len >= 4 && memcmp(m, "MTLB", 4) != 0)')
++        end = self.nvn.index("#endif", start)
++        branch = self.nvn[start:end]
++        self.assertEqual(branch.count("munmap(m, len);"), 1)
++        self.assertEqual(len(re.findall(r"\breturn\b", branch)), 1)
++        self.assertLess(branch.index("newLibraryWithSource:"), branch.index("munmap(m, len);"))
++        self.assertLess(branch.index("munmap(m, len);"), branch.index("return lib;"))
++        # Binary libraries retain their existing dispatch_data ownership.
++        self.assertRegex(self.nvn[end:end + 700], r"dispatch_data_create.*munmap\(m, len\)")
++
++    def test_windows_stamp_values_trimmed_in_reader_and_prep(self):
++        parse = self.nvn[self.nvn.index("*st_game = nil, *st_inputs = nil"):]
++        parse = parse[:parse.index("if (!st_inputs)")]
++        self.assertIn("stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet", parse)
++        marker = self.prep[self.prep.index("static NSString *marker("):self.prep.index("int dm_shader_prep_begin(")]
++        self.assertIn("stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet", marker)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/dm/tools/tests/run_shell_msl_native.py b/dm/tools/tests/run_shell_msl_native.py
+new file mode 100644
+--- /dev/null
++++ b/dm/tools/tests/run_shell_msl_native.py
+@@ -0,0 +1,100 @@
++#!/usr/bin/env python3
++"""Compile and execute the real source-load branch against a fake Metal device.
++
++Requires macOS/Xcode, but no GPU or game files. Exercises ARC, real mmap/munmap,
++UTF-8 decode failure, Metal failure, and prep/runtime compile option defaults.
++This does not test GPU image output or real shader compilation.
++"""
++from pathlib import Path
++import subprocess
++import sys
++import tempfile
++
++ROOT = Path(__file__).resolve().parents[3]
++
++
++def main():
++    if sys.platform != "darwin":
++        print("SKIP: native Foundation/Metal ownership test requires macOS/Xcode")
++        return 77
++    text = (ROOT / "dm/gfx/nvn/nvn_mtl.m").read_text(encoding="utf-8")
++    start = text.index('if (m != MAP_FAILED && len >= 4 && memcmp(m, "MTLB", 4) != 0)')
++    branch = text[start:text.index("#endif", start)]
++    harness = r'''
++#import <Foundation/Foundation.h>
++#import <Metal/Metal.h>
++#include <sys/mman.h>
++#include <assert.h>
++#include <stdio.h>
++#include <string.h>
++#include "dm_shell_msl.h"
++static int unmaps, compile_calls;
++static BOOL fail_compile;
++@interface FakeDevice : NSObject
++- (id<MTLLibrary>)newLibraryWithSource:(NSString *)src options:(MTLCompileOptions *)options error:(NSError **)error;
++@end
++@implementation FakeDevice
++- (id<MTLLibrary>)newLibraryWithSource:(NSString *)src options:(MTLCompileOptions *)options error:(NSError **)error {
++    assert(src.length > 0);
++    assert(options.preserveInvariance);
++    compile_calls++;
++    if (fail_compile) {
++        if (error) *error = [NSError errorWithDomain:@"test" code:1 userInfo:nil];
++        return nil;
++    }
++    return (id<MTLLibrary>)[NSObject new];
++}
++@end
++static FakeDevice *g_dev;
++static int tracked_unmap(void *p, size_t n) {
++    unmaps++;
++    return munmap(p, n);
++}
++#define munmap tracked_unmap
++static id<MTLLibrary> load_source(void *m, size_t len, NSError **err) {
++    NSString *path = @"synthetic.metallib";
++    /* ACTUAL_SOURCE_BRANCH */
++    return nil;
++}
++#undef munmap
++static void run_case(BOOL invalid_utf8, BOOL compile_failure) {
++    size_t len = 4096;
++    void *m = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
++    assert(m != MAP_FAILED);
++    memset(m, invalid_utf8 ? 0xff : 'a', len);
++    fail_compile = compile_failure;
++    int before = unmaps, compiles_before = compile_calls;
++    NSError *error = nil;
++    id<MTLLibrary> result = load_source(m, len, &error);
++    assert(unmaps == before + 1);
++    assert(compile_calls == compiles_before + (invalid_utf8 ? 0 : 1));
++    assert((result != nil) == (!invalid_utf8 && !compile_failure));
++    if (!result) assert(error != nil);
++}
++int main(void) { @autoreleasepool {
++    MTLCompileOptions *baseline = [MTLCompileOptions new];
++    MTLCompileOptions *policy = dm_shell_nvn_compile_options();
++    assert(policy.preserveInvariance);
++    assert(policy.mathMode == baseline.mathMode);
++    assert(policy.optimizationLevel == baseline.optimizationLevel);
++    g_dev = [FakeDevice new];
++    for (int i = 0; i < 100; i++) { @autoreleasepool {
++        run_case(NO, NO); run_case(NO, YES); run_case(YES, NO);
++    } }
++    assert(unmaps == 300);
++    puts("PASS: actual source branch, 300 mappings released across success/decode/compile failure; option parity verified");
++} return 0; }
++'''.replace("/* ACTUAL_SOURCE_BRANCH */", branch)
++    with tempfile.TemporaryDirectory(prefix="shell-msl-native-") as td:
++        source, executable = Path(td) / "test.m", Path(td) / "test"
++        source.write_text(harness, encoding="utf-8", newline="\n")
++        subprocess.run(["xcrun", "clang", "-fobjc-arc", "-Wall", "-Wextra", "-Werror",
++                        "-mmacosx-version-min=26.0", "-I", str(ROOT / "dm/gfx/nvn"),
++                        "-framework", "Foundation", "-framework", "Metal",
++                        str(source), "-o", str(executable)], check=True)
++        subprocess.run([str(executable)], check=True)
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/.shell-overlay.txt b/.shell-overlay.txt
+--- a/.shell-overlay.txt
++++ b/.shell-overlay.txt
+@@ -16,6 +16,7 @@
+ + dm/gfx/tools/nometal_run.py             # runs the shader chain without Apple's compiler
+ + dm/gfx/tools/gl_prebuilt.py              # a LOVE game's GLSL from its own files: what DM_GL_CAPTURE would have written
+ + dm/ios/Sources/dm_shader_prep.m         # first-launch shader compilation page
+++ dm/gfx/nvn/dm_shell_msl.h               # matching source-form NVN compile options and prep epoch
+ + dm/ios/Sources/dm_shader_learn.h        # what the host learns about a shader's output types, from a refused pipeline
+ + dm/ios/Sources/dm_shader_learn.m        # the rewrite that makes a colour output integer, and the rows it keeps
+ + dm/ios/tools/shell_build.sh             # builds the game-free shell
