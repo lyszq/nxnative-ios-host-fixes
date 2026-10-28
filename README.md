@@ -3,8 +3,10 @@
 This folder contains only a source patch, its manifest and a macOS workflow.
 It contains no game code, game data, shader exports, keys, saves or IPA.
 
-The workflow checks out public fork commit
-`59492c868416d82cdd5b57fbbf78753d044412d9`, applies the reviewed changes, runs
+The workflow combines public upstream commit
+`337186cf3ce778dd1b89092e8958652cb4d7ceb3` with fork commit
+`59492c868416d82cdd5b57fbbf78753d044412d9` using the release's overlay and
+patch procedure, applies the reviewed changes, runs
 source integration and native ownership tests, and builds the unsigned/ad-hoc
 shell with its Increased Memory Limit entitlement. It publishes a temporary
 Actions artifact; it does not publish a release, install an app or sign with

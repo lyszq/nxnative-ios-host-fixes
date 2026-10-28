@@ -22,8 +22,37 @@ jobs:
         with:
           repository: xinerqu/ns2ios-shell
           ref: 59492c868416d82cdd5b57fbbf78753d044412d9
+          path: fork
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: seedds/nxnative
+          ref: 337186cf3ce778dd1b89092e8958652cb4d7ceb3
           path: shell
           persist-credentials: false
+      - name: Assemble the pinned release sources
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          fork, shell = Path('fork'), Path('shell')
+          for raw in (fork / '.shell-overlay.txt').read_text().splitlines():
+              if not raw.startswith('+ '):
+                  continue
+              name = raw[1:].split('#', 1)[0].strip()
+              if not name:
+                  continue
+              source, target = fork / name, shell / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              if source.is_dir():
+                  shutil.copytree(source, target, dirs_exist_ok=True)
+              else:
+                  shutil.copy2(source, target)
+          PY
+          for patch in "$GITHUB_WORKSPACE/fork/.shell-patches/"*.patch; do
+            git -C shell apply --whitespace=nowarn "$patch"
+          done
       - name: Apply the reviewed host changes
         run: |
           set -euo pipefail
