@@ -1,10 +1,10 @@
 {
   "baseline_local_commit": "247b957d7525033f4d602a0c3242eaad96d977ab",
-  "source_local_commit": "28872f3159a2dfaaff43f2ca67d6ab6d555edc9d",
+  "source_local_commit": "a95502def862375c69fbf59d7147ecd0711bc17a",
   "base_upstream": "337186cf3ce778dd1b89092e8958652cb4d7ceb3",
   "base_fork": "59492c868416d82cdd5b57fbbf78753d044412d9",
   "applies_after": "host-fixes.patch",
-  "patch_sha256": "d6c6905e3640b853555256d8943d9ecfd83dfeacf14056c6e00eeae555a684c6",
+  "patch_sha256": "80878b2229a52fface395068f2f52d89ac427b94104c739aaa2d8ee09edf69f8",
   "unchanged_cache_interfaces": [
     "dm/gfx/nvn/dm_shell_msl.h",
     "dm/gfx/nvn/dmsh_chain.h",
@@ -25,7 +25,7 @@
     },
     {
       "path": "dm/gfx/tests/run_nvn_text_lines_native.py",
-      "normalized_sha256": "a2930401f3e31342fba4d3a91a88fc242b79beda8e22ef87685a13e09623cce6"
+      "normalized_sha256": "1e595677480d20b8e314638a37ea919c74f11bbe1f7ca3418e263a7f71a5de4f"
     },
     {
       "path": "dm/gfx/tests/t_rt_survey.c",
