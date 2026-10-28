@@ -183,12 +183,13 @@ diff --git a/dm/tools/tests/run_shell_msl_native.py b/dm/tools/tests/run_shell_m
 new file mode 100644
 --- /dev/null
 +++ b/dm/tools/tests/run_shell_msl_native.py
-@@ -0,0 +1,100 @@
+@@ -0,0 +1,103 @@
 +#!/usr/bin/env python3
 +"""Compile and execute the real source-load branch against a fake Metal device.
 +
 +Requires macOS/Xcode, but no GPU or game files. Exercises ARC, real mmap/munmap,
-+UTF-8 decode failure, Metal failure, and prep/runtime compile option defaults.
++UTF-8 decode failure, and Metal failure. Invariance is checked on every runner;
++math/optimization default parity is checked when those properties are available.
 +This does not test GPU image output or real shader compilation.
 +"""
 +from pathlib import Path
@@ -258,24 +259,26 @@ new file mode 100644
 +    if (!result) assert(error != nil);
 +}
 +int main(void) { @autoreleasepool {
-+    MTLCompileOptions *baseline = [MTLCompileOptions new];
 +    MTLCompileOptions *policy = dm_shell_nvn_compile_options();
 +    assert(policy.preserveInvariance);
-+    assert(policy.mathMode == baseline.mathMode);
-+    assert(policy.optimizationLevel == baseline.optimizationLevel);
++    if (@available(macOS 26.0, *)) {
++        MTLCompileOptions *baseline = [MTLCompileOptions new];
++        assert(policy.mathMode == baseline.mathMode);
++        assert(policy.optimizationLevel == baseline.optimizationLevel);
++    }
 +    g_dev = [FakeDevice new];
 +    for (int i = 0; i < 100; i++) { @autoreleasepool {
 +        run_case(NO, NO); run_case(NO, YES); run_case(YES, NO);
 +    } }
 +    assert(unmaps == 300);
-+    puts("PASS: actual source branch, 300 mappings released across success/decode/compile failure; option parity verified");
++    puts("PASS: actual source branch, 300 mappings released across success/decode/compile failure; invariance verified; math/optimization parity checked when available");
 +} return 0; }
 +'''.replace("/* ACTUAL_SOURCE_BRANCH */", branch)
 +    with tempfile.TemporaryDirectory(prefix="shell-msl-native-") as td:
 +        source, executable = Path(td) / "test.m", Path(td) / "test"
 +        source.write_text(harness, encoding="utf-8", newline="\n")
 +        subprocess.run(["xcrun", "clang", "-fobjc-arc", "-Wall", "-Wextra", "-Werror",
-+                        "-mmacosx-version-min=26.0", "-I", str(ROOT / "dm/gfx/nvn"),
++                        "-mmacosx-version-min=15.0", "-I", str(ROOT / "dm/gfx/nvn"),
 +                        "-framework", "Foundation", "-framework", "Metal",
 +                        str(source), "-o", str(executable)], check=True)
 +        subprocess.run([str(executable)], check=True)

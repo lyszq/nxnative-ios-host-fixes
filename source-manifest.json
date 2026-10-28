@@ -23,8 +23,8 @@
     },
     {
       "path": "dm/tools/tests/run_shell_msl_native.py",
-      "bytes": 3924,
-      "sha256": "dbe1e4fe4efb66169555e5fe5dff0aae265ef8ee3a9438d692914b55dd88c803"
+      "bytes": 4107,
+      "sha256": "14bbf3f261eec82c95c4464afaf526cb70723bf5850c9c16aacdad8bc35fea11"
     },
     {
       "path": ".shell-overlay.txt",
