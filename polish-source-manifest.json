@@ -4,7 +4,7 @@
   "base_upstream": "337186cf3ce778dd1b89092e8958652cb4d7ceb3",
   "base_fork": "59492c868416d82cdd5b57fbbf78753d044412d9",
   "applies_after": "host-fixes.patch",
-  "patch_sha256": "6692acca59de4d5731450a6edba8c33844988f5d683c34afb88c4f2ce4eafbf5",
+  "patch_sha256": "5192785b536ab8efc4ac06658a5cc2bcb159fee64c9818f90d406064d983ef14",
   "unchanged_cache_interfaces": [
     "dm/gfx/nvn/dm_shell_msl.h",
     "dm/gfx/nvn/dmsh_chain.h",
