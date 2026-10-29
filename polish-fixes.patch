@@ -1,11 +1,13 @@
 diff --git a/dm/games/0100000000010000/README.md b/dm/games/0100000000010000/README.md
-index fe83bf3..585b7f7 100644
+index fe83bf3..b3e5c4c 100644
 --- a/dm/games/0100000000010000/README.md
 +++ b/dm/games/0100000000010000/README.md
-@@ -58,6 +58,14 @@ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in
+@@ -58,6 +58,16 @@ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in
  
  General host and tool changes first needed here; each applies to every game:
  
++- **Raw capture byte widths:** [Raw snapshots guessed four bytes for wider pixel formats](../../../docs/reference/rendering.md#raw-snapshots-guessed-four-bytes-for-wider-pixel-formats). Uses the existing format mapping; no rendering change.
++
 +- **Array-layer HDR diagnostics:** [Raw snapshots read the wrong array layer](../../../docs/reference/rendering.md#raw-render-target-snapshots-read-the-wrong-array-layer). Capture correctness only; this does not fix or explain gameplay bloom.
 +
 +- **Opt-in cold vertex/pixel loading:** [Joined loading for a demanded cold pair](../../../docs/reference/shaders.md#opt-in-joined-loading-for-a-demanded-cold-vertex-and-pixel-pair). Default off; native fixture checks do not establish a device performance gain.
@@ -68,7 +70,7 @@ index 38bddf5..85e1336 100644
          plib = lib_; ppso = pso_;
          trow(f, "@t_s", (now_ns() - g_t0_ns) / 1e9);
 diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
-index c5d269c..6b196c9 100644
+index c5d269c..283f34f 100644
 --- a/dm/gfx/nvn/nvn_mtl.m
 +++ b/dm/gfx/nvn/nvn_mtl.m
 @@ -29,6 +29,9 @@
@@ -343,18 +345,38 @@ index c5d269c..6b196c9 100644
  // state_op also sets the scissor, which lives in R, not S: it is restored with S. Without that the replay went on with the last scissor of the rest of the submission until its next
  // OP_SCISSOR. OCTOPATH TRAVELER II (Unreal Engine 4.27) with pipelines built on demand: from Castti's opening flashback and the battlefield of Hikari's opening on, the picture was bright
  // green and white, in every run with the prediction and in none without it (DM_NVN_PREDICT=0); a short prewarm list hid it, as fewer pipelines missed
-@@ -10341,9 +10480,10 @@ static void td_dump(void) {
-             size_t bpp = t.pixelFormat == MTLPixelFormatRGBA16Float ? 8 : t.pixelFormat == MTLPixelFormatRGBA32Float ? 16 : t.pixelFormat == MTLPixelFormatR16Float || t.pixelFormat == MTLPixelFormatR16Unorm ? 2 : 4;
-             id<MTLBuffer> rb = [g_dev newBufferWithLength:rw * rh * bpp options:MTLResourceStorageModeShared];
-             id<MTLCommandBuffer> rc = q_cb(); id<MTLBlitCommandEncoder> bb = [rc blitCommandEncoder];
+@@ -10338,15 +10477,22 @@ static void td_dump(void) {
+         if (t.textureType != MTLTextureType2D && t.textureType != MTLTextureType2DArray) { MLOG("[texdump] ser=%llu type %lu skipped", ser, (unsigned long)t.textureType); continue; }
+         if (getenv("DM_NVN_SNAPRAW")) {   // Also save the raw bytes (converting an HDR target to an 8-bit image truncates; first-line text header: width height format bytes-per-row)
+             NSUInteger rw = MAX(t.width >> lv, 1u), rh = MAX(t.height >> lv, 1u);
+-            size_t bpp = t.pixelFormat == MTLPixelFormatRGBA16Float ? 8 : t.pixelFormat == MTLPixelFormatRGBA32Float ? 16 : t.pixelFormat == MTLPixelFormatR16Float || t.pixelFormat == MTLPixelFormatR16Unorm ? 2 : 4;
+-            id<MTLBuffer> rb = [g_dev newBufferWithLength:rw * rh * bpp options:MTLResourceStorageModeShared];
+-            id<MTLCommandBuffer> rc = q_cb(); id<MTLBlitCommandEncoder> bb = [rc blitCommandEncoder];
 -            [bb copyFromTexture:t sourceSlice:0 sourceLevel:lv sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake(rw, rh, 1) toBuffer:rb destinationOffset:0 destinationBytesPerRow:rw * bpp destinationBytesPerImage:rw * rh * bpp];
-+            [bb copyFromTexture:t sourceSlice:sl sourceLevel:lv sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake(rw, rh, 1) toBuffer:rb destinationOffset:0 destinationBytesPerRow:rw * bpp destinationBytesPerImage:rw * rh * bpp];
-             [bb endEncoding]; [rc commit]; [rc waitUntilCompleted];
-             char rp_[1024]; snprintf(rp_, sizeof rp_, g_td_path, (int)(ser * 100 + lv));
-+            if (sl) { char tail[64]; snprintf(tail, sizeof tail, "_layer%03lu", (unsigned long)sl); strlcat(rp_, tail, sizeof rp_); }   // keep slice 0's established path; distinguish nonzero array layers
-             if (e.count > 4) { char tail[64]; snprintf(tail, sizeof tail, "_s%03d", [e[4] intValue]); strlcat(rp_, tail, sizeof rp_); }   // TEXSNAP copies of one target: one file per pass
-             strlcat(rp_, ".raw", sizeof rp_);
-             FILE *f = fopen(rp_, "wb"); if (f) { fprintf(f, "%lu %lu %lu %zu\n", (unsigned long)rw, (unsigned long)rh, (unsigned long)t.pixelFormat, rw * bpp); fwrite(rb.contents, 1, rw * rh * bpp, f); fclose(f); }
+-            [bb endEncoding]; [rc commit]; [rc waitUntilCompleted];
+-            char rp_[1024]; snprintf(rp_, sizeof rp_, g_td_path, (int)(ser * 100 + lv));
+-            if (e.count > 4) { char tail[64]; snprintf(tail, sizeof tail, "_s%03d", [e[4] intValue]); strlcat(rp_, tail, sizeof rp_); }   // TEXSNAP copies of one target: one file per pass
+-            strlcat(rp_, ".raw", sizeof rp_);
+-            FILE *f = fopen(rp_, "wb"); if (f) { fprintf(f, "%lu %lu %lu %zu\n", (unsigned long)rw, (unsigned long)rh, (unsigned long)t.pixelFormat, rw * bpp); fwrite(rb.contents, 1, rw * rh * bpp, f); fclose(f); }
++            size_t bpp = mtl_pf_bytes(t.pixelFormat);
++            if (!bpp) MLOG("[RED] [texdump] SNAPRAW skipped pixel format %lu for ser=%llu; PNG dump continues", (unsigned long)t.pixelFormat, (unsigned long long)ser);
++            else {
++                id<MTLBuffer> rb = [g_dev newBufferWithLength:rw * rh * bpp options:MTLResourceStorageModeShared];
++                if (!rb) MLOG("[RED] [texdump] SNAPRAW buffer allocation failed for ser=%llu; PNG dump continues", (unsigned long long)ser);
++                else {
++                    id<MTLCommandBuffer> rc = q_cb(); id<MTLBlitCommandEncoder> bb = [rc blitCommandEncoder];
++                    [bb copyFromTexture:t sourceSlice:sl sourceLevel:lv sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake(rw, rh, 1) toBuffer:rb destinationOffset:0 destinationBytesPerRow:rw * bpp destinationBytesPerImage:rw * rh * bpp];
++                    [bb endEncoding]; [rc commit]; [rc waitUntilCompleted];
++                    char rp_[1024]; snprintf(rp_, sizeof rp_, g_td_path, (int)(ser * 100 + lv));
++                    if (sl) { char tail[64]; snprintf(tail, sizeof tail, "_layer%03lu", (unsigned long)sl); strlcat(rp_, tail, sizeof rp_); }   // keep slice 0's established path; distinguish nonzero array layers
++                    if (e.count > 4) { char tail[64]; snprintf(tail, sizeof tail, "_s%03d", [e[4] intValue]); strlcat(rp_, tail, sizeof rp_); }   // TEXSNAP copies of one target: one file per pass
++                    strlcat(rp_, ".raw", sizeof rp_);
++                    FILE *f = fopen(rp_, "wb"); if (f) { fprintf(f, "%lu %lu %lu %zu\n", (unsigned long)rw, (unsigned long)rh, (unsigned long)t.pixelFormat, rw * bpp); fwrite(rb.contents, 1, rw * rh * bpp, f); fclose(f); }
++                }
++            }
+         }
+         id<MTLTexture> v = [t newTextureViewWithPixelFormat:t.pixelFormat textureType:MTLTextureType2D levels:NSMakeRange(lv, 1) slices:NSMakeRange(sl, 1)];
+         NSUInteger w = MAX(t.width >> lv, 1u), h = MAX(t.height >> lv, 1u);
 diff --git a/dm/gfx/nvn/nvn_pair_batch.h b/dm/gfx/nvn/nvn_pair_batch.h
 new file mode 100644
 index 0000000..2dc5fce
@@ -685,12 +707,12 @@ index 0000000..cc573de
 +    raise SystemExit(main())
 diff --git a/dm/gfx/tests/run_nvn_snapraw_native.py b/dm/gfx/tests/run_nvn_snapraw_native.py
 new file mode 100644
-index 0000000..ee8952a
+index 0000000..ac74d95
 --- /dev/null
 +++ b/dm/gfx/tests/run_nvn_snapraw_native.py
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,92 @@
 +#!/usr/bin/env python3
-+"""Compile a no-GPU fake Metal-copy harness around nvn_mtl.m's actual SNAPRAW block."""
++"""Compile a no-GPU fake Metal-copy harness around nvn_mtl.m's SNAPRAW block and pixel-width helper."""
 +from pathlib import Path
 +import shutil
 +import subprocess
@@ -703,10 +725,10 @@ index 0000000..ee8952a
 +TEMPLATE = Path(__file__).resolve().with_name("t_nvn_snapraw_native.m")
 +MARKER = 'if (getenv("DM_NVN_SNAPRAW")) {'
 +PLACEHOLDER = "SNAPRAW_SOURCE_BLOCK"
++BPP_PLACEHOLDER = "SNAPRAW_BPP_HELPER"
 +
 +
-+def extract_snapraw_block(source: str) -> str:
-+    start = source.index(MARKER)
++def extract_braced_block(source: str, start: int) -> str:
 +    brace = source.index("{", start)
 +    depth = 0
 +    quote = None
@@ -745,6 +767,15 @@ index 0000000..ee8952a
 +    raise AssertionError("unclosed SNAPRAW block")
 +
 +
++def extract_snapraw_block(source: str) -> str:
++    return extract_braced_block(source, source.index(MARKER))
++
++
++def extract_pf_bytes(source: str) -> str:
++    signature = "static size_t mtl_pf_bytes(MTLPixelFormat pf)"
++    return extract_braced_block(source, source.index(signature))
++
++
 +def main():
 +    if sys.platform != "darwin":
 +        print("SKIP: native Foundation fake-copy SNAPRAW test requires macOS/Xcode")
@@ -753,11 +784,13 @@ index 0000000..ee8952a
 +    if not xcrun:
 +        print("SKIP: xcrun is required for the native SNAPRAW fixture")
 +        return 77
-+    block = extract_snapraw_block(SOURCE.read_text(encoding="utf-8"))
++    source = SOURCE.read_text(encoding="utf-8")
++    block = extract_snapraw_block(source)
++    bpp_helper = extract_pf_bytes(source)
 +    template = TEMPLATE.read_text(encoding="utf-8")
-+    if template.count(PLACEHOLDER) != 1:
-+        raise SystemExit(f"expected one {PLACEHOLDER} in native fixture template")
-+    generated = template.replace(PLACEHOLDER, block)
++    if template.count(PLACEHOLDER) != 1 or template.count(BPP_PLACEHOLDER) != 1:
++        raise SystemExit("expected one placeholder for each extracted NVN source block in the native fixture")
++    generated = template.replace(PLACEHOLDER, block).replace(BPP_PLACEHOLDER, bpp_helper)
 +    with tempfile.TemporaryDirectory(prefix="nvn-snapraw-native-") as temp:
 +        src = Path(temp) / "t_nvn_snapraw_generated.m"
 +        exe = Path(temp) / "t_nvn_snapraw_generated"
@@ -1121,10 +1154,10 @@ index 0000000..b49b27b
 +}
 diff --git a/dm/gfx/tests/t_nvn_snapraw_native.m b/dm/gfx/tests/t_nvn_snapraw_native.m
 new file mode 100644
-index 0000000..304eb1c
+index 0000000..fc3741b
 --- /dev/null
 +++ b/dm/gfx/tests/t_nvn_snapraw_native.m
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,171 @@
 +// The runner injects the actual DM_NVN_SNAPRAW block from nvn_mtl.m at the marker below.
 +#import <Foundation/Foundation.h>
 +#import <Metal/Metal.h>
@@ -1135,9 +1168,14 @@ index 0000000..304eb1c
 +#include <string.h>
 +#include <unistd.h>
 +
++#define MLOG(...) do { fprintf(stderr, "[fake-nvn] " __VA_ARGS__); fputc('\n', stderr); } while (0)
++
++SNAPRAW_BPP_HELPER
++
 +@interface FakeTexture : NSObject
 +@property(nonatomic) NSUInteger width, height, depth;
 +@property(nonatomic) MTLPixelFormat pixelFormat;
++@property(nonatomic) NSUInteger bytesPerPixel;   // Explicit fixture expectation, independent of mtl_pf_bytes.
 +@property(nonatomic, copy) NSArray<NSData *> *slicePayloads;
 +@end
 +@implementation FakeTexture @end
@@ -1168,7 +1206,7 @@ index 0000000..304eb1c
 +    FakeTexture *src = (FakeTexture *)(id)texture; FakeBuffer *dst = (FakeBuffer *)(id)buffer;
 +    assert(level == 0 && origin.x == 0 && origin.y == 0 && origin.z == 0);
 +    assert(size.width == src.width && size.height == src.height && size.depth == 1);
-+    assert(row == size.width * 4 && image == row * size.height);
++    assert(row == size.width * src.bytesPerPixel && image == row * size.height);
 +    assert(slice < src.slicePayloads.count);
 +    NSData *payload = src.slicePayloads[slice]; assert(payload.length == image && offset + image <= dst.length);
 +    memcpy((uint8_t *)dst.contents + offset, payload.bytes, payload.length);
@@ -1186,12 +1224,14 @@ index 0000000..304eb1c
 +- (void)waitUntilCompleted {}
 +@end
 +
++static NSUInteger g_fake_alloc_count, g_fake_last_buffer_length;
 +@interface FakeDevice : NSObject
 +- (id<MTLBuffer>)newBufferWithLength:(NSUInteger)length options:(MTLResourceOptions)options;
 +@end
 +@implementation FakeDevice
 +- (id<MTLBuffer>)newBufferWithLength:(NSUInteger)length options:(MTLResourceOptions)options {
-+    assert(options == MTLResourceStorageModeShared); return (id<MTLBuffer>)(id)[[FakeBuffer alloc] initWithLength:length];
++    assert(options == MTLResourceStorageModeShared); g_fake_alloc_count++; g_fake_last_buffer_length = length;
++    return (id<MTLBuffer>)(id)[[FakeBuffer alloc] initWithLength:length];
 +}
 +@end
 +
@@ -1205,13 +1245,43 @@ index 0000000..304eb1c
 +SNAPRAW_SOURCE_BLOCK
 +}
 +
-+static NSData *raw_payload(NSString *path) {
++static NSData *raw_payload(NSString *path, FakeTexture *texture, NSUInteger expected_bpp) {
 +    NSData *file = [NSData dataWithContentsOfFile:path]; assert(file);
 +    const uint8_t *bytes = file.bytes; const uint8_t *newline = memchr(bytes, '\n', file.length); assert(newline);
 +    NSString *header = [[NSString alloc] initWithBytes:bytes length:(NSUInteger)(newline - bytes) encoding:NSUTF8StringEncoding];
-+    NSString *expected = [NSString stringWithFormat:@"2 2 %lu 8", (unsigned long)MTLPixelFormatRGBA8Unorm];
++    NSUInteger row = texture.width * expected_bpp;
++    NSString *expected = [NSString stringWithFormat:@"%lu %lu %lu %lu", (unsigned long)texture.width, (unsigned long)texture.height,
++                          (unsigned long)texture.pixelFormat, (unsigned long)row];
 +    assert([header isEqualToString:expected]);
-+    return [file subdataWithRange:NSMakeRange((NSUInteger)(newline - bytes) + 1, file.length - (NSUInteger)(newline - bytes) - 1)];
++    NSData *payload = [file subdataWithRange:NSMakeRange((NSUInteger)(newline - bytes) + 1, file.length - (NSUInteger)(newline - bytes) - 1)];
++    assert(payload.length == row * texture.height);
++    return payload;
++}
++
++static void raw_format_case(NSString *root, MTLPixelFormat format, NSUInteger expected_bpp, NSUInteger serial, uint8_t fill) {
++    NSUInteger expected_size = 2 * 2 * expected_bpp;
++    NSMutableData *payload = [NSMutableData dataWithLength:expected_size]; memset(payload.mutableBytes, fill, expected_size);
++    FakeTexture *texture = [FakeTexture new]; texture.width = 2; texture.height = 2; texture.depth = 1;
++    texture.pixelFormat = format; texture.bytesPerPixel = expected_bpp; texture.slicePayloads = @[payload];
++    FakeBlit *fake_blit = [FakeBlit new]; g_fake_command.blit = fake_blit;
++    NSUInteger allocations = g_fake_alloc_count;
++    snapraw_block((id<MTLTexture>)(id)texture, serial, 0, 0, @[texture, @(serial), @0, @0]);
++    NSString *path = [root stringByAppendingPathComponent:[NSString stringWithFormat:@"snapshot-%lu.raw", (unsigned long)(serial * 100)]];
++    assert(g_fake_alloc_count == allocations + 1 && g_fake_last_buffer_length == expected_size);
++    NSData *actual = raw_payload(path, texture, expected_bpp);
++    assert(actual.length == expected_size && ((const uint8_t *)actual.bytes)[0] == fill);
++    assert(([fake_blit.slices isEqualToArray:@[@0]]));
++}
++
++static void raw_unsupported_case(NSString *root, MTLPixelFormat format, NSUInteger serial) {
++    FakeTexture *texture = [FakeTexture new]; texture.width = 2; texture.height = 2; texture.depth = 1;
++    texture.pixelFormat = format; texture.bytesPerPixel = 0; texture.slicePayloads = @[];
++    FakeBlit *fake_blit = [FakeBlit new]; g_fake_command.blit = fake_blit;
++    NSUInteger allocations = g_fake_alloc_count;
++    snapraw_block((id<MTLTexture>)(id)texture, serial, 0, 0, @[texture, @(serial), @0, @0]);
++    NSString *path = [root stringByAppendingPathComponent:[NSString stringWithFormat:@"snapshot-%lu.raw", (unsigned long)(serial * 100)]];
++    assert(g_fake_alloc_count == allocations && access(path.fileSystemRepresentation, F_OK) != 0);
++    assert(fake_blit.slices.count == 0);
 +}
 +
 +int main(void) {
@@ -1225,7 +1295,7 @@ index 0000000..304eb1c
 +        NSMutableData *layer0 = [NSMutableData dataWithLength:16], *layer1 = [NSMutableData dataWithLength:16];
 +        memset(layer0.mutableBytes, 0x31, layer0.length); memset(layer1.mutableBytes, 0xa7, layer1.length);
 +        FakeTexture *texture = [FakeTexture new]; texture.width = 2; texture.height = 2; texture.depth = 2;
-+        texture.pixelFormat = MTLPixelFormatRGBA8Unorm; texture.slicePayloads = @[layer0, layer1];
++        texture.pixelFormat = MTLPixelFormatRGBA8Unorm; texture.bytesPerPixel = 4; texture.slicePayloads = @[layer0, layer1];
 +        FakeBlit *fake_blit = [FakeBlit new]; g_fake_command = [FakeCommandBuffer new]; g_fake_command.blit = fake_blit; g_dev = (id<MTLDevice>)(id)[FakeDevice new];
 +
 +        snapraw_block((id<MTLTexture>)(id)texture, 7, 0, 0, @[texture, @7, @0, @0]);
@@ -1233,10 +1303,10 @@ index 0000000..304eb1c
 +        NSString *slice0 = [root stringByAppendingPathComponent:@"snapshot-700.raw"];
 +        NSString *slice1 = [root stringByAppendingPathComponent:@"snapshot-700_layer001.raw"];
 +        assert(access(slice0.fileSystemRepresentation, F_OK) == 0 && access(slice1.fileSystemRepresentation, F_OK) == 0);
-+        NSData *p0 = raw_payload(slice0), *p1 = raw_payload(slice1);
++        NSData *p0 = raw_payload(slice0, texture, 4), *p1 = raw_payload(slice1, texture, 4);
 +        const uint8_t *b0 = p0.bytes, *b1 = p1.bytes;
 +        assert(p0.length == 16 && p1.length == 16 && b0[0] == 0x31 && b1[0] == 0xa7 && ![p0 isEqualToData:p1]);
-+        assert([fake_blit.slices isEqualToArray:@[@0, @1]]);
++        assert(([fake_blit.slices isEqualToArray:@[@0, @1]]));
 +
 +        // Keep the existing pass suffix and its slice-0 spelling; add the explicit layer before it.
 +        snapraw_block((id<MTLTexture>)(id)texture, 7, 0, 0, @[texture, @7, @0, @0, @12]);
@@ -1244,8 +1314,17 @@ index 0000000..304eb1c
 +        NSString *pass0 = [root stringByAppendingPathComponent:@"snapshot-700_s012.raw"];
 +        NSString *pass1 = [root stringByAppendingPathComponent:@"snapshot-700_layer001_s012.raw"];
 +        assert(access(pass0.fileSystemRepresentation, F_OK) == 0 && access(pass1.fileSystemRepresentation, F_OK) == 0);
-+        assert([raw_payload(pass0) isEqualToData:p0] && [raw_payload(pass1) isEqualToData:p1]);
-+        printf("PASS: actual SNAPRAW block copies both array slices and writes unique layer/pass filenames\n");
++        assert([raw_payload(pass0, texture, 4) isEqualToData:p0] && [raw_payload(pass1, texture, 4) isEqualToData:p1]);
++
++        // Expected bytes per pixel are declared independently here; the injected production helper must match them.
++        raw_format_case(root, MTLPixelFormatRG32Float, 8, 20, 0x11);
++        raw_format_case(root, MTLPixelFormatRGBA16Unorm, 8, 21, 0x22);
++        raw_format_case(root, MTLPixelFormatR8Unorm, 1, 22, 0x33);
++        raw_format_case(root, MTLPixelFormatRGBA16Float, 8, 23, 0x44);
++        raw_format_case(root, MTLPixelFormatRGBA32Float, 16, 24, 0x55);
++        raw_unsupported_case(root, MTLPixelFormatASTC_4x4_LDR, 30);
++        raw_unsupported_case(root, (MTLPixelFormat)0x7fff, 31);
++        printf("PASS: actual SNAPRAW and pixel-width helpers copy array layers, write known formats, and skip unsupported raw captures\n");
 +        [[NSFileManager defaultManager] removeItemAtPath:root error:nil];
 +    }
 +    return 0;
@@ -1396,17 +1475,17 @@ index 0000000..e85a68b
 +    unittest.main()
 diff --git a/dm/gfx/tests/test_nvn_snapraw.py b/dm/gfx/tests/test_nvn_snapraw.py
 new file mode 100644
-index 0000000..2712db9
+index 0000000..2c5bb8f
 --- /dev/null
 +++ b/dm/gfx/tests/test_nvn_snapraw.py
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,76 @@
 +"""Source guards plus a macOS fake Metal-copy test for DM_NVN_SNAPRAW."""
 +from pathlib import Path
 +import subprocess
 +import sys
 +import unittest
 +
-+from dm.gfx.tests.run_nvn_snapraw_native import extract_snapraw_block
++from dm.gfx.tests.run_nvn_snapraw_native import extract_pf_bytes, extract_snapraw_block
 +
 +
 +ROOT = Path(__file__).resolve().parents[3]
@@ -1417,7 +1496,9 @@ index 0000000..2712db9
 +class NVNSnaprawTests(unittest.TestCase):
 +    @classmethod
 +    def setUpClass(cls):
-+        cls.block = extract_snapraw_block(SOURCE.read_text(encoding="utf-8"))
++        cls.source = SOURCE.read_text(encoding="utf-8")
++        cls.block = extract_snapraw_block(cls.source)
++        cls.bpp_helper = extract_pf_bytes(cls.source)
 +
 +    def test_array_slice_is_copied_and_layer_filename_is_explicit(self):
 +        self.assertIn("sourceSlice:sl", self.block)
@@ -1432,14 +1513,38 @@ index 0000000..2712db9
 +        self.assertLess(self.block.index('"_layer%03lu"'), self.block.index('"_s%03d"'))
 +        self.assertIn('strlcat(rp_, ".raw", sizeof rp_)', self.block)
 +
++    def test_raw_width_uses_shared_mapping_and_unsupported_only_skips_raw(self):
++        self.assertIn("size_t bpp = mtl_pf_bytes(t.pixelFormat)", self.block)
++        self.assertIn("if (!bpp)", self.block)
++        self.assertIn("SNAPRAW skipped pixel format", self.block)
++        self.assertNotIn("continue;", self.block)
++        self.assertIn("case 103: case 104: case 105", self.bpp_helper)
++        self.assertIn("case 110: case 112: case 113: case 114: case 115: return 8", self.bpp_helper)
++        self.assertIn("case 123: case 124: case 125: return 16", self.bpp_helper)
++        raw_at = self.source.index('if (getenv("DM_NVN_SNAPRAW"))')
++        png_view = self.source.index("id<MTLTexture> v = [t newTextureViewWithPixelFormat", raw_at)
++        self.assertLess(raw_at, png_view)  # the loop continues into the existing PNG dump
++
 +    def test_native_fixture_injects_the_actual_source_block(self):
 +        fixture = (ROOT / "dm/gfx/tests/t_nvn_snapraw_native.m").read_text(encoding="utf-8")
 +        self.assertEqual(fixture.count("SNAPRAW_SOURCE_BLOCK"), 1)
++        self.assertEqual(fixture.count("SNAPRAW_BPP_HELPER"), 1)
 +        self.assertIn('#import <Metal/Metal.h>', fixture)
 +        self.assertNotRegex(fixture, r'@interface Fake\w+\s*:\s*NSObject\s*<MTL')
 +        self.assertIn("(id<MTLTexture>)(id)texture", fixture)
 +        self.assertIn("(id<MTLCommandBuffer>)(id)g_fake_command", fixture)
 +        self.assertIn("slicePayloads", fixture)
++        expected = (
++            "MTLPixelFormatRG32Float, 8",
++            "MTLPixelFormatRGBA16Unorm, 8",
++            "MTLPixelFormatR8Unorm, 1",
++            "MTLPixelFormatRGBA16Float, 8",
++            "MTLPixelFormatRGBA32Float, 16",
++        )
++        for case in expected:
++            self.assertIn(case, fixture)
++        self.assertIn("MTLPixelFormatASTC_4x4_LDR", fixture)
++        self.assertIn("(MTLPixelFormat)0x7fff", fixture)
 +        self.assertNotIn("MTLCreateSystemDefaultDevice", fixture)
 +        runner = (ROOT / "dm/gfx/tests/run_nvn_snapraw_native.py").read_text(encoding="utf-8")
 +        self.assertIn('"-framework", "Metal"', runner)
@@ -2026,7 +2131,7 @@ index 29912b1..2b7981b 100644
  
  `python3 scripts/regress.py impact <base>..<head>` (or one commit) maps a change to those names: the functions around its changed lines, followed through the host's callers to the NVN entry points and HLE functions they serve, and the rules of `dm/tools/impact_map.tsv` (a file, or functions in it, to manifest rows: `dmsh_atomic.py` to the image atomic features, the prepare-step functions of `nvn_mtl.m` to the games that run it). It lists the games that use what the change touches, those reached only through a broad rule (every game of the API), and the profiles without a manifest as unknown. It reads only git and the committed manifests, so it needs neither game files nor a harness root: the report is printed, and written as `impact.md` and `impact.json` to `--out` or, when there is one, `<root>/reports/`. Run it before a change to the chain or host, and run `regress.py check` on the games it names that you have; ask their owners for the others. A changed file no rule maps is listed: add a rule for it.
 diff --git a/docs/agents/symptoms.md b/docs/agents/symptoms.md
-index 0358e52..54beb26 100644
+index 0358e52..011d997 100644
 --- a/docs/agents/symptoms.md
 +++ b/docs/agents/symptoms.md
 @@ -289,6 +289,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
@@ -2037,15 +2142,16 @@ index 0358e52..54beb26 100644
  
  ## NVN objects
  
-@@ -448,6 +449,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+@@ -448,6 +449,8 @@ One line per symptom in the [subsystem references](../reference/): what you see
  - a jump to address 0 right after `glGetFloatv(0xb12)` (`lr=main+0x2d58c4`). → [Which GL functions a game calls](../reference/rendering.md#which-gl-functions-a-game-calls)
  - in a capture run every program links with no uniforms; the game's first `Shader:send` raises a Lua error and, on the Switch, its error handler quits (Any Lua error quits a LÖVE game). → [GL shaders put together at run time and captured](../reference/rendering.md#gl-shaders-put-together-at-run-time-and-captured)
  - read-only depth/stencil attachments are written back after every pass, and the periodic unwritten-store savings counter remains zero with the default configuration. → [Unwritten attachment stores without lookahead](../reference/rendering.md#unwritten-attachment-stores-without-lookahead)
 +- array-layer PNGs differ, but their `DM_NVN_SNAPRAW` files contain layer zero or overwrite one another. → [Raw render-target snapshots read the wrong array layer](../reference/rendering.md#raw-render-target-snapshots-read-the-wrong-array-layer)
++- raw HDR capture has an undersized row or buffer for formats such as RG32Float and RGBA16Unorm; narrow formats also carry unnecessary padding. → [Raw snapshots guessed four bytes for wider pixel formats](../reference/rendering.md#raw-snapshots-guessed-four-bytes-for-wider-pixel-formats)
  
  ## Shaders
  
-@@ -480,6 +482,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+@@ -480,6 +483,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
  - SPIRV-Cross can't parse the SPIR-V (`nullptr` exception). → [SPIRV-Cross parse failures](../reference/shaders.md#spirv-cross-parse-failures)
  - `Fragment input(s) user(locnN) mismatching vertex shader output type(s) or not written by vertex shader` and the draw is skipped; the host reports `[RED] failed to create render pipeline (vertex … fragment …)`. Offline packing fails with `pso_offline: metal-tt failed` for the same reason. → [Pixel shader inputs the vertex shader does not write](../reference/shaders.md#pixel-shader-inputs-the-vertex-shader-does-not-write)
  - outdoors dim and nothing casts a sun shadow (every shadow-map lookup fails). → [Unwritten components of a written output start as (0, 0, 0, 1)](../reference/shaders.md#unwritten-components-of-a-written-output-start-as-0-0-0-1)
@@ -2053,7 +2159,7 @@ index 0358e52..54beb26 100644
  - the ground kept stale 32×32 blocks where the G-buffer draw failed the depth test: blocks of a stale image where a depth pre-pass and a later pass with other vertex shaders meet (Odyssey: 32×32 blocks on every fourth frame). → [Position invariance across shaders](../reference/shaders.md#position-invariance-across-shaders)
  - making a pipeline archive prints `Max Unstruct ID 758 in function agc.main in shader 13941 exceeds supported limit`, and one pipeline takes many minutes, in `metal-tt` offline or in the host's prebuild on the device (`Preparing pipelines` holding one count for minutes). The line is a note, not an error: `metal-tt` goes on, exits 0 and writes that pipeline into the archive. → [Front end at -O1: Apple's control-flow lowering](../reference/shaders.md#front-end-at--o1-apples-control-flow-lowering)
  - the half of Mario facing the camera's left was white (GitHub issue 72, on an iPhone). → [min, max and clamp with a NaN operand](../reference/shaders.md#min-max-and-clamp-with-a-nan-operand)
-@@ -550,6 +553,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+@@ -550,6 +554,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
  - hundreds of geometry raster passes in combat, despite support for batching consecutive geometry draws. → [Geometry runs across occlusion query boundaries](../reference/shaders.md#geometry-runs-across-occlusion-query-boundaries)
  - geometry preparation dominates rendering CPU even after geometry passes have been batched; primitive assembly and capture-index deduplication repeat for unchanged meshes. → [Prepared geometry indices reused after byte comparison](../reference/shaders.md#prepared-geometry-indices-reused-after-byte-comparison)
  - geometry vertex-capture passes consume substantial GPU time before geometry compute or depth rasterization. → [Geometry capture initializes only missing words](../reference/shaders.md#geometry-capture-initializes-only-missing-words)
@@ -2079,10 +2185,10 @@ index a438de6..8ba819b 100644
 +- **Check:** `test_nvn_timing.py` exercises the actual pure-C accounting with a fake clock/predictor, nested and outside loads, repeated snapshots, overflow and invalid counters. It also checks both runtime call sites and the TSV wiring. This corrects measurement, not frame rate.
 +- **Found on:** the [Odyssey iPad audit](../../dm/games/0100000000010000/README.md#found-on-this-game). Old per-frame totals cannot be corrected from nearby untagged prefetch messages; only window-level overlap bounds are available.
 diff --git a/docs/reference/rendering.md b/docs/reference/rendering.md
-index c5151dc..db984b1 100644
+index c5151dc..488eb0d 100644
 --- a/docs/reference/rendering.md
 +++ b/docs/reference/rendering.md
-@@ -932,3 +932,12 @@ Digimon Story Cyber Sleuth: Complete Edition (Media.Vision's MVGL engine, SDK 6.
+@@ -932,3 +932,21 @@ Digimon Story Cyber Sleuth: Complete Edition (Media.Vision's MVGL engine, SDK 6.
  - **Fix:** collect per-pass write facts independently of the lookahead switch and omit only stores of attachments that were loaded and provably unchanged. Clears, depth writes, stencil writes and possible writable image/atomic/storage aliases retain their stores. Lookahead, pass merging and cross-submission invalidation remain disabled. `DM_NVN_UNWRITTEN_DC=0` restores store-all behavior.
  - **Check:** `make -C dm/gfx/tests GAME=<id> check_t_unwritten_store` performs real GPU readback against a store-all control and literal color/depth/stencil values, with lookahead disabled. It covers read-only depth/stencil, depth writes, stencil writes, pending clears, and writable images (including native image atomics) and both storage-buffer binding forms. `t_unwritten_store --bench` runs a synthetic 32-pass 1080p workload with balanced on/off order; it is not a game FPS measurement.
  - **Found on:** [NieR:Automata US 1.0.3](../../dm/games/010056B015FE8000/README.md#factory-combat-capture-and-9s-texture-follow-up), during iPhone factory-combat performance investigation. The change passes the GPU proof and rendering regressions on Mac; iPhone gameplay benefit remains to be measured.
@@ -2095,6 +2201,15 @@ index c5151dc..db984b1 100644
 +- **Fix:** raw snapshots copy the recorded slice. Nonzero layers receive an explicit `_layerNNN` suffix before the existing pass suffix. Ordinary 2D and slice-zero filenames remain unchanged. This affects diagnostic readback only, not game rendering.
 +- **Check:** a Foundation fixture injects the actual source block into fake copy objects using the real Metal API declarations. It checks distinct payloads and unique names for two array slices, with and without pass suffixes; no GPU correctness result is implied.
 +- **Found on:** the [Odyssey iPad lighting audit](../../dm/games/0100000000010000/README.md#found-on-this-game). The defect was confirmed by source review, not attributed to the visible bloom.
++
++
++### Raw snapshots guessed four bytes for wider pixel formats
++
++- **Symptom:** raw HDR capture has an undersized row or buffer for formats such as RG32Float and RGBA16Unorm; narrow formats also carry unnecessary padding.
++- **Cause:** the capture selected a few special formats and otherwise assumed four bytes per texel, instead of using the shared uncompressed-format byte-width mapping.
++- **Fix:** SNAPRAW uses `mtl_pf_bytes`. Unsupported formats and failed readback allocation skip only the raw capture and leave the following PNG path available. The game renderer, texture allocation policy and shader formats do not change.
++- **Check:** the native fake-copy fixture injects both actual source helpers and independently expects 8 bytes for RG32Float/RGBA16Unorm/RGBA16Float, 1 for R8Unorm, and 16 for RGBA32Float. It checks header and payload lengths; unsupported formats must allocate nothing and create no raw file.
++- **Found on:** the [Odyssey iPad lighting audit](../../dm/games/0100000000010000/README.md#found-on-this-game). Source-confirmed diagnostic error; it does not establish that the game renders those formats incorrectly.
 diff --git a/docs/reference/shaders.md b/docs/reference/shaders.md
 index 7dbec3c..8e6e5f3 100644
 --- a/docs/reference/shaders.md
