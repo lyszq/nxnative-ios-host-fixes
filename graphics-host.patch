@@ -1305,10 +1305,10 @@ index 7213fd5..c19a4a7 100644
  
 diff --git a/dm/tools/tests/test_windows_metal.py b/dm/tools/tests/test_windows_metal.py
 new file mode 100644
-index 0000000..062ba87
+index 0000000..8512506
 --- /dev/null
 +++ b/dm/tools/tests/test_windows_metal.py
-@@ -0,0 +1,92 @@
+@@ -0,0 +1,93 @@
 +"""Windows Apple Metal command/identity integration without proprietary shaders."""
 +import importlib.util
 +import os
@@ -1332,12 +1332,13 @@ index 0000000..062ba87
 +    def setUp(self):
 +        self.tmp = tempfile.TemporaryDirectory(prefix='windows-metal-')
 +        self.addCleanup(self.tmp.cleanup)
-+        self.bin = (Path(self.tmp.name) / 'tools with spaces').resolve()
++        self.root = Path(self.tmp.name).resolve()
++        self.bin = self.root / 'tools with spaces'
 +        self.bin.mkdir()
 +        (self.bin / 'metal.exe').write_bytes(b'synthetic compiler identity')
 +        (self.bin / 'metallib.exe').write_bytes(b'synthetic linker identity')
 +        self.env = mock.patch.dict(os.environ, {'METAL_WINDOWS_BIN': str(self.bin),
-+                                  'METAL_MODULE_CACHE': str(Path(self.tmp.name) / 'module cache')})
++                                  'METAL_MODULE_CACHE': str(self.root / 'module cache')})
 +        self.env.start(); self.addCleanup(self.env.stop)
 +
 +    def test_mac_command_and_record_are_unchanged_without_override(self):
