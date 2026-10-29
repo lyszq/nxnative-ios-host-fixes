@@ -1,0 +1,1480 @@
+diff --git a/dm/games/0100000000010000/README.md b/dm/games/0100000000010000/README.md
+index bf60f53..0f50267 100644
+--- a/dm/games/0100000000010000/README.md
++++ b/dm/games/0100000000010000/README.md
+@@ -22,7 +22,8 @@ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in
+ - **Resolved: hard-edged dark boxes behind the HUD's layout panes** (the coin counters' solid white cards, a dark box behind the "Look Around" hint; layout captures, as in Breath of the Wild). The game creates each capture with its per-format default mapping (an R8 capture reads (R, 0, 0, 1)), rebuilds it on the same storage with the capture's own mapping, (1, 1, 1, R), and replaces the registered descriptor only if `nvnTextureCompare` reports a difference (`main+0x982320`). The host compared everything but the mapping, so the captures kept alpha 1. Fixed by the general [`nvnTextureCompare` compares the channel mapping](../../../docs/reference/rendering.md#nvntexturecompare-compares-the-channel-mapping). The profile's earlier workaround, `alpha_from_red` (all 26 layout pixel shaders, `main`'s BNSH at 0x132c000, read such targets as (R, 0, 0, R)), is gone with its host code. Checked on the Mac from the "Look Around" hint with a probe host on the comparison: 40 rebuilds in the first 11,700 frames change only the mapping, R8 captures (640×80, 400×120, 390×80, 378×80, 300×40, 250×50, 128×128, 64×64, 48×57) from (R, 0, 0, 1) to (1, 1, 1, R) and a 320×180 RGBA one from (R, G, B, 1) to (R, G, B, A). Ignoring the mapping again brings back a dark box behind the hint (about 12,800 pixels from frame 4,200 on); with the old list the workaround converted the 378×80 capture and the frames matched the fixed host's; with the fix, the list converted nothing and changed nothing (the frames 4,200 to 6,600 equal to the pixel but for the hint video's corner). The comparison and the views run the same on the iPhone (no platform branch), so the rebuilt captures leave no (R, 0, 0, 1) target for the list to find there either.
+ - **Resolved: the Cap Kingdom fog never parted around Mario (reported on an iPhone; fix checked on the Mac).** The fog's shading reads velocity fields that a small fluid simulation updates every frame: two 256×256 and two 128×128 RG16F targets, with a two-pass blur and a blended composite. Its only input is a point-sprite splat per mover, drawn with `alPointSpriteShader`: one vertex per mover, its size in the vertex data (Mario's main splat about 18 px, others 3–5 px) and a soft disc in the fragment shader (`clamp(1 - 4r², 0, 1)` × velocity). The vertex shader writes `gl_PointSize = min(size, c0[0x610])`, and the host had nothing at that offset of the driver segment, so every splat had size 0 and the fields stayed exactly zero (raw dumps with `DM_NVN_TEXDUMP` + `DM_NVN_SNAPRAW`). The host now writes the largest point size, 2047, at `c0 + 0x610` for the graphics stages. Writing the `SetPointSize` value instead (always 1 here) left one-pixel splats whose disc weight came out 0 (the fields held `-0.0`). After the fix the fields hold velocities up to ±44 and the fog clears around Mario.
+ - **Resolved: the Cap Kingdom ground showed 32×32 blocks of a stale image on every fourth frame (Mac).** Presents 4k were brighter and blocky, 4k+1 and 4k+2 clean, 4k+3 partly blocked, repeating to the decimal across runs; only with the ground's material (`b6384a85afd3ef94`) drawn. In some frames the game first draws a depth pre-pass (`alRenderDepthOnly`) for objects its occlusion queries report visible (the queries rotate through three slots, hence the cycle), then the G-buffer with other vertex shaders and depth test less-or-equal, without clearing the colour targets. Metal compiled the two vertex shaders' identical position math to slightly different depths, the G-buffer fragments failed the test and kept the previous content. Every Metal compile now uses `-fpreserve-invariance`. Ruled out on the way: the TBDR optimizations, same-pass feedback, the present path; evaluating the game's conditional rendering on the CPU from earlier frames' results made it worse (the condition belongs to the same frame on the GPU), so the host still ignores the condition here and draws (no `render_cond`).
+-- Its three geometry shaders (a thunder effect) do not translate.
++- **Host fix ported, iPad validation pending:** the Cascade Kingdom waterfall mist can composite twice when a nine-vertex draw reads beyond its three-vertex stream. See [Vertex fetches past a stream's bound size](../../../docs/reference/rendering.md#vertex-fetches-past-a-streams-bound-size). This does not establish a fix for every bloom or lighting flash.
++- The accepted F4.1 package contains compute-based translations for all three thunder geometry shaders, including their geometry topology libraries. Their presence is not a device validation of the effect.
+ 
+ ## Movies
+ 
+@@ -30,6 +31,7 @@ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in
+ 
+ ## Services
+ 
++- **Resolved in the host: modern Chinese codes selected Japanese.** Both settings equality hooks now match `zh-Hans` with `zh-CN`, and `zh-Hant` with `zh-TW`; see [Chinese language aliases in settings comparisons](../../../docs/reference/services.md#chinese-language-aliases-in-settings-comparisons). Upstream checked fresh-save Mac startup menus; this fork's port is covered by the synthetic hook matrix and still needs device validation.
+ - Start-up calls no game before it made, each answered by the host: the aborting `account::OpenPreselectedUser` and `GetLastOpenedUser` (a null read), news delivery (`bcat`: the delivery storage does not mount, which the game treats as "nothing delivered"), HOME-button blocking, the parental 3D-mode setting, `vi::SetLayerScalingMode`, `time::ToPosixTimeFromUtc`, the debug pad, and the SDK 7 names of two audio-device calls (`audio::AcquireAudioDeviceSwitchNotification` aborted). Each aborted with no message in the SDK's IPC; frames resolved with `sdis.py --sym`.
+ - Command memory: it hands out many 512-byte command memory grants before recording; with no recording to reclaim them by, 256 KB host segments each reached the cap entering the Wooded Kingdom, so an empty-pool grant of at most 4 KB outside a recording gets a 4 KB segment (`hostseg_size`). The `GetCommandMemoryUsed` count from the last `AddCommandMemory` (found on Three Houses) left it unchanged.
+ - Shared fonts: SDK 7, so the address is the plain TTF. Focus handling mode 3 (no focus notifications; the system suspends the game out of focus).
+@@ -58,6 +60,7 @@ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in
+ 
+ General host and tool changes first needed here; each applies to every game:
+ 
++- **Chinese language aliases in both settings equality operators:** [Chinese language aliases in settings comparisons](../../../docs/reference/services.md#chinese-language-aliases-in-settings-comparisons).
+ - **Storage-write tracking follow-up:** [A size-zero storage write needlessly invalidates every partial uniform shadow](../../../docs/reference/rendering.md#a-size-zero-storage-write-needlessly-invalidates-every-partial-uniform-shadow). The upstream host correction is ported and tested with synthetic native bookkeeping; Odyssey GPU behavior and performance remain unmeasured.
+ - **Shader build sidecars:** [AppleDouble files are not shader build outputs](../../../docs/reference/packing.md#appledouble-files-are-not-shader-build-outputs). Exact output-name filtering preserves the existing shader/cache identity.
+ 
+diff --git a/dm/gfx/nvn/dm_shell_msl.h b/dm/gfx/nvn/dm_shell_msl.h
+index 87a5ff2..82bd161 100644
+--- a/dm/gfx/nvn/dm_shell_msl.h
++++ b/dm/gfx/nvn/dm_shell_msl.h
+@@ -5,13 +5,18 @@
+ #import <Metal/Metal.h>
+ 
+ // Changing the policy requires a new epoch so old prep markers cannot skip it.
+-#define DM_SHELL_NVN_MSL_EPOCH @"nvn-inv1"
++#define DM_SHELL_NVN_MSL_EPOCH @"nvn-inv2-relaxed"
+ 
+ static inline MTLCompileOptions *dm_shell_nvn_compile_options(void) {
+     MTLCompileOptions *options = [MTLCompileOptions new];
+     // [[position, invariant]] only guarantees agreement when this is enabled.
+-    // Leave math and optimization defaults unchanged in this isolated fix.
+     options.preserveInvariance = YES;
++    // Match ios_metal.py's -fmetal-math-mode=relaxed: translated Maxwell
++    // shaders use isnan selects, which the default fast mode may remove.
++    // The shell targets iOS 26; mathMode is public from iOS 18 / macOS 15.
++    // Keep the independent FP32 function and optimization policies at their
++    // defaults. Public optimizationLevel offers default / -Os, not -O1.
++    options.mathMode = MTLMathModeRelaxed;
+     return options;
+ }
+ #endif
+diff --git a/dm/gfx/nvn/dmsh_chain.h b/dm/gfx/nvn/dmsh_chain.h
+index 8552c74..3058da9 100644
+--- a/dm/gfx/nvn/dmsh_chain.h
++++ b/dm/gfx/nvn/dmsh_chain.h
+@@ -1,3 +1,3 @@
+ // Generated file (dm/gfx/tools/dmsh_chain.py --header): the B shader library translation chain version this source tree expects (default options), one for every game;
+ // the host loads only <library dir>/b-<V>/. Run dmsh_chain.py --header after changing the chain's tools and commit this file with the change
+-#define DMSH_CHAIN "a78f966a7b38"
++#define DMSH_CHAIN "2710ccf61c31"
+diff --git a/dm/gfx/nvn/nvn_feedback.inc b/dm/gfx/nvn/nvn_feedback.inc
+index 287f1f6..34a23d5 100644
+--- a/dm/gfx/nvn/nvn_feedback.inc
++++ b/dm/gfx/nvn/nvn_feedback.inc
+@@ -65,7 +65,7 @@ static void tf_draw(NvProg *pr,const p_draw *dw,const p_draw_idx *di) {
+     id<MTLRenderPipelineState> ps=vs&&vs->tf_fn?tf_pso(vs):nil;if(!ps)return;
+     uint64_t dst[4]={0};uint64_t job=tf_prepare(vs,0,0,(uint32_t)count,dw->prim==0?1:dw->prim==1?2:3,
+                                               dw->first,dw->count,dw->base_instance,dst);if(!job)return;
+-    vbuf_prepare();if(g_blit){enc_b_end(g_blit);g_blit=nil;}
++    vbuf_prepare(vs?&vs->rf:NULL,dw,NULL);if(g_blit){enc_b_end(g_blit);g_blit=nil;}
+     MTL4RenderPassDescriptor *rd=[MTL4RenderPassDescriptor new];rd.renderTargetWidth=rd.renderTargetHeight=rd.defaultRasterSampleCount=1;
+     id<MTL4RenderCommandEncoder> en=enc_r_begin(rd);enc_r_pso(en,ps);bind_vbufs(en);vconv_bind(en,vs,1,dw,NULL);
+     args_dirty_all();encode_args(en,vs,0,1);enc_r_vbuf(en,14,job);
+diff --git a/dm/gfx/nvn/nvn_geometry.inc b/dm/gfx/nvn/nvn_geometry.inc
+index dd159ac..42773e2 100644
+--- a/dm/gfx/nvn/nvn_geometry.inc
++++ b/dm/gfx/nvn/nvn_geometry.inc
+@@ -130,11 +130,11 @@ static void vertex_dump(NvShader *vs, const p_draw *dw, const p_draw_idx *di) {
+     nvn_geo_capture gc = {info[0], 0, {(uint32_t)lo, (uint32_t)span, (uint32_t)info[3], 1}, GEO_CAPTURE_WORDS, {0}};
+     for (int k = 0; k < GEO_CAPTURE_WORDS; k++) gc.slot[k] = (int16_t)k;   // every word, in order
+     memcpy((uint8_t *)output.contents + offset, &gc, sizeof gc);
+-    vbuf_prepare();
++    p_draw range = {.first = (int32_t)lo, .count = (int32_t)span, .instances = 1, .base_instance = (int32_t)(info[3] & UINT32_MAX)};
++    vbuf_prepare(&vs->rf, &range, NULL);   // the vertices the capture reads: streams it reads past get zeros there (vbuf_need)
+     if (g_blit) { enc_b_end(g_blit); g_blit = nil; }
+     MTL4RenderPassDescriptor *rd = [MTL4RenderPassDescriptor new]; rd.renderTargetWidth = rd.renderTargetHeight = rd.defaultRasterSampleCount = 1;
+     id<MTL4RenderCommandEncoder> en = enc_r_begin(rd); enc_r_pso(en, ps); bind_vbufs(en);
+-    p_draw range = {.first = (int32_t)lo, .count = (int32_t)span, .instances = 1, .base_instance = (int32_t)(info[3] & UINT32_MAX)};
+     vconv_bind(en, vs, 1, &range, NULL); args_dirty_all(); encode_args(en, vs, 0, 1); enc_r_vbuf(en, 13, gpu);
+     enc_r_draw_instanced(en, MTLPrimitiveTypePoint, lo, span, 1, (uint32_t)info[3]); enc_r_end(en);
+     mdi_wait();
+@@ -637,12 +637,13 @@ static int geo_prep(NvProg *pr, const p_draw *dw0, const p_draw_idx *di0, geo_jo
+         if (b->kind == NVN_RB_SBUFP && b->rw && b->reg < 16 && S.ssbo[2][b->reg].addr)
+             sbw_note(S.ssbo[2][b->reg].addr, S.ssbo[2][b->reg].size, SBW_GPU);
+     }
+-    if (may_wait) vbuf_prepare();
++    if (may_wait) vbuf_prepare(NULL, NULL, NULL);   // the run's captures bind later (geo_capture_one), so their streams are not bounded by their draws' ranges
+     return 1;
+ }
+ static void geo_capture_one(id<MTL4RenderCommandEncoder> re, const geo_job *j) {
+     if (!j->capture_words) return;
+     g_draw_binst = j->first_instance;
++    memset(g_vbuf_need, 0, sizeof g_vbuf_need);   // a later draw's bounds do not apply here (geo_prepare)
+     enc_r_pso(re, j->capture); bind_vbufs(re);
+     vconv_bind(re, j->vs, 1, &j->vertex_range, NULL);
+     args_dirty_all(); encode_args(re, j->vs, 0, 1); enc_r_vbuf(re, 13, j->capture_info);
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+index 8e032ea..cc89b32 100644
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -1635,7 +1635,7 @@ void mtl_drain(void) { present_drop_for_suspend(); mtl_present_flush(); snap_dra
+ 
+ // ================= Render replay =================
+ #include "../../host/front.h"
+-static int g_red_once[121];
++static int g_red_once[131];
+ #define RED_ONCE(k, ...) do { if (!g_red_once[k]++) MLOG("[RED] " __VA_ARGS__); } while (0)
+ // NVN vertex streams 0–15 → Metal vertex buffer slots: 0–13 go to 16–29 (30 is the constant fallback buffer), 14 and 15 to 14 and 15. Metal has only the 31 slots 0–30; translated shaders use only buffer(0) (the argument buffer),
+ // and the host's own vertex functions read no vertex buffers. 13 Sentinels uses stream 15, and the old 16 + stream went out of range (Metal assertion: buffer index (31) must be < 31)
+@@ -4456,6 +4456,8 @@ static id<MTLSamplerState> samp_by_id(int sid) {   // Caller holds g_rmu
+     d.mipFilter = p.minf <= 1 ? MTLSamplerMipFilterNotMipmapped : (p.minf == 2 || p.minf == 3) ? MTLSamplerMipFilterNearest : MTLSamplerMipFilterLinear;
+     d.sAddressMode = wrapm(p.ws); d.tAddressMode = wrapm(p.wt); d.rAddressMode = wrapm(p.wr);
+     d.lodMinClamp = p.lod_min < 0 ? 0 : p.lod_min; d.lodMaxClamp = p.lod_max;
++    if (@available(macOS 26.0, iOS 26.0, tvOS 26.0, *))
++        d.lodBias = p.lod_bias < -16 ? -16 : p.lod_bias > 15.99f ? 15.99f : p.lod_bias;   // SetLodBias: Maxwell's sampler bias, Metal 26's range [-16, 15.99]
+     d.maxAnisotropy = p.aniso < 1 ? 1 : p.aniso > 16 ? 16 : (NSUInteger)p.aniso;
+     if (p.cmp_mode) d.compareFunction = (MTLCompareFunction)(p.cmp_func - 1);
+     // Reduction (NVN 1 min / 2 max): the minimum or maximum of the texels a filtered sample covers, per channel (Metal 26). Pokémon Legends: Z-A builds its depth pyramid with a min sampler
+@@ -4548,31 +4550,38 @@ static void ubd_dirty(uint64_t lo, uint64_t hi) {
+ // NVN permits byte-aligned vertex streams; Metal drops the low two address bits. Keep an aligned copy in the submission arena.
+ // A CPU copy is safe only without GPU writers (including earlier submissions and sparse aliases). Otherwise copy on the GPU before
+ // opening the draw's encoder. Guest writes and pool remaps invalidate reuse; scratch copies themselves do not change guest memory.
++// The same copy bounds a stream the draw reads past: Maxwell's fetch stops at the size the stream was bound with and reads zeros beyond it, Metal's reads on into
++// whatever follows. Such a stream (vbuf_need) gets the bound bytes followed by zeros up to the last byte the draw reads. Super Mario Odyssey's agl mist composite
++// draws 9 vertices from a 36-byte stream holding one full-screen triangle: the 6 vertices past it read the pool's next bytes, which drew a second triangle of the
++// mist over the scene (hard-edged white slabs in the Cascade Kingdom)
+ #define VBUF_COPY_MAX (64u << 20)
+ typedef struct { uint64_t gpu, epoch, writes; uint32_t sbw; int npend; } vbuf_copy;
+-static nvn_hmap g_vbuf_unaligned = {.klen = 16};
++static nvn_hmap g_vbuf_unaligned = {.klen = 24};
+ static uint64_t g_vbuf_write_epoch;   // shader writes invalidate snapshots without disturbing indirect conversions of the same draw
+-static uint64_t vbuf_unaligned(uint64_t addr, uint64_t size, int prepare) {
+-    uint64_t key[2] = {addr, size}; vbuf_copy *c = nvn_hm_get(&g_vbuf_unaligned, key);
++static uint64_t g_vbuf_need[16];   // per stream: the bytes the draw reads when that is more than the bound size, else 0
++static uint64_t vbuf_unaligned(uint64_t addr, uint64_t size, uint64_t need, int prepare) {   // need: 0, or the copy's length (more than size; zeros past size)
++    uint64_t key[3] = {addr, size, need}, len = need > size ? need : size; vbuf_copy *c = nvn_hm_get(&g_vbuf_unaligned, key);
+     if (c && !prepare) return c->gpu;
+     if (c) {
+         int changed = c->epoch != g_wr_epoch || c->writes != g_vbuf_write_epoch || c->sbw != g_sbw_gen || c->npend != g_npend;
+-        int dirty = g_pend_over || g_sbw_over || (changed && nvn_sparse_gen())   // aliases may write through another guest address
++        int dirty = size && (g_pend_over || g_sbw_over || (changed && nvn_sparse_gen())   // aliases may write through another guest address
+             || (changed && sbw_hits(addr, addr + size))
+-            || (c->npend != g_npend && pend_last(addr, size) >= c->npend);
++            || (c->npend != g_npend && pend_last(addr, size) >= c->npend));
+         if (!dirty) { c->epoch = g_wr_epoch; c->writes = g_vbuf_write_epoch; c->sbw = g_sbw_gen; c->npend = g_npend; return c->gpu; }
+     }
+-    void *mb; uint64_t mo;
+-    if (!size || size > VBUF_COPY_MAX || !mtl_addr(addr, size, &mb, &mo)) {
+-        RED_ONCE(120, "vertex stream at an address not 4-byte aligned (%#llx, %llu bytes) could not be copied: bound as it is, which Metal reads from the aligned address below", (unsigned long long)addr, (unsigned long long)size);
++    void *mb = NULL; uint64_t mo = 0;
++    if (!len || len > VBUF_COPY_MAX || (size && !mtl_addr(addr, size, &mb, &mo))) {
++        if (need) RED_ONCE(121, "a draw reads %llu bytes of the vertex stream at %#llx, bound with %llu: no copy padded with zeros, so Metal reads past the bound range", (unsigned long long)need, (unsigned long long)addr, (unsigned long long)size);
++        else RED_ONCE(120, "vertex stream at an address not 4-byte aligned (%#llx, %llu bytes) could not be copied: bound as it is, which Metal reads from the aligned address below", (unsigned long long)addr, (unsigned long long)size);
+         return 0;
+     }
+     id<MTLBuffer> src = (__bridge id<MTLBuffer>)mb;
+-    int cpu = !pend_hits(addr, size) && !g_sbw_over && !sbw_hits(addr, addr + size) && !gw_live(addr, addr + size)
+-        && !nvn_sparse_gen() && nvn_host_readable(addr, size) && src.contents;   // a sparse mapping may alias this physical range
++    int cpu = !size || (!pend_hits(addr, size) && !g_sbw_over && !sbw_hits(addr, addr + size) && !gw_live(addr, addr + size)
++        && !nvn_sparse_gen() && nvn_host_readable(addr, size) && src.contents);   // a sparse mapping may alias this physical range
+     if (!cpu && !prepare) MDIE("unaligned vertex stream was not prepared before its render encoder");
+-    id<MTLBuffer> ab; size_t off = arena_alloc((size_t)size, &ab);
+-    if (cpu) memcpy((uint8_t *)ab.contents + off, (const uint8_t *)src.contents + mo, (size_t)size);
++    id<MTLBuffer> ab; size_t off = arena_alloc((size_t)len, &ab);
++    if (len > size) memset((uint8_t *)ab.contents + off + size, 0, (size_t)(len - size));   // the bytes past the bound range read as zeros
++    if (cpu) { if (size) memcpy((uint8_t *)ab.contents + off, (const uint8_t *)src.contents + mo, (size_t)size); }
+     else {
+         g_blit_alias = 1;
+         id<MTL4ComputeCommandEncoder> e = blit();   // lands deferred updates and orders all preceding GPU writes, including aliases
+@@ -4583,11 +4592,41 @@ static uint64_t vbuf_unaligned(uint64_t addr, uint64_t size, int prepare) {
+     if (!c) { c = malloc(sizeof *c); if (!c) MDIE("cannot allocate vertex copy cache entry"); nvn_hm_put(&g_vbuf_unaligned, key, c); }
+     *c = (vbuf_copy){ab.gpuAddress + off, g_wr_epoch, g_vbuf_write_epoch, g_sbw_gen, g_npend}; return c->gpu;
+ }
+-static void vbuf_prepare(void) {
++static int vattr_bytes(int f) {   // bytes of one element of NVN vertex format f; 0 = not a vertex format
++    static const uint8_t c[12] = {1, 1, 1, 1, 2, 2, 2, 2, 2, 4, 4, 4};   // per component of 0x01-0x30 (one to four components): UNORM8 SNORM8 UINT8 SINT8, F16 UNORM16 SNORM16 UINT16 SINT16, F32 UINT32 SINT32
++    if (f >= 0x01 && f <= 0x30) return c[(f - 1) % 12] * ((f - 1) / 12 + 1);
++    if (f == 0x3D || f == 0x69 || f == 0x3F || f == 0x9A) return 4;   // 10:10:10:2, 11:11:10 float, BGRA8
++    if (f >= 0x51 && f <= 0x68) { int i = (f - 0x51) >> 1; return (i / 3 + 1) * (1 << (i % 3)); }   // integers read as floats (vconv_i2f): 8 / 16 / 32-bit components
++    return 0;
++}
++// The last element a draw reads from stream st: [*last]; 0 = not known on the CPU (indirect, multi-draw, or a per-vertex stream of an indexed draw, whose indices are not scanned here)
++static int vstream_last(int st, const p_draw *dw, const p_draw_idx *di, uint64_t *last) {
++    if ((dw && (dw->ind || dw->mdi_cnt)) || (di && (di->ind || di->mdi_cnt)) || (!dw && !di)) return 0;
++    uint32_t stride = S.stream[st].stride, div = S.stream[st].divisor;
++    if (!stride) { *last = 0; return 1; }
++    if (div) { int32_t n = dw ? dw->instances : di->instances, b = dw ? dw->base_instance : di->base_instance; if (n < 1) n = 1; if (b < 0) return 0; *last = (uint64_t)b + (uint64_t)(n - 1) / div; return 1; }
++    if (!dw || dw->first < 0 || dw->count <= 0) return 0;
++    *last = (uint64_t)dw->first + (uint64_t)dw->count - 1; return 1;
++}
++static void vbuf_need(const nvn_refl *rf, const p_draw *dw, const p_draw_idx *di) {   // fills g_vbuf_need for the inputs the vertex shader reads
++    memset(g_vbuf_need, 0, sizeof g_vbuf_need);
++    for (int v = 0; rf && v < rf->nv; v++) {
++        int a = rf->v[v].nvn; if (a >= 16 || a >= S.nattr || !S.attr[a].fmt) continue;
++        int st = S.attr[a].stream, eb = vattr_bytes(S.attr[a].fmt); uint64_t last;
++        if (st >= 16 || !eb || !S.vbuf[st].address || !vstream_last(st, dw, di, &last)) continue;
++        uint64_t end = last * S.stream[st].stride + S.attr[a].offset + (uint64_t)eb;
++        if (end > S.vbuf[st].size && end > g_vbuf_need[st]) g_vbuf_need[st] = end;
++    }
++}
++static void vbuf_prepare(const nvn_refl *rf, const p_draw *dw, const p_draw_idx *di) {   // before the draw's render encoder: rf, dw / di the draw's vertex shader and record (NULL: no bounds)
+     static uint64_t sub, gen, sparse;
+     uint64_t pool_gen = atomic_load_explicit(&g_pool_gen, memory_order_acquire), sparse_gen = nvn_sparse_gen();
+     if (sub != g_sub_serial || gen != pool_gen || sparse != sparse_gen) nvn_hm_clear(&g_vbuf_unaligned, free);
+-    for (int s = 0; s < 16; s++) if (S.vbuf[s].address & 3) vbuf_unaligned(S.vbuf[s].address, S.vbuf[s].size, 1);
++    vbuf_need(rf, dw, di);
++    for (int s = 0; s < 16; s++) if ((S.vbuf[s].address & 3) || g_vbuf_need[s]) {
++        if (g_vbuf_need[s]) { static int once; if (!once++) MLOG("a draw reads %llu bytes of vertex stream %d, bound with %llu: bound as a copy with zeros past the bound range, as Maxwell's fetch reads them", (unsigned long long)g_vbuf_need[s], s, (unsigned long long)S.vbuf[s].size); }
++        vbuf_unaligned(S.vbuf[s].address, S.vbuf[s].size, g_vbuf_need[s], 1);
++    }
+     sub = g_sub_serial; gen = pool_gen; sparse = sparse_gen;
+ }
+ // Resolved guest streams are separate from the table cache: vconv_bind may overwrite a stream's table slot.
+@@ -4598,7 +4637,7 @@ static void bind_vbufs(id<MTL4RenderCommandEncoder> en) {
+     for (int s = 0; s < 16; s++) {
+         uint64_t addr = S.vbuf[s].address, gpu;
+         if (!addr) continue;
+-        if (addr & 3) { uint64_t c = vbuf_unaligned(addr, S.vbuf[s].size, 0); if (c) { cache[s].addr = 0; enc_r_vbuf(en, VB_SLOT(s), c); continue; } }   // not cached: the copy is per submission
++        if ((addr & 3) || g_vbuf_need[s]) { uint64_t c = vbuf_unaligned(addr, S.vbuf[s].size, g_vbuf_need[s], 0); if (c) { cache[s].addr = 0; enc_r_vbuf(en, VB_SLOT(s), c); continue; } }   // not cached: the copy is per submission
+         if (g_vbuf_cache && cache[s].addr == addr && cache[s].gen == gen) { gpu = cache[s].gpu; g_vbuf_reuse++; }
+         else {
+             void *mb; uint64_t mo; g_vbuf_resolve++;
+@@ -4623,7 +4662,9 @@ static void pull_layout_fill(pull_layout *Lp) {
+     pull_layout L; memset(&L, 0, sizeof L); uint32_t lo[16] = {0};
+     for (int st = 0; st < 16; st++) {
+         uint64_t addr = S.vbuf[st].address, gpu; void *mb; uint64_t mo;
+-        if (!addr || !mtl_gpu_addr(addr, 1, &mb, &mo, &gpu)) continue;
++        if (!addr) continue;
++        if (!g_vbuf_need[st] || !(gpu = vbuf_unaligned(addr, S.vbuf[st].size, g_vbuf_need[st], 0)))   // a stream the draw reads past: its copy padded with zeros (vbuf_need)
++            if (!mtl_gpu_addr(addr, 1, &mb, &mo, &gpu)) continue;
+         L.s[st].base = gpu & ~3ull; lo[st] = (uint32_t)(gpu & 3); L.s[st].stride = S.stream[st].stride; L.s[st].divisor = S.stream[st].divisor;
+     }
+     for (int a = 0; a < 16 && a < S.nattr; a++) {
+@@ -5032,7 +5073,7 @@ static void vc_stat(void) {   // every 3600 submissions
+     g_vc_stat = g_sub_serial; g_vc_conv = g_vc_whole = 0;
+ }
+ // Per submission, one conversion per (range, format, layout): KTGL draws the same mesh several times a frame (depth, shadow, G-buffer)
+-static struct { uint64_t addr, size, serial, v0, nv; uint32_t fmt, off, stride; uint64_t gpu; } g_vconv[64]; static int g_vconv_next;
++static struct { uint64_t addr, size, serial, v0, nv, nt; uint32_t fmt, off, stride; uint64_t gpu; } g_vconv[64]; static int g_vconv_next;
+ static void vconv_bind(id<MTL4RenderCommandEncoder> en, NvShader *vs, int tf, const p_draw *dw, const p_draw_idx *di) {   // tf: a transform feedback capture (no shadow inputs)
+     const nvn_refl *rf = &vs->rf; int slot = VCONV_SLOT0, vc = vc_on(), rk = -1, on = vin_on(vs, NULL, tf); int64_t rlo = 0, rhi = 0;   // rk: the draw's vertex range is known (-1 = not looked up yet)
+     vc_stat();
+@@ -5040,24 +5081,31 @@ static void vconv_bind(id<MTL4RenderCommandEncoder> en, NvShader *vs, int tf, co
+         if (!vconv_wanted(rf, v, NULL, on) || rf->v[v].nvn >= S.nattr) continue;
+         int a = rf->v[v].nvn, st = S.attr[a].stream, f = S.attr[a].fmt; uint32_t off = S.attr[a].offset, stride = st < 16 ? S.stream[st].stride : 0;
+         uint64_t addr = st < 16 ? S.vbuf[st].address : 0, size = st < 16 ? S.vbuf[st].size : 0, gpu = 0;
+-        uint64_t es = (uint64_t)vconv_size(f), v0 = 0, nv = stride == 0 ? 1 : size >= off + es ? (size - off - es) / stride + 1 : 0, whole = nv;
++        uint64_t es = (uint64_t)vconv_size(f), v0 = 0, nv = size >= off + es ? stride == 0 ? 1 : (size - off - es) / stride + 1 : 0, whole = nv;
+         if (vc && nv && stride && !S.stream[st].divisor) {   // per-vertex stream: only the vertices the draw reads
+             if (rk < 0) rk = vc_draw_range(dw, di, &rlo, &rhi);
+             int64_t a0 = rlo < 0 ? 0 : rlo, a1 = rhi < (int64_t)nv - 1 ? rhi : (int64_t)nv - 1;
+             if (rk && a0 <= a1) { v0 = (uint64_t)a0; nv = (uint64_t)(a1 - a0 + 1); }
+         }
+-        for (int i = 0; i < 64 && !gpu; i++) if (g_vconv[i].serial == g_sub_serial && g_vconv[i].addr == addr && g_vconv[i].size == size && g_vconv[i].v0 == v0 && g_vconv[i].nv == nv && g_vconv[i].fmt == (uint32_t)f && g_vconv[i].off == off && g_vconv[i].stride == stride) gpu = g_vconv[i].gpu;
++        // Elements past the bound range read as zeros on Maxwell (vbuf_need): the conversion goes on to the last one the draw reads with the conversion of zero bytes
++        uint64_t last, nt = nv; int lk = vstream_last(st, dw, di, &last);
++        if (!lk && rk > 0 && stride && !S.stream[st].divisor && rhi >= 0) { last = (uint64_t)rhi; lk = 1; }
++        if (lk && last + 1 > v0 + nv) nt = last + 1 - v0;
++        for (int i = 0; i < 64 && !gpu; i++) if (g_vconv[i].serial == g_sub_serial && g_vconv[i].addr == addr && g_vconv[i].size == size && g_vconv[i].v0 == v0 && g_vconv[i].nv == nv && g_vconv[i].nt == nt && g_vconv[i].fmt == (uint32_t)f && g_vconv[i].off == off && g_vconv[i].stride == stride) gpu = g_vconv[i].gpu;
+         if (!gpu && addr) {
+-            if (nv && nv * 16 <= (4u << 20)) {
+-                id<MTLBuffer> b; size_t o = arena_alloc((size_t)nv * 16, &b); vconv_fill(f, addr + off + v0 * stride, stride, nv, (float *)((uint8_t *)b.contents + o)); gpu = b.gpuAddress + o;
++            if (nt && nt * 16 <= (4u << 20)) {
++                id<MTLBuffer> b; size_t o = arena_alloc((size_t)nt * 16, &b); float *d = (float *)((uint8_t *)b.contents + o);
++                if (nv) vconv_fill(f, addr + off + v0 * stride, stride, nv, d);
++                if (nt > nv) { static const uint8_t zeros[16]; vconv_fill(f, (uint64_t)(uintptr_t)zeros, 0, nt - nv, d + 4 * nv); }
++                gpu = b.gpuAddress + o;
+                 g_vc_conv += nv; g_vc_whole += whole;
+-                int c = g_vconv_next++ % 64; g_vconv[c].addr = addr; g_vconv[c].size = size; g_vconv[c].v0 = v0; g_vconv[c].nv = nv; g_vconv[c].serial = g_sub_serial; g_vconv[c].fmt = (uint32_t)f; g_vconv[c].off = off; g_vconv[c].stride = stride; g_vconv[c].gpu = gpu;
++                int c = g_vconv_next++ % 64; g_vconv[c].addr = addr; g_vconv[c].size = size; g_vconv[c].v0 = v0; g_vconv[c].nv = nv; g_vconv[c].nt = nt; g_vconv[c].serial = g_sub_serial; g_vconv[c].fmt = (uint32_t)f; g_vconv[c].off = off; g_vconv[c].stride = stride; g_vconv[c].gpu = gpu;
+                 int ib, is;
+                 if (vconv_i2f(f, &ib, &is)) { static int once; if (!once++) MLOG("vertex attribute format %#x (integers read as floats, which Metal has no vertex format for): converted on the CPU at replay and bound separately", f); }
+                 else if (rf->v[v].ct == NVN_CT_FLOAT) RED_ONCE(99, "vertex attribute format %#x (8 / 16-bit integer) feeds a float input: the 32-bit register values Maxwell's fetch makes are bound as float bit patterns, converted on the CPU at replay", f);
+                 else if (vconv_ncomp(f)) RED_ONCE(89, "vertex attribute format %#x feeds an integer input: converted to float32 bit patterns on the CPU at replay and bound separately (the conversion Maxwell does on vertex fetch)", f);
+                 else RED_ONCE(96, "vertex attribute format %#x (8 / 16-bit integer) feeds an integer input of the opposite signedness: extended to 32 bits with the format's own signedness on the CPU at replay and bound separately", f);
+-            } else if (nv) RED_ONCE(90, "vertex attribute conversion: a range of %llu vertices exceeds the per-frame staging (format %#x)", (unsigned long long)nv, f);
++            } else if (nt) RED_ONCE(90, "vertex attribute conversion: a range of %llu vertices exceeds the per-frame staging (format %#x)", (unsigned long long)nt, f);
+         }
+         if (gpu) enc_r_vbuf(en, (NSUInteger)slot, gpu - v0 * 16);   // vertex id v0 reads the first converted element
+         slot++;
+@@ -6657,12 +6705,14 @@ static int img_atomic_ok(id<MTLTexture> t, const nvn_rbind *b) {
+ static uint64_t g_draw_seq, g_fb_seq, g_fb_count; static int g_fb_n, g_fb_rebind;
+ static __unsafe_unretained id<MTLTexture> g_fb_src[4]; static __strong id<MTLTexture> g_fb_use[4]; static uint64_t g_fb_rid[4];
+ static uint8_t g_args_dirty[6] = {1, 1, 1, 1, 1, 1};
+-static uint64_t g_args_reg_seen, g_args_dirty_seen;
++static uint64_t g_args_reg_seen, g_args_dirty_seen, g_args_ser_seen;
+ static inline void args_dirty_all(void) { memset(g_args_dirty, 1, sizeof g_args_dirty); }
++// A reused block holds resource IDs: it is stale after a registration change, a guest write, or a serial's Metal object replaced (g_ser_gen: an upgraded or re-uploaded packaged texture,
++// an alias taken or evicted) with the same program and bindings (MacNativeGames e49aa55)
+ static inline void args_sync_dirty(void) {
+-    uint64_t reg = g_reg_gen, dirty = nvn_dirty_now();
+-    if (reg != g_args_reg_seen || dirty != g_args_dirty_seen) {
+-        g_args_reg_seen = reg; g_args_dirty_seen = dirty; args_dirty_all();
++    uint64_t reg = g_reg_gen, dirty = nvn_dirty_now(), ser = g_ser_gen;
++    if (reg != g_args_reg_seen || dirty != g_args_dirty_seen || ser != g_args_ser_seen) {
++        g_args_reg_seen = reg; g_args_dirty_seen = dirty; g_args_ser_seen = ser; args_dirty_all();
+     }
+ }
+ static NSUInteger g_args_mesh;   // nonzero: geometry-stage arguments go to this slot of the vertex table, which the mesh stage shares (geo_mesh_draw)
+@@ -9203,7 +9253,7 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
+     if (g_enc && g_pass.layered != g_rp_layered) rp_end();   // a layered pass only for layer-writing vertex shaders (see rp_begin_ex)
+     if (g_enc && g_sm_pass && draw_samples_rt(pr)) { PD("M %llu a draw in the slice-merged pass samples its attachment; split here", g_stat_pass); rp_end(); }
+     if (!g_enc && mode == 0 && !g_rp_layered && !defer_q_draw && g_exec_next && !tbdr_on() && !g_geo_program && sm_on()) sm_plan(pr);
+-    vbuf_prepare();   // an unaligned GPU-written stream needs its ordered copy before the render encoder
++    vbuf_prepare(pr->sh[0] ? &pr->sh[0]->rf : NULL, dw, di);   // an unaligned GPU-written stream, or one the draw reads past, needs its ordered copy before the render encoder
+     id<MTLRenderCommandEncoder> en = rp_begin_ex(mode);
+     g_rp_layered = 0; g_sm_plan.on = 0;
+     g_fd_dw = NULL; g_fd_di = NULL;
+@@ -9213,7 +9263,7 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
+         // A replayed draw may have ended Q's encoder to align a GPU-written stream. Restore this draw's streams and encoder.
+         g_rp_layered = pr->sh[0] && pr->sh[0]->layer_out;
+         if (g_enc && g_pass.layered != g_rp_layered) rp_end();
+-        vbuf_prepare(); g_fd_dw = dw; g_fd_di = di; en = rp_begin_ex(mode); g_fd_dw = NULL; g_fd_di = NULL; g_rp_layered = 0;
++        vbuf_prepare(pr->sh[0] ? &pr->sh[0]->rf : NULL, dw, di); g_fd_dw = dw; g_fd_di = di; en = rp_begin_ex(mode); g_fd_dw = NULL; g_fd_di = NULL; g_rp_layered = 0;
+         if (!en) return;
+     }
+     if (skip_d) { g_stat_ds_omit++; if (mode == 3) g_stat_s_only++; else if (mode == 4) g_stat_d_only++; }
+@@ -9280,6 +9330,14 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
+     g_kd_force = kd_draw(pr, dw, di);
+     if (pr->sh[0]) encode_args(en, pr->sh[0], 0, 1);
+     if (pr->sh[1] && !S.rast_discard) encode_args(en, pr->sh[1], 1, 0);
++    // Binding a texture view can upgrade its texture first (tex_upgrade: a format view of a texture made without PixelFormatView), and the upgrade's copy goes through blit(),
++    // which ends the render pass: en is then an ended encoder, and drawing on it crashed in the driver (AGX reads its released context: Need for Speed: Hot Pursuit Remastered,
++    // a 4096x1024 texture sampled through another format's view at its first loading screen). The texture is upgraded now, so the draw is encoded again in a new pass
++    if (g_enc != en) {
++        static int again; if (again) { RED_ONCE(130, "binding a draw's arguments ended its render pass twice; draw skipped"); return; }
++        PD("M %llu binding the draw's arguments ended the render pass (texture upgrade); encoded again", g_stat_pass);
++        again = 1; draw(dw, di); again = 0; return;
++    }
+     // Parameter binding captures the actual resources under the registry lock; if the version changed between the eligibility check and the binding, split and retry before any GPU draw.
+     if (g_rt_range_active && (g_pass.reg_gen != g_reg_gen || g_pass.ser_gen != g_ser_gen || g_pass.range_dirty != nvn_dirty_now())) { rp_end(); draw(dw, di); return; }
+     int prim = dw ? dw->prim : di->prim;
+diff --git a/dm/gfx/tests/run_nvn_resource_rebind_native.py b/dm/gfx/tests/run_nvn_resource_rebind_native.py
+new file mode 100644
+index 0000000..487c36a
+--- /dev/null
++++ b/dm/gfx/tests/run_nvn_resource_rebind_native.py
+@@ -0,0 +1,150 @@
++#!/usr/bin/env python3
++"""Execute production argument invalidation and ended-encoder recovery in C.
++
++The fixture supplies fake encoder identities; it does not validate Metal texture
++upgrades or GPU execution. Apple CI still compiles the real API and the full host.
++"""
++from __future__ import annotations
++
++import os
++import re
++import subprocess
++import tempfile
++from pathlib import Path
++
++from run_nvn_sbw_native import _compiler, _extract_function
++
++ROOT = Path(__file__).resolve().parents[3]
++
++
++def fixture() -> str:
++    source = (ROOT / "dm/gfx/nvn/nvn_mtl.m").read_text(encoding="utf-8")
++    globals_ = []
++    for pattern in (
++        r"(?m)^static uint8_t g_args_dirty\[6\][^\n]*",
++        r"(?m)^static uint64_t g_args_reg_seen[^\n]*",
++        r"(?m)^static int g_red_once\[\d+\];",
++    ):
++        found = re.search(pattern, source)
++        if not found:
++            raise RuntimeError("production resource declaration missing: " + pattern)
++        globals_.append(found.group())
++    count = int(re.search(r"static int g_red_once\[(\d+)\]", source).group(1))
++    indices = [int(i) for i in re.findall(r"\bRED_ONCE\(\s*(\d+)\s*,", source)]
++    if max(indices) >= count:
++        raise RuntimeError("production RED_ONCE index is outside its storage")
++    block = re.search(r"    if \(g_enc != en\) \{\n.*?^    \}", source, re.M | re.S)
++    if not block:
++        raise RuntimeError("production encoder recovery block is missing")
++    lod = re.search(r"d\.lodBias = (.*?);", source)
++    if not lod:
++        raise RuntimeError("production sampler LOD-bias assignment is missing")
++    signature = "if (@available(macOS 26.0, iOS 26.0, tvOS 26.0, *))"
++    if signature not in source[source.index("static id<MTLSamplerState> samp_by_id"):source.index("static inline __attribute__((always_inline)) void *samp_fast")]:
++        raise RuntimeError("the Metal 26 LOD-bias property must have an availability guard")
++    return r'''
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#include <math.h>
++static uint64_t g_reg_gen, g_ser_gen, dirty_gen;
++static uint64_t nvn_dirty_now(void) { return dirty_gen; }
++static int cases, failed, retries, skipped, encoded, binds, upgrades, next_encoder;
++static uintptr_t g_enc;
++static unsigned long long g_stat_pass;
++#define CHECK(label, want, got) do { uint64_t w = (want), g = (got); cases++; \
++    if (w != g) { failed++; fprintf(stderr, "%s: expected %llu got %llu\n", label, \
++        (unsigned long long)w, (unsigned long long)g); } } while (0)
++#define RED_ONCE(k, ...) do { g_red_once[k]++; skipped++; } while (0)
++#define PD(...) do { retries++; } while (0)
++typedef struct { int unused; } p_draw;
++typedef struct { int unused; } p_draw_idx;
++''' + "\n".join(globals_) + "\n" + "\n".join(
++        _extract_function(source, name) for name in ("args_dirty_all", "args_sync_dirty")
++    ) + "\nstatic float lod_bias(float value) { struct { float lod_bias; } p = {value}; return " + lod.group(1) + "; }\n" + r'''
++// Supply a new encoder and simulate argument binding ending it. The recovery
++// block itself is extracted verbatim from production draw_, including its guard.
++static void draw(const p_draw *dw, const p_draw_idx *di) {
++    if (!g_enc) g_enc = (uintptr_t)++next_encoder;
++    uintptr_t en = g_enc;
++    binds++;
++    if (upgrades) { upgrades--; g_enc = 0; }
++''' + block.group() + r'''
++    CHECK("a draw uses the current live encoder", g_enc, en);
++    encoded++;
++}
++static void clear_dirty(void) { memset(g_args_dirty, 0, sizeof g_args_dirty); }
++static void check_dirty(int want, const char *name) {
++    for (unsigned i = 0; i < sizeof g_args_dirty; i++) CHECK(name, want, g_args_dirty[i]);
++}
++static void test_generation_invalidation(void) {
++    clear_dirty(); args_sync_dirty(); check_dirty(0, "unchanged generations reuse arguments");
++    g_reg_gen++; args_sync_dirty(); check_dirty(1, "registration change invalidates all stages");
++    clear_dirty(); args_sync_dirty(); check_dirty(0, "stable registration can reuse again");
++    dirty_gen++; args_sync_dirty(); check_dirty(1, "guest write invalidates all stages");
++    clear_dirty(); args_sync_dirty(); check_dirty(0, "stable dirty generation can reuse again");
++    // The missing case: same binding/program IDs, but a replaced Metal object.
++    g_ser_gen++; args_sync_dirty(); check_dirty(1, "replacement texture invalidates all stages");
++    CHECK("serial generation is remembered", g_ser_gen, g_args_ser_seen);
++    clear_dirty(); args_sync_dirty(); check_dirty(0, "stable replacement can reuse again");
++    g_reg_gen++; g_ser_gen++; dirty_gen++;
++    args_sync_dirty(); check_dirty(1, "simultaneous generation changes invalidate");
++    clear_dirty(); args_sync_dirty(); check_dirty(0, "simultaneous changes settle to reuse");
++}
++static void test_encoder_recovery(void) {
++    p_draw dw = {0}; p_draw_idx di = {0};
++    draw(&dw, NULL);
++    CHECK("normal draw: one bind", 1, binds);
++    CHECK("normal draw: no retry", 0, retries);
++    CHECK("normal draw: emitted once", 1, encoded);
++    upgrades = 1; g_enc = 0;
++    draw(NULL, &di);
++    CHECK("one texture upgrade: rebound once", 3, binds);
++    CHECK("one texture upgrade: one retry", 1, retries);
++    CHECK("one texture upgrade: emitted once", 2, encoded);
++    CHECK("one texture upgrade: not skipped", 0, skipped);
++    upgrades = 2; g_enc = 0;
++    draw(&dw, NULL);
++    CHECK("repeated encoder end: only two attempts", 5, binds);
++    CHECK("repeated encoder end: bounded retry", 2, retries);
++    CHECK("repeated encoder end: skipped", 1, skipped);
++    CHECK("repeated encoder end: no ended draw", 2, encoded);
++    CHECK("bounded failure records its diagnostic slot", 1, g_red_once[130]);
++    upgrades = 1; g_enc = 0;
++    draw(&dw, NULL);
++    CHECK("next draw resets recovery guard", 3, retries);
++    CHECK("next draw can be emitted", 3, encoded);
++    CHECK("next draw has no additional skip", 1, skipped);
++}
++static void test_sampler_bias(void) {
++    CHECK("large negative bias clamps", 1, lod_bias(-100) == -16.0f);
++    CHECK("negative bound unchanged", 1, lod_bias(-16) == -16.0f);
++    CHECK("fractional negative bias unchanged", 1, lod_bias(-1.25f) == -1.25f);
++    CHECK("zero bias unchanged", 1, lod_bias(0) == 0.0f);
++    CHECK("fractional positive bias unchanged", 1, lod_bias(2.5f) == 2.5f);
++    CHECK("positive bound unchanged", 1, lod_bias(15.99f) == 15.99f);
++    CHECK("large positive bias clamps", 1, lod_bias(100) == 15.99f);
++}
++int main(void) {
++    test_generation_invalidation();
++    test_encoder_recovery();
++    test_sampler_bias();
++    printf("RESOURCE_REBIND_NATIVE cases=%d failed=%d\n", cases, failed);
++    return failed != 0;
++}
++'''
++
++
++def main() -> int:
++    with tempfile.TemporaryDirectory(prefix="nvn-resource-rebind-") as td:
++        path = Path(td)
++        source = path / "rebind.c"
++        binary = path / ("rebind.exe" if os.name == "nt" else "rebind")
++        source.write_text(fixture(), encoding="utf-8", newline="\n")
++        subprocess.run(_compiler() + ["-std=c11", "-O2", "-Wall", "-Wextra",
++            "-Wno-unused-variable", str(source), "-o", str(binary)], check=True)
++        return subprocess.run([str(binary)]).returncode
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/dm/gfx/tests/run_nvn_vbuf_bounds_native.py b/dm/gfx/tests/run_nvn_vbuf_bounds_native.py
+new file mode 100644
+index 0000000..9068e2d
+--- /dev/null
++++ b/dm/gfx/tests/run_nvn_vbuf_bounds_native.py
+@@ -0,0 +1,136 @@
++#!/usr/bin/env python3
++"""Exercise the production vertex-bound arithmetic without requiring a Metal GPU.
++
++The GPU copy, ordering and pulling paths remain covered by t_vbuf and t_pull.
++"""
++from __future__ import annotations
++
++import os
++import re
++import subprocess
++import sys
++import tempfile
++from pathlib import Path
++
++from run_nvn_sbw_native import _compiler, _extract_function
++
++ROOT = Path(__file__).resolve().parents[3]
++
++
++def fixture() -> str:
++    source = (ROOT / "dm/gfx/nvn/nvn_mtl.m").read_text(encoding="utf-8")
++    obj = (ROOT / "dm/gfx/nvn/nvn_obj.h").read_text(encoding="utf-8")
++    declarations = []
++    for name in ("va_st", "vs_st", "p_draw", "p_draw_idx"):
++        found = re.search(r"(?m)^typedef struct \{[^\n]+\} " + name + r";", obj)
++        if not found:
++            raise RuntimeError("production declaration missing: " + name)
++        declarations.append(found.group())
++    functions = "\n".join(_extract_function(source, name) for name in ("vattr_bytes", "vstream_last", "vbuf_need"))
++    return r'''
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#include "nvn_refl.h"
++''' + "\n".join(declarations) + r'''
++static struct { va_st attr[16]; int nattr; vs_st stream[16];
++    struct { uint64_t address, size; } vbuf[16]; } S;
++static uint64_t g_vbuf_need[16];
++static int cases, failed;
++#define CHECK(label, want, got) do { uint64_t w = (want), g = (got); cases++; \
++    if (w != g) { failed++; fprintf(stderr, "%s: expected %llu got %llu\n", label, \
++        (unsigned long long)w, (unsigned long long)g); } } while (0)
++''' + functions + r'''
++int main(void) {
++    // Format widths independently specified by the NVN component classes.
++    const int widths[12] = {1,1,1,1,2,2,2,2,2,4,4,4};
++    for (int n = 1; n <= 4; n++) for (int c = 0; c < 12; c++)
++        CHECK("component format byte width", n * widths[c], vattr_bytes((n-1)*12+c+1));
++    CHECK("RGB32F", 12, vattr_bytes(0x22));
++    CHECK("packed 10:10:10:2", 4, vattr_bytes(0x3d));
++    CHECK("packed 11:11:10", 4, vattr_bytes(0x3f));
++    CHECK("BGRA8", 4, vattr_bytes(0x9a));
++    CHECK("invalid zero", 0, vattr_bytes(0));
++    CHECK("invalid high", 0, vattr_bytes(0xff));
++    nvn_refl rf = {0}; rf.nv = 1; rf.v[0].nvn = 0;
++    S.nattr = 1; S.attr[0] = (va_st){.fmt = 0x22, .stream = 0};
++    S.stream[0].stride = 12; S.vbuf[0].address = 0x1000; S.vbuf[0].size = 36;
++    p_draw dw = {.count = 9, .instances = 1};
++    vbuf_need(&rf, &dw, NULL);
++    CHECK("Odyssey: bound triangle followed by six zero vertices", 108, g_vbuf_need[0]);
++    dw.count = 3; vbuf_need(&rf, &dw, NULL);
++    CHECK("exactly in bound: no copy", 0, g_vbuf_need[0]);
++    dw.first = 2; dw.count = 2; vbuf_need(&rf, &dw, NULL);
++    CHECK("first vertex contributes to end", 48, g_vbuf_need[0]);
++    S.attr[0].offset = 4; vbuf_need(&rf, &dw, NULL);
++    CHECK("attribute offset contributes to end", 52, g_vbuf_need[0]);
++    S.attr[0].offset = 0;
++    dw.first = -1; vbuf_need(&rf, &dw, NULL);
++    CHECK("negative first is unknown", 0, g_vbuf_need[0]);
++    dw.first = 0; dw.count = 0; vbuf_need(&rf, &dw, NULL);
++    CHECK("empty vertex draw is unknown", 0, g_vbuf_need[0]);
++    dw.count = 9; dw.ind = 1; vbuf_need(&rf, &dw, NULL);
++    CHECK("indirect vertex range remains unbounded", 0, g_vbuf_need[0]);
++    dw.ind = 0; dw.mdi_cnt = 1; vbuf_need(&rf, &dw, NULL);
++    CHECK("indirect multi draw remains unbounded", 0, g_vbuf_need[0]);
++    dw.mdi_cnt = 0; S.stream[0].stride = 0; S.vbuf[0].size = 8;
++    vbuf_need(&rf, &dw, NULL);
++    CHECK("constant vertex stream needs one full element", 12, g_vbuf_need[0]);
++    S.stream[0].stride = 12; S.stream[0].divisor = 2;
++    dw.instances = 5; dw.base_instance = 3; S.vbuf[0].size = 36;
++    vbuf_need(&rf, &dw, NULL);
++    CHECK("instance divisor and base instance", 72, g_vbuf_need[0]);
++    dw.instances = 0; vbuf_need(&rf, &dw, NULL);
++    CHECK("zero instances follows host's one-instance convention", 48, g_vbuf_need[0]);
++    dw.base_instance = -1; vbuf_need(&rf, &dw, NULL);
++    CHECK("negative base instance is unknown", 0, g_vbuf_need[0]);
++    p_draw_idx di = {.count = 3, .instances = 2, .base_instance = 3};
++    vbuf_need(&rf, NULL, &di);
++    CHECK("indexed per-instance input can be bounded", 48, g_vbuf_need[0]);
++    S.stream[0].divisor = 0; vbuf_need(&rf, NULL, &di);
++    CHECK("indexed per-vertex range stays unknown", 0, g_vbuf_need[0]);
++    dw = (p_draw){.count = 9, .instances = 1};
++    S.vbuf[0].size = 0; vbuf_need(&rf, &dw, NULL);
++    CHECK("zero bound size is entirely zero padded", 108, g_vbuf_need[0]);
++    S.vbuf[0].address = 0; vbuf_need(&rf, &dw, NULL);
++    CHECK("unbound address is skipped", 0, g_vbuf_need[0]);
++    S.vbuf[0].address = 0x1000; S.attr[0].fmt = 0;
++    vbuf_need(&rf, &dw, NULL);
++    CHECK("disabled attribute is skipped", 0, g_vbuf_need[0]);
++    S.attr[0].fmt = 0x22; S.attr[0].stream = 31;
++    vbuf_need(&rf, &dw, NULL);
++    CHECK("invalid stream is skipped", 0, g_vbuf_need[0]);
++    S.attr[0].stream = 0; rf.v[0].nvn = 31;
++    vbuf_need(&rf, &dw, NULL);
++    CHECK("invalid attribute is skipped", 0, g_vbuf_need[0]);
++    rf.v[0].nvn = 0; rf.nv = 2; rf.v[1].nvn = 1; S.nattr = 2;
++    S.attr[1] = (va_st){.fmt = 0x22, .offset = 16, .stream = 0};
++    vbuf_need(&rf, &dw, NULL);
++    CHECK("multiple attributes use furthest byte in stream", 124, g_vbuf_need[0]);
++    S.attr[1].stream = 1; S.stream[1].stride = 16;
++    S.vbuf[1].address = 0x2000; S.vbuf[1].size = 16;
++    vbuf_need(&rf, &dw, NULL);
++    CHECK("first stream length independent", 108, g_vbuf_need[0]);
++    CHECK("second stream length independent", 156, g_vbuf_need[1]);
++    vbuf_need(NULL, NULL, NULL);
++    CHECK("null reflection resets stale first length", 0, g_vbuf_need[0]);
++    CHECK("null reflection resets stale second length", 0, g_vbuf_need[1]);
++    printf("VBUF_BOUNDS_NATIVE cases=%d failed=%d\n", cases, failed);
++    return failed != 0;
++}
++'''
++
++
++def main() -> int:
++    with tempfile.TemporaryDirectory(prefix="nvn-vbuf-bounds-") as td:
++        path = Path(td)
++        source = path / "bounds.c"
++        binary = path / ("bounds.exe" if os.name == "nt" else "bounds")
++        source.write_text(fixture(), encoding="utf-8", newline="\n")
++        subprocess.run(_compiler() + ["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
++            "-I", str(ROOT / "dm/gfx/nvn"), str(source), "-o", str(binary)], check=True)
++        return subprocess.run([str(binary)]).returncode
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/dm/gfx/tests/t_pull.m b/dm/gfx/tests/t_pull.m
+index 36df678..d930651 100644
+--- a/dm/gfx/tests/t_pull.m
++++ b/dm/gfx/tests/t_pull.m
+@@ -84,6 +84,7 @@ int main(void) { @autoreleasepool {
+         if (mf == MTLVertexFormatInvalid) continue;   // a format the host does not know: no fetch either way
+         nfmt++;
+         int es = elem_size(f), ic = int_class(mf);
++        EXPECT("vattr_bytes (the bound-range check's element size) matches Metal's element", es, vattr_bytes(f));
+         int k8 = !i2f && (mf == MTLVertexFormatUCharNormalized || mf == MTLVertexFormatCharNormalized || mf == MTLVertexFormatUChar || mf == MTLVertexFormatChar || mf == MTLVertexFormatUChar2Normalized ||
+                  mf == MTLVertexFormatChar2Normalized || mf == MTLVertexFormatUChar2 || mf == MTLVertexFormatChar2 || mf == MTLVertexFormatUChar3Normalized || mf == MTLVertexFormatChar3Normalized ||
+                  mf == MTLVertexFormatUChar3 || mf == MTLVertexFormatChar3 || mf == MTLVertexFormatUChar4Normalized || mf == MTLVertexFormatChar4Normalized || mf == MTLVertexFormatUChar4 ||
+diff --git a/dm/gfx/tests/t_vbuf.m b/dm/gfx/tests/t_vbuf.m
+index 4f9e59c..c241424 100644
+--- a/dm/gfx/tests/t_vbuf.m
++++ b/dm/gfx/tests/t_vbuf.m
+@@ -1,5 +1,6 @@
+ // Real Metal readback: cached stream bindings survive helper overwrites, encoder/submit changes and pool replacement.
+ // Byte-aligned streams preserve their bytes and GPU write ordering (Arkham Knight's Scaleform streams sit at addresses 2 mod 4).
++// A draw that reads past a stream's bound size reads zeros there, not the pool's next bytes (Super Mario Odyssey's 9-vertex draw from a 3-vertex stream).
+ #include "../nvn/nvn_mtl.m"
+ uint64_t g_t0_ns;
+ int dm_guest_as_contains(uintptr_t address) { (void)address; return 0; }   // Tests use host-thread stacks.
+@@ -11,27 +12,28 @@ uint64_t now_ns(void) { return bp_now(); }
+ static int checks, failed;
+ #define EXPECT(name, want, got) do { uint64_t w = (want), g = (got); checks++; if (w != g) { fprintf(stderr, "%s: expected %llu, got %llu\n", name, (unsigned long long)w, (unsigned long long)g); failed++; } } while (0)
+ 
+-static id<MTLRenderPipelineState> pipeline(void) {
++static id<MTLRenderPipelineState> pipeline(NSString *fn) {   // v: the first word of streams 0, 14, 15 and the zero buffer; w: words 0, 3, 6 and 8 of stream 0 (vertices 0-2 of 12 bytes)
+     NSError *err = nil;
+     id<MTLLibrary> lib = [g_dev newLibraryWithSource:@"#include <metal_stdlib>\nusing namespace metal;\n"
+         "vertex void v(const device uint *a[[buffer(16)]], const device uint *b[[buffer(14)]],"
+         "const device uint *c[[buffer(15)]], const device uint *z[[buffer(30)]], device uint4 *o[[buffer(8)]])"
+-        "{ *o=uint4(*a,*b,*c,*z); }" options:nil error:&err];
++        "{ *o=uint4(*a,*b,*c,*z); }\n"
++        "vertex void w(const device uint *a[[buffer(16)]], device uint4 *o[[buffer(8)]]) { *o=uint4(a[0],a[3],a[6],a[8]); }" options:nil error:&err];
+     if (!lib) { fprintf(stderr, "%s\n", err.localizedDescription.UTF8String); abort(); }
+     MTLRenderPipelineDescriptor *d = [MTLRenderPipelineDescriptor new];
+-    d.vertexFunction = [lib newFunctionWithName:@"v"]; d.rasterizationEnabled = NO;
++    d.vertexFunction = [lib newFunctionWithName:fn]; d.rasterizationEnabled = NO;
+     id<MTLRenderPipelineState> ps = [g_dev newRenderPipelineStateWithDescriptor:d error:&err];
+     if (!ps) { fprintf(stderr, "%s\n", err.localizedDescription.UTF8String); abort(); }
+     return ps;
+ }
+-static id<MTL4RenderCommandEncoder> encoder(id<MTLRenderPipelineState> ps) {
+-    vbuf_prepare();
++static id<MTL4RenderCommandEncoder> encoder_prepared(id<MTLRenderPipelineState> ps) {   // after the caller's vbuf_prepare
+     ubd_land_compute();
+     if (g_blit) { enc_b_end(g_blit); g_blit = nil; }
+     MTL4RenderPassDescriptor *d = [MTL4RenderPassDescriptor new];
+     d.renderTargetWidth = d.renderTargetHeight = d.defaultRasterSampleCount = 1;
+     id<MTL4RenderCommandEncoder> en = enc_r_begin(d); enc_r_pso(en, ps); return en;
+ }
++static id<MTL4RenderCommandEncoder> encoder(id<MTLRenderPipelineState> ps) { vbuf_prepare(NULL, NULL, NULL); return encoder_prepared(ps); }
+ static void capture(id<MTL4RenderCommandEncoder> en, id<MTLBuffer> out, unsigned row) {
+     enc_r_vbuf(en, TF_SLOT, out.gpuAddress + row * 16); enc_r_draw(en, MTLPrimitiveTypePoint, 0, 1);
+ }
+@@ -40,7 +42,7 @@ static void finish(void) {
+     EXPECT("no GPU error", 0, mtl_last_commit_error());
+ }
+ int main(void) { @autoreleasepool {
+-    mtl_init(); id<MTLRenderPipelineState> ps = pipeline();
++    mtl_init(); id<MTLRenderPipelineState> ps = pipeline(@"v"), tail = pipeline(@"w");
+     size_t size = (size_t)getpagesize(); uint32_t *mem;
+     if (posix_memalign((void **)&mem, size, size)) abort();
+     memset(mem, 0, size); mem[0] = 11; mem[1] = 22; mem[2] = 33; mem[3] = 99;
+@@ -147,6 +149,37 @@ int main(void) { @autoreleasepool {
+         EXPECT("stream 15 readback", 33, pixels[row * 4 + 2]);
+         EXPECT("zero buffer readback", 0, pixels[row * 4 + 3]);
+     }
++    // A 3-vertex draw of 12-byte RGB32F elements from a stream bound with 12 bytes: vertices 1 and 2 read zeros, though the pool holds other words there,
++    // through the vertex table and the pulling layout alike; a draw inside the range binds the stream itself
++    uint32_t *tri = mem + 128; for (int i = 0; i < 9; i++) tri[i] = 0x1000u + (uint32_t)i;
++    nvn_refl rf; memset(&rf, 0, sizeof rf); rf.nv = 1; rf.v[0].nvn = 0;
++    S.nattr = 1; S.attr[0] = (va_st){.fmt = 0x22, .offset = 0, .stream = 0}; S.stream[0].stride = 12; S.stream[0].divisor = 0;
++    S.vbuf[0].address = (uint64_t)tri; S.vbuf[0].size = 12;
++    p_draw dw = {.prim = 4, .first = 0, .count = 3, .instances = 1};
++    mtl_sub_begin(); copies = g_vbuf_copies; vbuf_prepare(&rf, &dw, NULL);
++    EXPECT("bytes the draw reads past the bound size", 36, g_vbuf_need[0]);
++    en = encoder_prepared(tail); bind_vbufs(en); capture(en, out, 22);
++    pull_layout L; pull_layout_fill(&L);
++    EXPECT("pulling layout reads the padded copy", g_vt_addr[VB_SLOT(0)] & ~3ull, L.s[0].base);
++    enc_r_end(en); finish();
++    EXPECT("padded stream copied once", 1, g_vbuf_copies - copies);
++    EXPECT("vertex 0 inside the bound range", 0x1000u, ((const uint32_t *)out.contents)[22 * 4]);
++    EXPECT("vertex 1 past the bound range reads zero", 0, ((const uint32_t *)out.contents)[22 * 4 + 1]);
++    EXPECT("vertex 2 past the bound range reads zero", 0, ((const uint32_t *)out.contents)[22 * 4 + 2]);
++    EXPECT("vertex 2's last word reads zero", 0, ((const uint32_t *)out.contents)[22 * 4 + 3]);
++    dw.count = 1; mtl_sub_begin(); copies = g_vbuf_copies; vbuf_prepare(&rf, &dw, NULL);
++    EXPECT("a draw inside the bound range needs no copy", 0, g_vbuf_need[0]);
++    en = encoder_prepared(tail); bind_vbufs(en); capture(en, out, 23); enc_r_end(en); finish();
++    EXPECT("in-range stream bound as it is", 0, g_vbuf_copies - copies);
++    EXPECT("in-range stream reads the pool", 0x1003u, ((const uint32_t *)out.contents)[23 * 4 + 1]);
++    S.stream[0].divisor = 1; p_draw inst = {.prim = 4, .first = 0, .count = 1, .instances = 2, .base_instance = 1};
++    vbuf_prepare(&rf, &inst, NULL); EXPECT("per-instance stream: base instance + last instance", 36, g_vbuf_need[0]);
++    p_draw_idx ix = {.prim = 4, .itype = 1, .count = 3, .instances = 2, .base_instance = 0, .ibuf = (uint64_t)mem};
++    vbuf_prepare(&rf, NULL, &ix); EXPECT("indexed draw: per-instance stream bounded", 24, g_vbuf_need[0]);
++    S.stream[0].divisor = 0; vbuf_prepare(&rf, NULL, &ix); EXPECT("indexed draw: per-vertex stream not scanned", 0, g_vbuf_need[0]);
++    dw.count = 3; dw.ind = (uint64_t)mem; vbuf_prepare(&rf, &dw, NULL); EXPECT("indirect draw: not known on the CPU", 0, g_vbuf_need[0]);
++    S.stream[0].stride = 0; dw.ind = 0; S.vbuf[0].size = 8; vbuf_prepare(&rf, &dw, NULL); EXPECT("stride 0: one element", 12, g_vbuf_need[0]);
++    S.nattr = 0; S.stream[0].stride = 0; vbuf_prepare(NULL, NULL, NULL);
+     // CPU-only binding microbenchmark, after GPU validation; reports overhead, not game frame time.
+     for (int mode = 0; mode < 2; mode++) {
+         g_vbuf_cache = mode; bind_vbufs(nil); uint64_t start = bp_now(), r = g_vbuf_resolve, w = g_vbuf_set;
+diff --git a/dm/gfx/tests/test_nvn_resource_rebind.py b/dm/gfx/tests/test_nvn_resource_rebind.py
+new file mode 100644
+index 0000000..b9858fe
+--- /dev/null
++++ b/dm/gfx/tests/test_nvn_resource_rebind.py
+@@ -0,0 +1,20 @@
++"""Native production-code checks for argument cache and encoder recovery."""
++from pathlib import Path
++import subprocess
++import sys
++import unittest
++
++
++class ResourceRebind(unittest.TestCase):
++    def test_production_resource_helpers(self):
++        result = subprocess.run(
++            [sys.executable, str(Path(__file__).with_name("run_nvn_resource_rebind_native.py"))],
++            capture_output=True, text=True, encoding="utf-8", timeout=120,
++        )
++        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++        self.assertIn("RESOURCE_REBIND_NATIVE cases=", result.stdout)
++        self.assertIn("failed=0", result.stdout)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/dm/gfx/tests/test_nvn_vbuf_bounds.py b/dm/gfx/tests/test_nvn_vbuf_bounds.py
+new file mode 100644
+index 0000000..d1ab57f
+--- /dev/null
++++ b/dm/gfx/tests/test_nvn_vbuf_bounds.py
+@@ -0,0 +1,20 @@
++"""Native checks for the production NVN vertex-bound arithmetic."""
++from pathlib import Path
++import subprocess
++import sys
++import unittest
++
++
++class VertexBounds(unittest.TestCase):
++    def test_production_bounds_helpers(self):
++        result = subprocess.run(
++            [sys.executable, str(Path(__file__).with_name("run_nvn_vbuf_bounds_native.py"))],
++            capture_output=True, text=True, encoding="utf-8", timeout=120,
++        )
++        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++        self.assertIn("VBUF_BOUNDS_NATIVE cases=", result.stdout)
++        self.assertIn("failed=0", result.stdout)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/dm/gfx/tools/dmsh_chain.lock b/dm/gfx/tools/dmsh_chain.lock
+index a379d39..6b8eaee 100644
+--- a/dm/gfx/tools/dmsh_chain.lock
++++ b/dm/gfx/tools/dmsh_chain.lock
+@@ -1,8 +1,8 @@
+ # Translation chain tool fingerprints (written by dmsh_chain.py --update-lock; regenerate after changing tools and commit it)
+-dmsh_xlate.dll	dbc483247a4cb22d
+-Ryujinx.Graphics.Shader.dll	ec7846f7f71a9eba
+-Ryujinx.Common.dll	971cd2b48bf2eccf
++dmsh_xlate.dll	95ee02d4038b14f4
++Ryujinx.Graphics.Shader.dll	bc9940567a2c95f8
++Ryujinx.Common.dll	75eac21e7941aff9
+ xlate_source	f21af1efa737a270
+-spirv-cross	e37945d8e441d34d
+-metal_macosx	Apple metal version 32023.921 (metalfe-32023.921.6)
+-metal_iphoneos	Apple metal version 32023.921 (metalfe-32023.921.6)
++spirv-cross	e7797f58bfe6a127
++metal_macosx	Apple metal version 32023.850 (metalfe-custom-windows)
++metal_iphoneos	Apple metal version 32023.850 (metalfe-custom-windows)
+diff --git a/dm/gfx/tools/dmsh_chain.py b/dm/gfx/tools/dmsh_chain.py
+index 7d0b2a2..437325e 100644
+--- a/dm/gfx/tools/dmsh_chain.py
++++ b/dm/gfx/tools/dmsh_chain.py
+@@ -15,7 +15,7 @@
+ import os, sys, ast, hashlib, subprocess, shutil
+ DM_ROOT = os.environ.get('DM_ROOT') or os.path.expanduser('~/dm-work')   # Workspace root (game files, build outputs and run artifacts are all under it)
+ HERE = os.path.dirname(os.path.abspath(__file__)); GFX = os.path.dirname(HERE); HOME = os.path.expanduser('~')
+-FILES = ['tools/dmsh_chain.py', 'tools/dmsh_build.py', 'tools/dmsh_atomic.py', 'tools/dmsh_fetch.py', 'tools/dmsh_vin.py', 'tools/dmsh_pull.py', 'tools/dmsh_pull.metal', 'tools/dmsh_geometry.py', 'tools/dmsh_mesh.py', 'tools/dmsh_facts.py', 'tools/dmsh_xlate/Program.cs', 'tools/dmsh_xlate/dmsh_xlate.csproj', '../ios/tools/ios_metal.py', 'tools/dmsh_chain.lock']
++FILES = ['tools/dmsh_chain.py', 'tools/dmsh_build.py', 'tools/dmsh_atomic.py', 'tools/dmsh_fetch.py', 'tools/dmsh_vin.py', 'tools/dmsh_pull.py', 'tools/dmsh_pull.metal', 'tools/dmsh_geometry.py', 'tools/dmsh_mesh.py', 'tools/dmsh_facts.py', 'tools/dmsh_xlate/Program.cs', 'tools/dmsh_xlate/dmsh_xlate.csproj', '../ios/tools/ios_metal.py', 'tools/windows_metal_run.py', 'tools/dmsh_chain.lock']
+ # This target-specific lowering lives in the vendored translator. Include its
+ # sources as well as the rebuilt DLL fingerprint; no old shader cache can bypass it.
+ FILES += ['../third_party/ryujinx/src/Ryujinx.Graphics.Shader/' + f for f in (
+diff --git a/dm/gfx/tools/windows_metal_run.py b/dm/gfx/tools/windows_metal_run.py
+new file mode 100644
+index 0000000..8eea879
+--- /dev/null
++++ b/dm/gfx/tools/windows_metal_run.py
+@@ -0,0 +1,92 @@
++#!/usr/bin/env python3
++"""Run the iOS-only shader chain with Apple's Windows Metal compiler.
++
++Usage: windows_metal_run.py <script.py> [args...]
++METAL_WINDOWS_BIN names the directory containing metal.exe and metallib.exe.
++METAL_MODULE_CACHE may name a workspace-local compiler module-cache directory.
++
++ios_metal.py executes the actual Windows compiler commands. This adapter only
++maps xcrun's version probes to the actual tools, reports that no platform SDK is
++used, and implements the two POSIX file/tool helpers the build invokes. It never
++copies shader source into a library or intercepts a compile's result.
++"""
++import hashlib
++import os
++from pathlib import Path
++import runpy
++import shutil
++import subprocess
++import sys
++
++_real = subprocess.run
++
++
++def tool(name):
++    directory = os.environ.get('METAL_WINDOWS_BIN')
++    if not directory:
++        raise RuntimeError('METAL_WINDOWS_BIN must name the Apple Windows Metal bin directory')
++    path = Path(directory).resolve() / (name + '.exe')
++    if not path.is_file():
++        raise FileNotFoundError(f'Apple Windows Metal tool missing: {path}')
++    return path
++
++
++def sdk_identity(sdk, build=False):
++    # These probes are opaque cache-identity strings, not a fabricated Xcode
++    # SDK version. Compiler built-in headers and the explicit AIR target are
++    # used; no macOS/iPhoneOS SDK is installed or selected by this adapter.
++    if build:
++        hashes = ' '.join(name + '=' + hashlib.sha256(tool(name).read_bytes()).hexdigest()
++                          for name in ('metal', 'metallib'))
++        return f'windows-metal-no-platform-sdk query={sdk} {hashes}\n'
++    return f'windows-metal-no-platform-sdk query={sdk} target=air64-apple-ios18.0\n'
++
++
++def completed(args, stdout, kwargs, returncode=0):
++    if not (kwargs.get('text') or kwargs.get('universal_newlines') or kwargs.get('encoding')):
++        stdout = stdout.encode(kwargs.get('encoding') or 'utf-8')
++        stderr = b''
++    else:
++        stderr = ''
++    result = subprocess.CompletedProcess(args, returncode, stdout=stdout, stderr=stderr)
++    if kwargs.get('check'):
++        result.check_returncode()
++    return result
++
++
++def run(args, *a, **kwargs):
++    if isinstance(args, (list, tuple)) and args:
++        command = [str(x) for x in args]
++        if command[0] == 'xcrun':
++            if len(command) >= 4 and command[1] == '-sdk' and command[2] in ('macosx', 'iphoneos'):
++                query = command[3:]
++                if len(query) == 2 and query[0] in ('metal', 'metallib') and query[1] == '--version':
++                    return _real([str(tool(query[0])), '--version'], *a, **kwargs)
++                if query in (['--show-sdk-version'], ['--show-sdk-build-version']):
++                    return completed(args, sdk_identity(command[2], query == ['--show-sdk-build-version']), kwargs)
++            raise RuntimeError(f'Windows Metal adapter only accepts xcrun identity probes; compile through ios_metal.py: {command!r}')
++        if command[0] == 'which' and len(command) == 2:
++            found = shutil.which(command[1])
++            return completed(args, (found + '\n') if found else '', kwargs, 0 if found else 1)
++        if command[0] == 'cp' and len(command) == 4 and command[1] == '-c':
++            shutil.copyfile(command[2], command[3])
++            return completed(args, '', kwargs)
++    return _real(args, *a, **kwargs)
++
++
++def main():
++    if len(sys.argv) < 2:
++        raise SystemExit(__doc__)
++    tool('metal'); tool('metallib')
++    targets = os.environ.setdefault('DMSH_TARGETS', 'ios')
++    if {x.strip() for x in targets.split(',') if x.strip()} != {'ios'}:
++        raise SystemExit('Windows Metal adapter requires DMSH_TARGETS=ios; macOS compilation is not supported here')
++    subprocess.run = run
++    script = os.path.abspath(sys.argv[1])
++    sys.argv = sys.argv[1:]
++    sys.path.insert(0, os.path.dirname(script))
++    runpy.run_path(script, run_name='__main__')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/dm/host/hle_sdk16.c b/dm/host/hle_sdk16.c
+index e8f8af5..d181e8a 100644
+--- a/dm/host/hle_sdk16.c
++++ b/dm/host/hle_sdk16.c
+@@ -283,14 +283,29 @@ HLE_FORCE("_ZN2nn4diag13GetSymbolNameEPcmm", "symbol name; the host provides non
+ // ---------- settings: language enum <-> language code ----------
+ // On the real device MakeLanguageCode asks the settings service; the table is public and fixed (nn::settings::Language order). LanguageCode = char[8]
+ static const char *const k_lang_code[] = {"ja", "en-US", "fr", "de", "it", "es", "zh-CN", "ko", "nl", "pt", "ru", "zh-TW", "en-GB", "fr-CA", "es-419", "zh-Hans", "zh-Hant", "pt-BR"};
++// The real operators compare bytes with MakeLanguageCode(lang). Older games (Super Mario Odyssey, SDK 7.3.2) compare
++// GetDesiredLanguage's code for Chinese only with Language::Chinese (6) and Taiwanese (11), so the system must hand
++// them zh-CN / zh-TW, while DM_LANG carries zh-Hans / zh-Hant (the NSP script's spelling for the control data's
++// Simplified and Traditional Chinese). Which spelling the system picks for a title is not known: both spellings of
++// one script match here instead, in both operator directions. Do not rewrite GetDesiredLanguage or collapse Make /
++// the available list: newer games use the distinct entries and their indices (SimplifiedChinese 15 / TraditionalChinese 16).
++static unsigned language_code_matches(int32_t lang, const char *code) {
++    if ((unsigned)lang >= sizeof k_lang_code / sizeof *k_lang_code) return 0;
++    if (!strncmp(k_lang_code[lang], code, 8)) return 1;
++    switch (lang) {
++        case 6:  return !strncmp(code, "zh-Hans", 8);
++        case 15: return !strncmp(code, "zh-CN", 8);
++        case 11: return !strncmp(code, "zh-Hant", 8);
++        case 16: return !strncmp(code, "zh-TW", 8);
++        default: return 0;
++    }
++}
+ HLE_FORCE("_ZN2nn8settingseqERKNS0_8LanguageERKNS0_12LanguageCodeE", "language enum vs. language code comparison (returns bool)", unsigned, h_set_LangEq, const int32_t *lang, const char *code) {
+-    if ((unsigned)*lang >= sizeof k_lang_code / sizeof *k_lang_code) return 0;
+-    return strncmp(k_lang_code[*lang], code, 8) == 0;
++    return language_code_matches(*lang, code);
+ }
+ // The reversed comparison and making a code from the enum (Super Mario 3D World + Bowser's Fury, SDK 10: its first comparison in nnMain connected to the settings service)
+ HLE_FORCE("_ZN2nn8settingseqERKNS0_12LanguageCodeERKNS0_8LanguageE", "language code vs. language enum comparison (returns bool)", unsigned, h_set_LangEq2, const char *code, const int32_t *lang) {
+-    if ((unsigned)*lang >= sizeof k_lang_code / sizeof *k_lang_code) return 0;
+-    return strncmp(k_lang_code[*lang], code, 8) == 0;
++    return language_code_matches(*lang, code);
+ }
+ HLE_FORCE("_ZN2nn8settings12LanguageCode4MakeENS0_8LanguageE", "language enum → language code (8 bytes returned by value)", uint64_t, h_set_LangMake, int lang) {
+     char code[8] = {0};
+diff --git a/dm/host/tests/Makefile b/dm/host/tests/Makefile
+index 6ef8e91..1293cf6 100644
+--- a/dm/host/tests/Makefile
++++ b/dm/host/tests/Makefile
+@@ -12,7 +12,8 @@ QUIET = $(if $(strip $(SAN)),,2>/dev/null)
+ GINC = $(if $(strip $(GAME)),-I../gen/$(GAME) -I../../games/$(GAME),$(error GAME is not set: make GAME=<base game title ID>: $(shell python3 ../../games/game.py list | awk -F'\t' '{printf "%s (%s)  ", $$1, $$3}')))
+ $(B)/t_fs $(B)/t_fs_case $(B)/t_fs_commit_list $(B)/t_fs_commit_list_tsan: ../romfs_image.h
+ GAME_H = ../gen/$(GAME)/game_profile.h
+-run: $(B)/t_motion $(B)/t_heap_size $(B)/t_touch $(B)/t_gesture $(B)/t_oe $(B)/t_fs $(B)/t_fs_commit_list $(B)/t_thread_leak $(B)/t_fs_case $(B)/t_audio $(B)/t_audio_spsc $(B)/t_swkbd $(B)/t_altstack $(B)/t_condvar $(B)/t_condvar_old $(B)/t_pctl $(B)/t_time $(B)/t_shared_font $(B)/t_vorbis $(B)/t_vorbis_divides $(B)/t_hid $(B)/t_haptics $(B)/t_haptics_apple
++run: $(B)/t_language $(B)/t_motion $(B)/t_heap_size $(B)/t_touch $(B)/t_gesture $(B)/t_oe $(B)/t_fs $(B)/t_fs_commit_list $(B)/t_thread_leak $(B)/t_fs_case $(B)/t_audio $(B)/t_audio_spsc $(B)/t_swkbd $(B)/t_altstack $(B)/t_condvar $(B)/t_condvar_old $(B)/t_pctl $(B)/t_time $(B)/t_shared_font $(B)/t_vorbis $(B)/t_vorbis_divides $(B)/t_hid $(B)/t_haptics $(B)/t_haptics_apple
++	$(B)/t_language
+ 	$(B)/t_heap_size
+ 	$(B)/t_touch
+ 	$(B)/t_gesture
+@@ -125,6 +126,8 @@ $(B)/t_pctl: t_pctl.c ../hle_misc.c ../hle.h ../dm.h $(GAME_H) | $(B)
+ 	$(CLANG) -O1 -Wall -Werror -Wno-unused-function -I.. $(GINC) -o $@ t_pctl.c
+ $(B)/t_shared_font: t_shared_font.c ../hle_sdk16.c ../hle.h ../dm.h $(GAME_H) | $(B)
+ 	$(CLANG) -O1 -Wall -Werror -Wno-unused-function -Wno-frame-address -I.. $(GINC) -o $@ t_shared_font.c
++$(B)/t_language: t_language.c ../hle_sdk16.c ../hle.h ../dm.h $(GAME_H) | $(B)
++	$(CLANG) -O1 -g -Wall -Werror -Wno-unused-function -Wno-frame-address -fsanitize=address,undefined -I.. $(GINC) -o $@ t_language.c
+ $(B)/t_motion: t_motion.c ../motion_fusion.h | $(B)
+ 	$(CLANG) -O1 -Wall -Werror -Wno-unused-function -o $@ t_motion.c -lm
+ run: $(B)/t_motion_apple
+diff --git a/dm/host/tests/t_language.c b/dm/host/tests/t_language.c
+new file mode 100644
+index 0000000..ebad9a6
+--- /dev/null
++++ b/dm/host/tests/t_language.c
+@@ -0,0 +1,78 @@
++// Settings language comparisons through the host hooks. All codes are synthetic;
++// no game module, control data, graphics device or font file is needed.
++#ifdef DM_LANGUAGE_PORTABLE
++// Generated directly from the checked-out production language section by the
++// native runner; Apple builds below include the whole host implementation.
++#include "language_hooks.inc"
++#else
++#include "../hle_sdk16.c"
++#endif
++#include <limits.h>
++
++#ifndef DM_LANGUAGE_PORTABLE
++module_t *g_mod;
++int g_nmod;
++uint64_t g_t0_ns;
++uint64_t now_ns(void) { return 0; }
++int dm_sdk_major(void) { return 20; }
++int dm_main_imports(const char *prefix) { (void)prefix; return 1; }
++module_t *module_of(const void *p) { (void)p; return NULL; }
++void *guest_sym(const char *name) { (void)name; return NULL; }
++void dm_backtrace(uint64_t fp) { (void)fp; }
++void hle_bind_system_event(void *ev, int autoclear) { (void)ev; (void)autoclear; }
++void hle_signal_system_event(void *ev) { (void)ev; }
++uint64_t hle_system_event_binding(void *ev) { (void)ev; return 1; }
++int hle_signal_system_event_binding(uint64_t binding) { (void)binding; return 1; }
++uint32_t hle_hid_connected_npad(void) { return 0; }
++void dm_host_helper_qos(qos_class_t q) { (void)q; }
++#endif
++
++static int checks, fails;
++#define CHECK(c, msg) do { checks++; if (!(c)) { fails++; fprintf(stderr, "FAIL: %s\n", msg); } } while (0)
++static const char *const codes[] = {"ja", "en-US", "fr", "de", "it", "es", "zh-CN", "ko", "nl", "pt", "ru", "zh-TW", "en-GB", "fr-CA", "es-419", "zh-Hans", "zh-Hant", "pt-BR"};
++
++int main(void) {
++    // Check the full matrix: both Chinese spellings match their own script;
++    // different scripts, region variants and every unrelated language stay distinct.
++    for (int32_t lang = 0; lang < 18; lang++) for (int i = 0; i < 18; i++) {
++        char code[8] = {0}; memcpy(code, codes[i], strlen(codes[i]));
++        unsigned want = lang == i || (lang == 6 && i == 15) || (lang == 15 && i == 6)
++                                 || (lang == 11 && i == 16) || (lang == 16 && i == 11);
++        CHECK(h_set_LangEq(&lang, code) == want, "Language == LanguageCode matrix");
++        CHECK(h_set_LangEq2(code, &lang) == want, "LanguageCode == Language matrix");
++    }
++    const int32_t invalid[] = {-1, INT_MIN, 18, INT_MAX};
++    for (unsigned i = 0; i < sizeof invalid / sizeof *invalid; i++) {
++        CHECK(!h_set_LangEq(&invalid[i], "zh-Hans"), "invalid Language is not equal");
++        CHECK(!h_set_LangEq2("zh-Hans", &invalid[i]), "invalid Language is not equal (reversed)");
++        CHECK(h_set_LangMake(invalid[i]) == 0, "invalid Make still returns an empty code");
++    }
++    // A LanguageCode is exactly eight bytes; a missing terminator must not
++    // accept an alias prefix or read past the supplied object.
++    const char malformed[][8] = {
++        "", "zh", "zh-hans",
++        {'z','h','-','H','a','n','s','X'}, {'z','h','-','H','a','n','t','X'},
++        {'z','h','-','C','N','x','y','z'}, {'z','h','-','T','W','x','y','z'}
++    };
++    const int32_t chinese[] = {6, 11, 15, 16};
++    for (unsigned i = 0; i < sizeof malformed / sizeof *malformed; i++)
++        for (unsigned j = 0; j < sizeof chinese / sizeof *chinese; j++) {
++            CHECK(!h_set_LangEq(&chinese[j], malformed[i]), "malformed code is not an alias");
++            CHECK(!h_set_LangEq2(malformed[i], &chinese[j]), "malformed code is not an alias (reversed)");
++        }
++    // Matching aliases must not collapse the system table: newer games use its
++    // indices, and callers of Make must continue to receive the original spelling.
++    char available[19 * 8]; memset(available, 0xa5, sizeof available);
++    CHECK(h_set_AvailLangN() == 18, "available language count stays 18");
++    CHECK(h_set_AvailLang(available, 19) == 18, "available language list keeps all 18 entries");
++    for (int i = 0; i < 18; i++) {
++        char expected[8] = {0}; memcpy(expected, codes[i], strlen(codes[i]));
++        uint64_t code = h_set_LangMake(i);
++        CHECK(!memcmp(&code, expected, 8), "Make preserves each exact spelling");
++        CHECK(!memcmp(available + i * 8, expected, 8), "available language list preserves order and spelling");
++    }
++    const unsigned char *tail = (const unsigned char *)available + 18 * 8;
++    for (int i = 0; i < 8; i++) CHECK(tail[i] == 0xa5, "available language list leaves the unused entry alone");
++    printf("language: %d checks, %d failed\n", checks, fails);
++    return fails != 0;
++}
+diff --git a/dm/ios/tools/ios_metal.py b/dm/ios/tools/ios_metal.py
+index f270b18..3071fad 100644
+--- a/dm/ios/tools/ios_metal.py
++++ b/dm/ios/tools/ios_metal.py
+@@ -1,5 +1,7 @@
+ # The single compile standard for the iOS shader packaging chain: MSL from any source (PC chain / constant patches / in future, the Switch original translated via Ryujinx) → iphoneos metallib.
+ # Compile parameters are defined only once, here; the chain.metal record in the reflection json is generated from the same parameters, record == actual.
++import os
++from pathlib import Path
+ import subprocess
+ # -fmetal-math-mode=relaxed: keep fast math's reassociation / contraction, but forbid assuming there are no NaN / Inf. The translated shaders reproduce Maxwell's NaN semantics with isnan selects (8337 / 12809 use them),
+ # and the default fast mode lets each GPU's backend compiler treat them as always false; on the A20 Pro the opening course's odd frames had 727k NaN pixels in the main image (a few dozen with the same AIR on the M4 Pro), which became the black band / black-edged glow
+@@ -7,7 +9,23 @@ import subprocess
+ # -O1: -O2's switch folding leaves a control-flow graph Apple's GPU backend can only lower slowly into very large code (as dmsh_build.py's MAC_METAL)
+ METAL = ['xcrun', '-sdk', 'iphoneos', 'metal', '-c', '-O1', '-mios-version-min=18.0', '-fmetal-math-mode=relaxed', '-fpreserve-invariance']
+ METALLIB = ['xcrun', '-sdk', 'iphoneos', 'metallib']
+-RECORD = ' '.join(METAL) + '; ' + ' '.join(METALLIB)                                # Written into json chain.metal
++# An explicit Windows toolchain builds real iOS AIR/metallib locally. It must
++# never use nometal_run.py's source-copy fallback or record xcrun commands that
++# were not executed. Leave the established macOS invocation unchanged.
++_windows_bin = os.environ.get('METAL_WINDOWS_BIN')
++if _windows_bin:
++    _bin = Path(_windows_bin).resolve()
++    for _tool in ('metal.exe', 'metallib.exe'):
++        if not (_bin / _tool).is_file():
++            raise FileNotFoundError(f'METAL_WINDOWS_BIN has no {_tool}: {_bin}')
++    METAL = [str(_bin / 'metal.exe'), '-target', 'air64-apple-ios18.0', '-std=ios-metal2.3',
++             '-c', '-O1', '-fmetal-math-mode=relaxed', '-fpreserve-invariance']
++    if os.environ.get('METAL_MODULE_CACHE'):
++        METAL.append('-fmodules-cache-path=' + str(Path(os.environ['METAL_MODULE_CACHE']).resolve()))
++    METALLIB = [str(_bin / 'metallib.exe')]
++    RECORD = subprocess.list2cmdline(METAL) + '; ' + subprocess.list2cmdline(METALLIB)
++else:
++    RECORD = ' '.join(METAL) + '; ' + ' '.join(METALLIB)                            # Written into json chain.metal
+ 
+ def compile(msl, air, lib):
+     subprocess.run([*METAL, msl, '-o', air], check=True)
+diff --git a/dm/tools/tests/run_language_native.py b/dm/tools/tests/run_language_native.py
+new file mode 100644
+index 0000000..142827e
+--- /dev/null
++++ b/dm/tools/tests/run_language_native.py
+@@ -0,0 +1,67 @@
++#!/usr/bin/env python3
++"""Run the hook language matrix against production C on any native C platform.
++
++Apple's t_language target includes the full host implementation and sanitizers.
++This runner extracts its exact language section so Windows can execute the same
++matrix without the unrelated Mach, pthread QoS and shared-font dependencies.
++"""
++from __future__ import annotations
++
++import os
++import shlex
++import shutil
++import subprocess
++import sys
++import tempfile
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[3]
++MARKER = "// ---------- settings: language enum <-> language code ----------"
++
++
++def compiler() -> list[str]:
++    if os.environ.get("CC"):
++        return shlex.split(os.environ["CC"])
++    for name in ("clang", "gcc", "cc"):
++        if found := shutil.which(name):
++            return [found]
++    if found := shutil.which("zig"):
++        return [found, "cc"]
++    raise RuntimeError("no native C compiler; set CC or install clang/gcc/zig")
++
++
++def language_section(source: str) -> str:
++    if source.count(MARKER) != 1:
++        raise RuntimeError("production language section missing or ambiguous")
++    section = source.split(MARKER, 1)[1]
++    # This section is the file's last section. Fail if that boundary changes,
++    # rather than silently compiling only a hand-maintained model of the hooks.
++    if section.count("HLE_FORCE(") != 5 or "h_set_AvailLangN" not in section:
++        raise RuntimeError("unexpected production language section boundary")
++    return (
++        "#include <stdint.h>\n#include <stdio.h>\n#include <string.h>\n"
++        "#define HLE_FORCE(symbol, why, ret, name, ...) static ret name(__VA_ARGS__)\n"
++        + section
++    )
++
++
++def run(source: str) -> int:
++    with tempfile.TemporaryDirectory(prefix="dm-language-") as td:
++        root = Path(td)
++        (root / "language_hooks.inc").write_text(language_section(source), encoding="utf-8", newline="\n")
++        binary = root / ("language.exe" if os.name == "nt" else "language")
++        subprocess.run(
++            compiler() + ["-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
++                          "-DDM_LANGUAGE_PORTABLE", "-I", str(root),
++                          str(ROOT / "dm/host/tests/t_language.c"), "-o", str(binary)],
++            check=True,
++        )
++        return subprocess.run([str(binary)], check=False).returncode
++
++
++def main() -> int:
++    return run((ROOT / "dm/host/hle_sdk16.c").read_text(encoding="utf-8"))
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/dm/tools/tests/run_shell_msl_native.py b/dm/tools/tests/run_shell_msl_native.py
+index 1ef8d54..83790ba 100644
+--- a/dm/tools/tests/run_shell_msl_native.py
++++ b/dm/tools/tests/run_shell_msl_native.py
+@@ -2,9 +2,10 @@
+ """Compile and execute the real source-load branch against a fake Metal device.
+ 
+ Requires macOS/Xcode, but no GPU or game files. Exercises ARC, real mmap/munmap,
+-UTF-8 decode failure, and Metal failure. Invariance is checked on every runner;
+-math/optimization default parity is checked when those properties are available.
+-This does not test GPU image output or real shader compilation.
++UTF-8 decode failure, and Metal failure. Invariance, relaxed math, and the
++independent FP32-function/optimization defaults are checked on every runner.
++An optional real Metal compute readback checks NaN/Inf selects when a GPU is
++available. This does not test game images or device performance.
+ """
+ from pathlib import Path
+ import subprocess
+@@ -38,6 +39,7 @@ static BOOL fail_compile;
+ - (id<MTLLibrary>)newLibraryWithSource:(NSString *)src options:(MTLCompileOptions *)options error:(NSError **)error {
+     assert(src.length > 0);
+     assert(options.preserveInvariance);
++    assert(options.mathMode == MTLMathModeRelaxed);
+     compile_calls++;
+     if (fail_compile) {
+         if (error) *error = [NSError errorWithDomain:@"test" code:1 userInfo:nil];
+@@ -75,17 +77,42 @@ static void run_case(BOOL invalid_utf8, BOOL compile_failure) {
+ int main(void) { @autoreleasepool {
+     MTLCompileOptions *policy = dm_shell_nvn_compile_options();
+     assert(policy.preserveInvariance);
+-    if (@available(macOS 26.0, *)) {
+-        MTLCompileOptions *baseline = [MTLCompileOptions new];
+-        assert(policy.mathMode == baseline.mathMode);
+-        assert(policy.optimizationLevel == baseline.optimizationLevel);
+-    }
++    MTLCompileOptions *baseline = [MTLCompileOptions new];
++    assert(policy.mathMode == MTLMathModeRelaxed);
++    assert(policy.mathFloatingPointFunctions == baseline.mathFloatingPointFunctions);
++    assert(policy.optimizationLevel == baseline.optimizationLevel);
+     g_dev = [FakeDevice new];
+     for (int i = 0; i < 100; i++) { @autoreleasepool {
+         run_case(NO, NO); run_case(NO, YES); run_case(YES, NO);
+     } }
+     assert(unmaps == 300);
+-    puts("PASS: actual source branch, 300 mappings released across success/decode/compile failure; invariance verified; math/optimization parity checked when available");
++    puts("PASS: actual source branch, 300 mappings released; invariance and relaxed math verified; FP32-function/optimization defaults preserved");
++    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
++    if (device) {
++        NSError *error = nil;
++        NSString *source = @"#include <metal_stdlib>\nusing namespace metal;\n"
++            "kernel void classify(const device uint *bits [[buffer(0)]], device uint *out [[buffer(1)]], uint i [[thread_position_in_grid]])"
++            "{ float v = as_type<float>(bits[i]); out[i] = isnan(v) ? 17u : (isinf(v) ? 19u : 23u); }";
++        id<MTLLibrary> library = [device newLibraryWithSource:source options:policy error:&error];
++        assert(library != nil && error == nil);
++        id<MTLComputePipelineState> pipeline = [device newComputePipelineStateWithFunction:[library newFunctionWithName:@"classify"] error:&error];
++        assert(pipeline != nil && error == nil);
++        const uint32_t bits[] = {0x7fc00000u, 0x7f800000u, 0x3f800000u};
++        id<MTLBuffer> input = [device newBufferWithBytes:bits length:sizeof bits options:MTLResourceStorageModeShared];
++        id<MTLBuffer> output = [device newBufferWithLength:sizeof bits options:MTLResourceStorageModeShared];
++        id<MTLCommandQueue> queue = [device newCommandQueue];
++        id<MTLCommandBuffer> command = [queue commandBuffer];
++        id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
++        [encoder setComputePipelineState:pipeline];
++        [encoder setBuffer:input offset:0 atIndex:0];
++        [encoder setBuffer:output offset:0 atIndex:1];
++        [encoder dispatchThreads:MTLSizeMake(3, 1, 1) threadsPerThreadgroup:MTLSizeMake(1, 1, 1)];
++        [encoder endEncoding]; [command commit]; [command waitUntilCompleted];
++        assert(command.status == MTLCommandBufferStatusCompleted && command.error == nil);
++        const uint32_t *values = output.contents;
++        assert(values[0] == 17 && values[1] == 19 && values[2] == 23);
++        puts("PASS: real Metal relaxed-math NaN/Inf/finite select readback");
++    } else puts("SKIP: no Metal device for NaN/Inf/finite select readback");
+ } return 0; }
+ '''.replace("/* ACTUAL_SOURCE_BRANCH */", branch)
+     with tempfile.TemporaryDirectory(prefix="shell-msl-native-") as td:
+diff --git a/dm/tools/tests/test_shell_identity_policy.py b/dm/tools/tests/test_shell_identity_policy.py
+index 58744fb..275651b 100644
+--- a/dm/tools/tests/test_shell_identity_policy.py
++++ b/dm/tools/tests/test_shell_identity_policy.py
+@@ -1,4 +1,4 @@
+-"""Guard path-free shell identity diagnostics and the F1 shader cache key."""
++"""Guard path-free shell identity diagnostics and versioned shader prep markers."""
+ from hashlib import sha256
+ from pathlib import Path
+ import unittest
+@@ -33,12 +33,12 @@ class ShellIdentityPolicyTests(unittest.TestCase):
+         self.assertIn("CC_SHA256_Update", self.identity)
+         self.assertNotIn("fileSystemRepresentation", self.identity)
+ 
+-    def test_prep_emits_one_path_free_status_line_and_keeps_f1_marker_identity(self):
++    def test_prep_keeps_marker_structure_and_uses_current_policy_epoch(self):
+         start = self.prep.index("static NSString *marker(")
+         end = self.prep.index("int dm_shader_prep_begin(", start)
+         marker = self.prep[start:end].encode("utf-8")
+         self.assertEqual(sha256(marker).hexdigest(), F1_MARKER_SHA256)
+-        self.assertIn('#define DM_SHELL_NVN_MSL_EPOCH @"nvn-inv1"', self.msl)
++        self.assertIn('#define DM_SHELL_NVN_MSL_EPOCH @"nvn-inv2-relaxed"', self.msl)
+         self.assertEqual(self.prep.count("shader prep status:"), 2)  # empty-source and marker hit/miss branches
+         self.assertIn("sources=%lu marker=%@ action=%@", self.prep)
+         self.assertIn("DM_SHELL_NVN_MSL_EPOCH", self.prep)
+diff --git a/dm/tools/tests/test_shell_msl_policy.py b/dm/tools/tests/test_shell_msl_policy.py
+index 7213fd5..c19a4a7 100644
+--- a/dm/tools/tests/test_shell_msl_policy.py
++++ b/dm/tools/tests/test_shell_msl_policy.py
+@@ -32,10 +32,12 @@ class ShellMslPolicyTests(unittest.TestCase):
+             source = (ROOT / f"dm/gfx/{backend}/hle_{backend}.m").read_text(encoding="utf-8")
+             self.assertIn("newLibraryWithSource:txt options:nil", source)
+ 
+-    def test_only_invariance_changes_and_epoch_invalidates_old_marker(self):
++    def test_relaxed_math_matches_offline_policy_and_invalidates_old_marker(self):
+         self.assertIn("options.preserveInvariance = YES;", self.policy)
+-        self.assertNotRegex(self.policy, r"\.(mathMode|fastMathEnabled|optimizationLevel)\s*=")
+-        self.assertIn('#define DM_SHELL_NVN_MSL_EPOCH @"nvn-inv1"', self.policy)
++        self.assertIn("options.mathMode = MTLMathModeRelaxed;", self.policy)
++        self.assertNotRegex(self.policy, r"\.(fastMathEnabled|mathFloatingPointFunctions|optimizationLevel)\s*=")
++        self.assertIn("'-fmetal-math-mode=relaxed'", (ROOT / "dm/ios/tools/ios_metal.py").read_text(encoding="utf-8"))
++        self.assertIn('#define DM_SHELL_NVN_MSL_EPOCH @"nvn-inv2-relaxed"', self.policy)
+         self.assertIn("if (dir) tag = [tag stringByAppendingFormat:@\"-%@\", DM_SHELL_NVN_MSL_EPOCH]", self.prep)
+         self.assertIn("dm/gfx/nvn/dm_shell_msl.h", (ROOT / ".shell-overlay.txt").read_text(encoding="utf-8"))
+ 
+diff --git a/dm/tools/tests/test_windows_metal.py b/dm/tools/tests/test_windows_metal.py
+new file mode 100644
+index 0000000..62ab141
+--- /dev/null
++++ b/dm/tools/tests/test_windows_metal.py
+@@ -0,0 +1,92 @@
++"""Windows Apple Metal command/identity integration without proprietary shaders."""
++import importlib.util
++import os
++from pathlib import Path
++import subprocess
++import tempfile
++import unittest
++from unittest import mock
++
++ROOT = Path(__file__).resolve().parents[3]
++
++
++def load(name, relative):
++    spec = importlib.util.spec_from_file_location(name, ROOT / relative)
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    return module
++
++
++class WindowsMetalTests(unittest.TestCase):
++    def setUp(self):
++        self.tmp = tempfile.TemporaryDirectory(prefix='windows-metal-')
++        self.addCleanup(self.tmp.cleanup)
++        self.bin = Path(self.tmp.name) / 'tools with spaces'
++        self.bin.mkdir()
++        (self.bin / 'metal.exe').write_bytes(b'synthetic compiler identity')
++        (self.bin / 'metallib.exe').write_bytes(b'synthetic linker identity')
++        self.env = mock.patch.dict(os.environ, {'METAL_WINDOWS_BIN': str(self.bin),
++                                  'METAL_MODULE_CACHE': str(Path(self.tmp.name) / 'module cache')})
++        self.env.start(); self.addCleanup(self.env.stop)
++
++    def test_mac_command_and_record_are_unchanged_without_override(self):
++        with mock.patch.dict(os.environ):
++            os.environ.pop('METAL_WINDOWS_BIN', None)
++            module = load('ios_metal_mac_test', 'dm/ios/tools/ios_metal.py')
++        self.assertEqual(module.METAL, ['xcrun', '-sdk', 'iphoneos', 'metal', '-c', '-O1',
++                                     '-mios-version-min=18.0', '-fmetal-math-mode=relaxed', '-fpreserve-invariance'])
++        self.assertEqual(module.RECORD, ' '.join(module.METAL) + '; ' + ' '.join(module.METALLIB))
++
++    def test_windows_compiles_with_real_commands_and_exact_record(self):
++        module = load('ios_metal_windows_test', 'dm/ios/tools/ios_metal.py')
++        self.assertEqual(module.METAL[:5], [str(self.bin / 'metal.exe'), '-target', 'air64-apple-ios18.0', '-std=ios-metal2.3', '-c'])
++        for flag in ('-O1', '-fmetal-math-mode=relaxed', '-fpreserve-invariance'):
++            self.assertIn(flag, module.METAL)
++        self.assertIn('-fmodules-cache-path=' + os.environ['METAL_MODULE_CACHE'], module.METAL)
++        self.assertEqual(module.RECORD, subprocess.list2cmdline(module.METAL) + '; ' + subprocess.list2cmdline(module.METALLIB))
++        with mock.patch.object(module.subprocess, 'run') as run:
++            module.compile('source with spaces.metal', 'test.air', 'test.metallib')
++        self.assertEqual(run.call_args_list, [mock.call([*module.METAL, 'source with spaces.metal', '-o', 'test.air'], check=True),
++                                             mock.call([*module.METALLIB, 'test.air', '-o', 'test.metallib'], check=True)])
++
++    def test_version_queries_call_actual_tool_and_preserve_errors(self):
++        adapter = load('windows_metal_probe_test', 'dm/gfx/tools/windows_metal_run.py')
++        result = subprocess.CompletedProcess(['actual metal'], 9, stdout='actual version', stderr='failure')
++        with mock.patch.object(adapter, '_real', return_value=result) as run:
++            self.assertIs(adapter.run(['xcrun', '-sdk', 'iphoneos', 'metal', '--version'], capture_output=True, text=True), result)
++        run.assert_called_once_with([str(self.bin / 'metal.exe'), '--version'], capture_output=True, text=True)
++
++    def test_sdk_probes_report_no_sdk_and_hash_real_tools(self):
++        adapter = load('windows_metal_sdk_test', 'dm/gfx/tools/windows_metal_run.py')
++        result = adapter.run(['xcrun', '-sdk', 'macosx', '--show-sdk-version'], capture_output=True, text=True)
++        self.assertIn('no-platform-sdk query=macosx', result.stdout)
++        before = adapter.sdk_identity('iphoneos', True)
++        (self.bin / 'metal.exe').write_bytes(b'another compiler')
++        self.assertNotEqual(before, adapter.sdk_identity('iphoneos', True))
++        self.assertIn('metal=', before)
++        self.assertIn('metallib=', before)
++
++    def test_adapter_cannot_turn_source_into_successful_library(self):
++        adapter = load('windows_metal_reject_test', 'dm/gfx/tools/windows_metal_run.py')
++        with self.assertRaisesRegex(RuntimeError, 'only accepts xcrun identity probes'):
++            adapter.run(['xcrun', '-sdk', 'iphoneos', 'metal', '-c', 'source.metal', '-o', 'test.air'])
++        with self.assertRaises(FileNotFoundError):
++            (self.bin / 'metallib.exe').unlink()
++            load('ios_metal_missing_test', 'dm/ios/tools/ios_metal.py')
++
++    def test_only_posix_helpers_are_emulated_and_other_commands_are_deferred(self):
++        adapter = load('windows_metal_helpers_test', 'dm/gfx/tools/windows_metal_run.py')
++        source, target = Path(self.tmp.name) / 'source', Path(self.tmp.name) / 'target'
++        source.write_bytes(b'ordinary data')
++        adapter.run(['cp', '-c', source, target], check=True)
++        self.assertEqual(target.read_bytes(), source.read_bytes())
++        with mock.patch.object(adapter.shutil, 'which', return_value=None):
++            with self.assertRaises(subprocess.CalledProcessError):
++                adapter.run(['which', 'missing'], check=True)
++        with mock.patch.object(adapter, '_real') as run:
++            adapter.run(['actual-compiler.exe', '-c', 'source'], check=True)
++        run.assert_called_once_with(['actual-compiler.exe', '-c', 'source'], check=True)
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/docs/agents/symptoms.md b/docs/agents/symptoms.md
+index b643b5f..e682b52 100644
+--- a/docs/agents/symptoms.md
++++ b/docs/agents/symptoms.md
+@@ -182,6 +182,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+ - the boot sits at a black loading screen for good, CPU nearly idle, every thread waiting, about 1 boot in 6 (3 in 4 with four Mac hosts at once); the title movie is never opened, and the save files are never probed. → [Network requests stay on hold before they settle](../reference/services.md#network-requests-stay-on-hold-before-they-settle)
+ - one thread at 100% CPU from boot, with one SVC in 99 s (`NexusRevolution Socket`, `main+0x92c7c4`, the game's network thread). → [Socket `Poll` and `Select` with nothing to wait on](../reference/services.md#socket-poll-and-select-with-nothing-to-wait-on)
+ - the first comparison in `nnMain` aborted in `sm`. → [Language codes](../reference/services.md#language-codes)
++- `DM_LANG=zh-Hans` or `zh-Hant` reaches the game unchanged, but its startup menu falls back to Japanese; the older `zh-CN` or `zh-TW` spelling selects Chinese. → [Chinese language aliases in settings comparisons](../reference/services.md#chinese-language-aliases-in-settings-comparisons)
+ - abort in `sm::Initialize` under `nn::settings::GetAvailableLanguageCodes` (early in `nnMain`, `main+0x327888`); abort in `sm::Initialize` under `nn::settings::GetAvailableLanguageCodeCount()` (`main+0x117590`). → [Available language codes and their count](../reference/services.md#available-language-codes-and-their-count)
+ - the font engine runs on garbage; crash after the shared fonts load, looking up the "?" glyph (`main+0x6c73c0`, a font cache lookup returning null), with SDK 10's `ScalableFontEngine::LoadFont` failing with error 403 and `SetFont` with 301 on both stand-in fonts; or Japanese, Korean or Chinese text draws nothing in a Unity game while Latin text is fine (Patrick's Parabox's language menu showed three blank lines). → [Shared font address: BFTTF header or bare TTF](../reference/services.md#shared-font-address-bfttf-header-or-bare-ttf)
+ - abort in `nn::sm::Initialize` under `nn::pl::sharedresource::GetPlatformSharedResourceManager` (first thing in `nnMain`). → [Shared fonts requested all at once](../reference/services.md#shared-fonts-requested-all-at-once)
+@@ -408,6 +409,8 @@ One line per symptom in the [subsystem references](../reference/): what you see
+ - `vertex attribute format … not mapped` (printed once). → [Vertex formats Metal lacks](../reference/rendering.md#vertex-formats-metal-lacks)
+ - the assertion `buffer index (31) must be < 31`. → [Vertex streams 14 and 15 at Metal slots 14 and 15](../reference/rendering.md#vertex-streams-14-and-15-at-metal-slots-14-and-15)
+ - Scaleform fills come out as solid white or light grey sheets over the whole screen, hard-edged triangles and bands, and the menu text is missing (a language list or a title screen that is all white behind its button prompt). → [Vertex streams at addresses that are not 4-byte aligned](../reference/rendering.md#vertex-streams-at-addresses-that-are-not-4-byte-aligned)
++- hard-edged translucent slabs and triangles that move with the camera, including white wedges in Odyssey's Cascade Kingdom waterfall mist. → [Vertex fetches past a stream's bound size](../reference/rendering.md#vertex-fetches-past-a-streams-bound-size)
++- cached argument blocks keep a replaced texture's resource ID, or a draw attempts to use an encoder ended by a texture upgrade. → [Replaced textures and argument reuse](../reference/rendering.md#replaced-textures-and-argument-reuse)
+ - scenes and characters black, only foliage, light shafts and the HUD drawn; pass dumps full of `Z … draw skipped: no program bound`. → [Programs bound per stage](../reference/rendering.md#programs-bound-per-stage)
+ - `[RED] failed to create render pipeline (vertex 790573a52b9c5053_b fragment f39fb42850f50ecd_b): Fragment input(s) user(locn0),user(locn1) … not written by vertex shader`, once on entering the first investigation; `texture type mismatch: shader declares a cube, texture is 2D` (a pixel shader run with another pair's bindings). → [Composite program taken again after a replay state restore](../reference/rendering.md#composite-program-taken-again-after-a-replay-state-restore)
+ - `no program bound before the draw`, `program has no vertex shader` (a draw after a dispatch is dropped); `the dispatched program has no compute shader` (a dispatch after a graphics bind). → [Compute programs bound apart from graphics programs](../reference/rendering.md#compute-programs-bound-apart-from-graphics-programs)
+diff --git a/docs/reference/rendering.md b/docs/reference/rendering.md
+index 77b2067..f464fa0 100644
+--- a/docs/reference/rendering.md
++++ b/docs/reference/rendering.md
+@@ -505,6 +505,21 @@ The replay on Metal (`dm/gfx/nvn/nvn_mtl.m`) and the Vulkan and OpenGL layers. E
+ - **Fix:** `bind_vbufs` copies a stream whose address is not 4-byte aligned into the submission's arena (`vbuf_unaligned`; one copy per address and size until guest writes or pool mappings change, up to 64 MB) and binds the copy. CPU copies require a host-readable, non-sparse range without pending GPU writers in this or an earlier submission; otherwise `vbuf_prepare` encodes an ordered GPU copy before the render encoder, including feedback and geometry captures. Submissions and pool mappings invalidate copies; buffer and shader writes invalidate the copies they can overlap, so unrelated uniform updates keep their vertex copies. The log's `vertex bindings` line counts the copies; `t_vbuf` checks byte-aligned readbacks, reuse, queued writes, writes between draws and pool replacement. The index buffers at addresses 2 mod 4 (16-bit indices) needed nothing.
+ - **Found on:** Batman: Arkham Knight (`0100ACD0163D0000`; its profile and note are in a PR of their own) (Scaleform GFx; 2–13 copies of 3–18 MB a frame in the menus and at the title, which the draws' vertex ranges could narrow). With the copy the language menu and the title screen draw right.
+ 
++### Vertex fetches past a stream's bound size
++
++- **Symptom:** hard-edged translucent slabs and triangles that move with the camera, including white wedges in Odyssey's Cascade Kingdom waterfall mist.
++- **Cause:** Maxwell fetches zeros past a bound vertex stream. Metal instead reads the following pool bytes. Odyssey's half-resolution composite draws nine vertices from a stream holding only three, so an unintended triangle composites the mist twice.
++- **Fix:** before opening the draw encoder, bound-range arithmetic uses the shader inputs and the last direct vertex or instance. Out-of-range streams use a copy padded with zeros; pulling, transform feedback, single geometry capture and CPU-converted inputs use the same semantics. Ported from upstream commit `1c54ea02264cef4abd66fe5767d68fccdf6bd8ff` (#558). The native arithmetic fixture covers 78 checks; the Metal readback tests are `t_vbuf` and `t_pull`.
++- **Open:** general indexed per-vertex streams, indirect draws and batched geometry captures remain unbounded. Windows native fixtures do not establish GPU or iPad acceptance.
++- **Found on:** [Super Mario Odyssey](../../dm/games/0100000000010000/README.md).
++
++### Replaced textures and argument reuse
++
++- **Symptom:** cached argument blocks keep a replaced texture's resource ID, or a draw attempts to use an encoder ended by a texture upgrade.
++- **Cause:** argument invalidation omitted the serial generation; texture-view upgrades may close the render pass while arguments are bound.
++- **Fix:** argument reuse tracks the texture serial generation. If binding ends the encoder, re-encode once on a new pass; a second closure reports and skips the draw. Sampler creation also honors the game's LOD bias within Metal's supported range. These are bounded host fixes from upstream `971d336516a20dde998f0ede29db7e380a8ee6dd` and `81ccacf2891e2ef7687bb63a48451e704887b3e2`.
++- **Found on:** upstream Need for Speed: Hot Pursuit Remastered (ended encoder); no Odyssey-specific trigger or performance gain has been measured. Native resource-rebind fixtures cover 80 checks; real GPU validation remains separate.
++
+ ### Programs bound per stage
+ 
+ - **Symptom:** scenes and characters black, only foliage, light shafts and the HUD drawn; pass dumps full of `Z … draw skipped: no program bound`.
+diff --git a/docs/reference/services.md b/docs/reference/services.md
+index 434f69d..cce9aca 100644
+--- a/docs/reference/services.md
++++ b/docs/reference/services.md
+@@ -529,6 +529,13 @@ Most service calls can be found before they crash, before the first boot or the
+ - **Fix:** hooked: `settings::LanguageCode::Make` and the reversed `operator==(LanguageCode, Language)`.
+ - **Found on:** [Super Mario 3D World + Bowser's Fury](../../dm/games/010028600EBDA000/README.md) (SDK 10).
+ 
++### Chinese language aliases in settings comparisons
++
++- **Symptom:** `DM_LANG=zh-Hans` or `zh-Hant` reaches the game unchanged, but its startup menu falls back to Japanese; the older `zh-CN` or `zh-TW` spelling selects Chinese.
++- **Cause:** Odyssey 1.4.1 compares its desired code with the deprecated Chinese and Taiwanese enum entries, whose spellings in the system table are `zh-CN` and `zh-TW`. The launcher can provide `zh-Hans` and `zh-Hant`. The console's per-title spelling rule is unknown; raw equality in the host did not bridge these aliases.
++- **Fix:** both settings equality hooks share `language_code_matches`: the two Simplified spellings match, as do the two Traditional spellings, while the scripts remain distinct. `GetDesiredLanguage`, `LanguageCode::Make` and the available list retain their codes, indices and order. This substitutes for the unknown system spelling policy; games comparing codes with their own strings may still require the exact spelling. The native matrix checks both operand orders, malformed eight-byte codes and unchanged Make/list behavior.
++- **Found on:** [Super Mario Odyssey](../../dm/games/0100000000010000/README.md), update 1.4.1 / SDK 7.3.2. Upstream commit `40ddca138eb59b58febf4168844fadf79b793b8f` reports fresh-save Mac menus in both scripts. This fork's port has no new device gameplay validation.
++
+ ### Available language codes and their count
+ 
+ - **Symptom:** abort in `sm::Initialize` under `nn::settings::GetAvailableLanguageCodes` (early in `nnMain`, `main+0x327888`); abort in `sm::Initialize` under `nn::settings::GetAvailableLanguageCodeCount()` (`main+0x117590`).
+diff --git a/docs/reference/shaders.md b/docs/reference/shaders.md
+index d5a49be..bf968bd 100644
+--- a/docs/reference/shaders.md
++++ b/docs/reference/shaders.md
+@@ -422,6 +422,7 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
+ 
+ - **Cause:** the translated shaders reproduce Maxwell's NaN behaviour with `isnan` selects (8,337 of 12,809 use them), and the default fast mode allows the GPU compiler to assume there is no NaN.
+ - **Fix:** the iOS libraries are compiled with `-fmetal-math-mode=relaxed` (`dm/ios/tools/ios_metal.py`; the Vulkan and GL libraries in `vk_shaders.py` and `gl_shaders.py` too). Relaxed keeps fast math's reassociation but not that assumption.
++- **Source-form shell libraries:** the game-free shell can package MSL text inside `.metallib` members. Offline command-line flags do not affect that text: preparation, ordinary loads and learned NVN variants compile it with `dm_shell_nvn_compile_options()`. The shared policy now sets `preserveInvariance = YES` and `mathMode = MTLMathModeRelaxed`, matching the offline iOS math mode while leaving the independent FP32 function and optimization policies unchanged. Epoch `nvn-inv2-relaxed` prevents an old preparation marker from skipping the new policy; old caches remain on disk. Apple's public `optimizationLevel` exposes default and size (`-Os`), not the frontend `-O1`; an actual `-O1` library must be compiled offline. `run_shell_msl_native.py` checks real option values and, when a Metal device is available, reads back a synthetic NaN/Inf/finite select. No Odyssey visual or performance result is established by that fixture.
+ - **Found on:** listed among the mechanisms first met in [Super Mario Bros. Wonder](../../dm/games/010015100B514000/README.md); the source gives the 8,337 of 12,809 count without naming the game.
+ 
+ ### Front end at -O1: Apple's control-flow lowering

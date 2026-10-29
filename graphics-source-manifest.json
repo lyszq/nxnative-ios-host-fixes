@@ -1,0 +1,125 @@
+{
+  "source_local_commit": "2c32b1cc1ba1eb4a873e184796156d54504319b7",
+  "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
+  "patch_sha256": "e0c84aa661ee39da84a6d9267745c8bb995d4117bfe7984a6533f006f622bf2b",
+  "files": [
+    {
+      "path": "dm/games/0100000000010000/README.md",
+      "normalized_sha256": "a755ec41de685f028712f619cb5889c65ea27a85a711e1b80a5cd18dcd561819"
+    },
+    {
+      "path": "dm/gfx/nvn/dm_shell_msl.h",
+      "normalized_sha256": "56aad66a21699968731fa9d06c95ab4dcecbb6cc553b48ba2abad88e9ec3c258"
+    },
+    {
+      "path": "dm/gfx/nvn/dmsh_chain.h",
+      "normalized_sha256": "1b09978f993d5ac43cc9c6b144c4feb2a49ef21df8af6754db54d0f1b331cebb"
+    },
+    {
+      "path": "dm/gfx/nvn/nvn_feedback.inc",
+      "normalized_sha256": "3bed92de38e5276a47a6cc4fac17f521a14535a0d197a2491886d80d4306e277"
+    },
+    {
+      "path": "dm/gfx/nvn/nvn_geometry.inc",
+      "normalized_sha256": "575fb4488597dae06e545cbfcf06afed1bcc22c77462ef96d422307e56d5c6a6"
+    },
+    {
+      "path": "dm/gfx/nvn/nvn_mtl.m",
+      "normalized_sha256": "1efbd55b66e6da17071a20c9a23ba0e1613b9ca9277dc210ba5190b016838162"
+    },
+    {
+      "path": "dm/gfx/tests/run_nvn_resource_rebind_native.py",
+      "normalized_sha256": "4f58abac01632d2c14a09cc6e02c91956098a163a85f621581d992b31caf4cfd"
+    },
+    {
+      "path": "dm/gfx/tests/run_nvn_vbuf_bounds_native.py",
+      "normalized_sha256": "25898ff06248f6ce5799f727834874c3ef5be94a06cf87c5d5dd3674376d168c"
+    },
+    {
+      "path": "dm/gfx/tests/t_pull.m",
+      "normalized_sha256": "8259b5eafb0cf975299c4464b0bf9ca98985470a90cb0ba855d419781ce296d1"
+    },
+    {
+      "path": "dm/gfx/tests/t_vbuf.m",
+      "normalized_sha256": "b4767eeb248a1eeb5865578a872fc149b0379adbf1e23047e460244b8d0776bd"
+    },
+    {
+      "path": "dm/gfx/tests/test_nvn_resource_rebind.py",
+      "normalized_sha256": "0b9c8eff7c71f9e20beebefc101747ebaff4cb54381d431caacefe96ea951289"
+    },
+    {
+      "path": "dm/gfx/tests/test_nvn_vbuf_bounds.py",
+      "normalized_sha256": "d8c75d81f74194d0b3c070bc51b25416a690645d64d14e5e7a85421506d36529"
+    },
+    {
+      "path": "dm/gfx/tools/dmsh_build.py",
+      "normalized_sha256": "9035699cd6e209de08b15f6a75d8978aafbdc8333584c49c1fc9ceeeba6b8f4a"
+    },
+    {
+      "path": "dm/gfx/tools/dmsh_chain.lock",
+      "normalized_sha256": "7d4a7794ed5cd0ceb9c83c668493b4bc28a98e9fd70d6fbf58955f76ddba06a5"
+    },
+    {
+      "path": "dm/gfx/tools/dmsh_chain.py",
+      "normalized_sha256": "4de93ecb37b524c6d8727c56af570782a004092d8403e07b5ab983e0553422ac"
+    },
+    {
+      "path": "dm/gfx/tools/windows_metal_run.py",
+      "normalized_sha256": "45ad1cc77c582b3b0c71b6c90d9d7937dad41dac4970050d499c13fa94c7748b"
+    },
+    {
+      "path": "dm/host/hle_sdk16.c",
+      "normalized_sha256": "d973e9c20030b6ba3ab6482d0f8685135a77ce75fa152cb7578aa883356306f2"
+    },
+    {
+      "path": "dm/host/tests/Makefile",
+      "normalized_sha256": "624048f83bd755bdaffa31eeb3ca784747a5a3bf0148e5a5884887472ccce0fd"
+    },
+    {
+      "path": "dm/host/tests/t_language.c",
+      "normalized_sha256": "eee3cbd5312c3dd182d078a3bbc7041e55b2c74e4c4d218f9a1df75af98d6d8b"
+    },
+    {
+      "path": "dm/ios/tools/ios_metal.py",
+      "normalized_sha256": "5126f742b8d7286c9553c0ab2c7bf64c254cc7694c4d98139ad4541d412365d7"
+    },
+    {
+      "path": "dm/tools/tests/run_language_native.py",
+      "normalized_sha256": "1ac48cb496c94d978f00cfed63458dfd75f10bd58961f2d66ab1bc2eef66aca1"
+    },
+    {
+      "path": "dm/tools/tests/run_shell_msl_native.py",
+      "normalized_sha256": "9c23e7eccd11caff1ba478ab89c07e9988472d6035db0d8218eccddac983f6d1"
+    },
+    {
+      "path": "dm/tools/tests/test_shell_identity_policy.py",
+      "normalized_sha256": "8c5094dfaa04c31da297da8a1c7c782ad5e9f92f89656498a5e299befb0231e7"
+    },
+    {
+      "path": "dm/tools/tests/test_shell_msl_policy.py",
+      "normalized_sha256": "fdfe5fe818e14d9d50e229b3bf4fe367f857fbdbf5a1ecdf701d30227d0413d1"
+    },
+    {
+      "path": "dm/tools/tests/test_windows_metal.py",
+      "normalized_sha256": "c2da8890681285ee0c8e31d92cc4ad3ce38143978c9b6b357562f8c00a1e03b2"
+    },
+    {
+      "path": "docs/agents/symptoms.md",
+      "normalized_sha256": "c63df881b227523b89d90c41f64a7bd7225d2b596c2e3f3c23116617910fdedb"
+    },
+    {
+      "path": "docs/reference/rendering.md",
+      "normalized_sha256": "586d7eb5a7a2fdf93f2f62747e217ec16da1d06c243a2ddb3173ad2ade12b141"
+    },
+    {
+      "path": "docs/reference/services.md",
+      "normalized_sha256": "bc2f05af18fc3ea71a2bde836c30bcd01f891006571037927ddc1b212203e481"
+    },
+    {
+      "path": "docs/reference/shaders.md",
+      "normalized_sha256": "4bff7b4ece816fde90f5cd73a6a0924b965197e2a093b70079519ef5e20f3d9c"
+    }
+  ],
+  "scope": "game-free host, compiler adapter, diagnostics and synthetic fixtures; no game resources, generated shaders, keys or device logs",
+  "device_validated": false
+}

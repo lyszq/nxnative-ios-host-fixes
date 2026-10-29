@@ -8,6 +8,8 @@ on:
       - polish-source-manifest.json
       - display-host.patch
       - display-source-manifest.json
+      - graphics-host.patch
+      - graphics-source-manifest.json
       - .github/workflows/host-build.yml
 permissions:
   contents: read
@@ -88,9 +90,23 @@ jobs:
               assert hashlib.sha256(data).hexdigest() == entry['normalized_sha256'], entry['path']
           print('PASS: reviewed stable and display source identities; no game inputs present')
           PY
+          git -C shell apply --check "$GITHUB_WORKSPACE/graphics-host.patch"
+          git -C shell apply "$GITHUB_WORKSPACE/graphics-host.patch"
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          manifest = json.loads(Path('graphics-source-manifest.json').read_text())
+          assert hashlib.sha256(Path('graphics-host.patch').read_bytes()).hexdigest() == manifest['patch_sha256']
+          for entry in manifest['files']:
+              data = (Path('shell') / entry['path']).read_bytes().replace(b'\r\n', b'\n')
+              assert hashlib.sha256(data).hexdigest() == entry['normalized_sha256'], entry['path']
+          print('PASS: reviewed F5 game-free source identities')
+          PY
           cd shell
           python3 -m unittest dm.tools.tests.test_shell_msl_policy dm.tools.tests.test_shell_identity_policy dm.gfx.tests.test_nvn_text_lines dm.gfx.tests.test_rt_survey dm.gfx.tests.test_nvn_timing dm.gfx.tests.test_nvn_sbw dm.gfx.tests.test_nvn_pair_batch dm.gfx.tests.test_nvn_snapraw dm.gfx.tests.test_nvn_arc_ownership dm.tools.tests.test_regress -v
           python3 -W ignore::ResourceWarning -m unittest dm.tools.tests.test_nsp_chain.TableTools dm.tools.tests.test_shader_toolchain_cache -v
+          python3 -m unittest dm.gfx.tests.test_nvn_vbuf_bounds dm.gfx.tests.test_nvn_resource_rebind dm.tools.tests.test_windows_metal -v
+          python3 dm/tools/tests/run_language_native.py
           python3 dm/tools/tests/run_shell_msl_native.py
           python3 dm/tools/tests/run_shell_identity_native.py
           python3 -m unittest dm.tools.tests.test_launcher_settings dm.ios.tests.test_launcher_storage -v
@@ -160,3 +176,5 @@ jobs:
             polish-fixes.patch
             display-source-manifest.json
             display-host.patch
+            graphics-source-manifest.json
+            graphics-host.patch
