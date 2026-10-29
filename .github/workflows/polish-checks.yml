@@ -5,6 +5,8 @@ on:
     paths:
       - polish-fixes.patch
       - polish-source-manifest.json
+      - aspect-prereqs.patch
+      - aspect-source-manifest.json
       - .github/workflows/polish-checks.yml
 permissions:
   contents: read
@@ -82,5 +84,35 @@ jobs:
         env:
           PYTHONUTF8: '1'
         run: python3 -m unittest dm.tools.tests.test_regress -v
+      - name: Apply isolated projection prerequisite test utilities
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          manifest = json.loads(Path('aspect-source-manifest.json').read_text())
+          assert hashlib.sha256(Path('aspect-prereqs.patch').read_bytes()).hexdigest() == manifest['patch_sha256']
+          entry = Path('shell/dm/host/entry.S').read_bytes().replace(b'\r\n', b'\n')
+          assert hashlib.sha256(entry).hexdigest() == manifest['entry_source_sha256'], 'gate entry source drift'
+          PY
+          git -C shell apply --check "$GITHUB_WORKSPACE/aspect-prereqs.patch"
+          git -C shell apply "$GITHUB_WORKSPACE/aspect-prereqs.patch"
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          for entry in json.loads(Path('aspect-source-manifest.json').read_text())['files']:
+              data = (Path('shell') / entry['path']).read_bytes().replace(b'\r\n', b'\n')
+              assert hashlib.sha256(data).hexdigest() == entry['normalized_sha256'], entry['path']
+          print('PASS: experimental utilities match reviewed source; runtime registration remains unchanged')
+          PY
+      - name: Prototype frame and FOV CPU fixtures
+        working-directory: shell
+        run: python3 -m unittest dm.tools.tests.test_projection_prereqs -v
+      - name: Actual ARM64 saved-vector gate fixture
+        working-directory: shell
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          python3 dm/tools/tests/run_obs_frame_native.py
       # Native Foundation row parsing also runs through test_nvn_text_lines above.
       # This workflow intentionally makes no host binary or IPA.

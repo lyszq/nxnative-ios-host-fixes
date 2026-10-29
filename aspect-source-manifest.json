@@ -1,0 +1,37 @@
+{
+  "source_local_commit": "ccb241d002840d59285e958c50dd024b8bb0fb86",
+  "base_local_commit": "4717b8fc3a0bba933f185d090ca1b4f25069169b",
+  "patch_sha256": "0f6880830569e95430351bb92ae0dbeaf854c41b26c08c59aebfe8b3f9d8803b",
+  "files": [
+    {
+      "path": "dm/host/dm_obs_frame.h",
+      "normalized_sha256": "e0e8af4cc02f8fa938b32fc10a6910b0e7fee30443e3fa237ffe7cdcc7b03162"
+    },
+    {
+      "path": "dm/host/dm_vertical_fov.c",
+      "normalized_sha256": "65ae829f8b0a31eec5bd976b3f9db5618997eda31711c566c1825953a4d9a016"
+    },
+    {
+      "path": "dm/host/dm_vertical_fov.h",
+      "normalized_sha256": "895bf476fdb977fd01b42afeb201240fa6498d17ec222aa6a458ef0e7f6fefdd"
+    },
+    {
+      "path": "dm/host/tests/t_obs_frame.c",
+      "normalized_sha256": "0258d559c19d2d328572d1b5128652516afea6836f9aa89ef08a3610862311e4"
+    },
+    {
+      "path": "dm/host/tests/t_vertical_fov.c",
+      "normalized_sha256": "72b8ef8e51265a94249539d37e6295eb80bb90ec6f0fe27a6f2590b6115466da"
+    },
+    {
+      "path": "dm/tools/tests/run_obs_frame_native.py",
+      "normalized_sha256": "a10fab5a3965d742000e8cb19f0224a579d24f0bb229ca459bbdce9dfb1e1f70"
+    },
+    {
+      "path": "dm/tools/tests/test_projection_prereqs.py",
+      "normalized_sha256": "183ab519c627027796f9f9d3774b08e3ffcd2ac9ebb9979dbfc133854489d504"
+    }
+  ],
+  "entry_source_sha256": "ac753892dcc7d1bfdd940a6935f73d627060b1790106569cffc4fab2a1b0a102",
+  "scope": "unused frame/FOV utilities and synthetic native tests; no observer registration, game patch, renderer change or IPA"
+}

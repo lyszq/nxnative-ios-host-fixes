@@ -1,0 +1,718 @@
+diff --git a/dm/host/dm_obs_frame.h b/dm/host/dm_obs_frame.h
+new file mode 100644
+index 0000000..2db96c8
+--- /dev/null
++++ b/dm/host/dm_obs_frame.h
+@@ -0,0 +1,71 @@
++#ifndef DM_OBS_FRAME_H
++#define DM_OBS_FRAME_H
++
++// Typed view of the 800-byte register frame used by dm/host/entry.S::_dm_gate.
++// S-lane helpers operate on exactly four bytes at the start of Qn; they do not
++// touch the rest of that vector, any other vector, GPRs, or saved status.
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <string.h>
++
++enum {
++    DM_OBS_FRAME_X_COUNT = 31,
++    DM_OBS_FRAME_Q_COUNT = 32,
++    DM_OBS_FRAME_Q_OFFSET = 256,
++    DM_OBS_FRAME_Q_STRIDE = 16,
++    DM_OBS_FRAME_NZCV_OFFSET = 768,
++    DM_OBS_FRAME_FPSR_OFFSET = 776,
++    DM_OBS_FRAME_FPCR_OFFSET = 784,
++    DM_OBS_FRAME_BYTES = 800,
++};
++
++typedef struct {
++    uint64_t x[DM_OBS_FRAME_X_COUNT];
++    uint64_t reserved_after_x;
++    uint8_t q[DM_OBS_FRAME_Q_COUNT][DM_OBS_FRAME_Q_STRIDE];
++    uint64_t nzcv;
++    uint64_t fpsr;
++    uint64_t fpcr;
++    uint64_t reserved_tail;
++} dm_obs_frame;
++
++_Static_assert(sizeof(float) == 4, "saved S lanes are 32-bit floats");
++_Static_assert(offsetof(dm_obs_frame, x) == 0, "saved GPR frame offset changed");
++_Static_assert(offsetof(dm_obs_frame, reserved_after_x) == 248, "saved frame padding after GPRs changed");
++_Static_assert(offsetof(dm_obs_frame, q) == DM_OBS_FRAME_Q_OFFSET, "saved Q frame offset changed");
++_Static_assert(offsetof(dm_obs_frame, nzcv) == DM_OBS_FRAME_NZCV_OFFSET, "saved NZCV offset changed");
++_Static_assert(offsetof(dm_obs_frame, fpsr) == DM_OBS_FRAME_FPSR_OFFSET, "saved FPSR offset changed");
++_Static_assert(offsetof(dm_obs_frame, fpcr) == DM_OBS_FRAME_FPCR_OFFSET, "saved FPCR offset changed");
++_Static_assert(offsetof(dm_obs_frame, reserved_tail) == 792, "saved frame tail changed");
++_Static_assert(sizeof(dm_obs_frame) == DM_OBS_FRAME_BYTES, "saved gate-frame size changed");
++
++// frame_bytes must describe the accessible buffer; this API can validate the
++// supplied length and S-register index, but C cannot discover allocation size.
++// The low 32 bits of Qn contain Sn on the supported little-endian Apple ARM64
++// host. memcpy avoids alignment and strict-aliasing assumptions.
++static inline bool dm_obs_frame_read_s(const void *frame, size_t frame_bytes,
++                                       unsigned sreg, float *value) {
++    if (!frame || !value || sreg >= DM_OBS_FRAME_Q_COUNT ||
++        frame_bytes < DM_OBS_FRAME_BYTES) return false;
++
++    float lane;
++    const uint8_t *bytes = (const uint8_t *)frame;
++    const size_t offset = DM_OBS_FRAME_Q_OFFSET + (size_t)sreg * DM_OBS_FRAME_Q_STRIDE;
++    memcpy(&lane, bytes + offset, sizeof lane);
++    *value = lane;
++    return true;
++}
++
++static inline bool dm_obs_frame_write_s(void *frame, size_t frame_bytes,
++                                        unsigned sreg, float value) {
++    if (!frame || sreg >= DM_OBS_FRAME_Q_COUNT ||
++        frame_bytes < DM_OBS_FRAME_BYTES) return false;
++
++    uint8_t *bytes = (uint8_t *)frame;
++    const size_t offset = DM_OBS_FRAME_Q_OFFSET + (size_t)sreg * DM_OBS_FRAME_Q_STRIDE;
++    memcpy(bytes + offset, &value, sizeof value);
++    return true;
++}
++
++#endif
+diff --git a/dm/host/dm_vertical_fov.c b/dm/host/dm_vertical_fov.c
+new file mode 100644
+index 0000000..30f9915
+--- /dev/null
++++ b/dm/host/dm_vertical_fov.c
+@@ -0,0 +1,76 @@
++#include "dm_vertical_fov.h"
++
++#include <math.h>
++
++#define DM_VERTICAL_FOV_PI 3.14159265358979323846264338327950288
++#define DM_VERTICAL_FOV_ASPECT_TOLERANCE 0.0001
++#define DM_VERTICAL_FOV_RELATIVE_GEOMETRY_TOLERANCE 0.00001
++
++static int valid_fovy(float fovy) {
++    return isfinite((double)fovy) && fovy > 0.0f &&
++           (double)fovy < DM_VERTICAL_FOV_PI;
++}
++
++static int valid_aspect(float aspect) {
++    return isfinite((double)aspect) && aspect > 0.0f;
++}
++
++static int aspect_near(float actual, double expected) {
++    return fabs((double)actual - expected) <= DM_VERTICAL_FOV_ASPECT_TOLERANCE;
++}
++
++dm_vertical_fov_result dm_vertical_fov_preserve_horizontal(
++        float fovy_radians, float source_aspect, float target_aspect,
++        float *out_fovy_radians) {
++    if (!out_fovy_radians || !valid_fovy(fovy_radians) ||
++        !valid_aspect(source_aspect) || !valid_aspect(target_aspect)) {
++        return DM_VERTICAL_FOV_INVALID;
++    }
++
++    if (source_aspect == target_aspect) {
++        *out_fovy_radians = fovy_radians;
++        return DM_VERTICAL_FOV_UNCHANGED;
++    }
++
++    const double half_fovy = (double)fovy_radians * 0.5;
++    const double horizontal_tangent = (double)source_aspect / (double)target_aspect * tan(half_fovy);
++    const double result = 2.0 * atan(horizontal_tangent);
++    const float narrowed = (float)result;
++    if (!isfinite(result) || !isfinite((double)narrowed) || narrowed <= 0.0f ||
++        (double)narrowed >= DM_VERTICAL_FOV_PI) {
++        return DM_VERTICAL_FOV_INVALID;
++    }
++
++    const double before = (double)source_aspect * tan(half_fovy);
++    const double after = (double)target_aspect * tan((double)narrowed * 0.5);
++    if (!isfinite(before) || !isfinite(after) || before <= 0.0 || after <= 0.0 ||
++        fabs(after - before) / before > DM_VERTICAL_FOV_RELATIVE_GEOMETRY_TOLERANCE) {
++        return DM_VERTICAL_FOV_INVALID;
++    }
++
++    *out_fovy_radians = narrowed;
++    return DM_VERTICAL_FOV_TRANSFORMED;
++}
++
++dm_vertical_fov_result dm_vertical_fov_extend_16_9_to_4_3(
++        float fovy_radians, float source_aspect, float target_aspect,
++        float *out_fovy_radians) {
++    if (!out_fovy_radians || !valid_fovy(fovy_radians) ||
++        !valid_aspect(source_aspect) || !valid_aspect(target_aspect)) {
++        return DM_VERTICAL_FOV_INVALID;
++    }
++
++    if (source_aspect == target_aspect) {
++        *out_fovy_radians = fovy_radians;
++        return DM_VERTICAL_FOV_UNCHANGED;
++    }
++
++    if (!aspect_near(source_aspect, 16.0 / 9.0) ||
++        !aspect_near(target_aspect, 4.0 / 3.0)) {
++        *out_fovy_radians = fovy_radians;
++        return DM_VERTICAL_FOV_SKIPPED;
++    }
++
++    return dm_vertical_fov_preserve_horizontal(
++        fovy_radians, source_aspect, target_aspect, out_fovy_radians);
++}
+diff --git a/dm/host/dm_vertical_fov.h b/dm/host/dm_vertical_fov.h
+new file mode 100644
+index 0000000..200fe02
+--- /dev/null
++++ b/dm/host/dm_vertical_fov.h
+@@ -0,0 +1,28 @@
++#ifndef DM_VERTICAL_FOV_H
++#define DM_VERTICAL_FOV_H
++
++// Stateless geometry helpers for a vertical-FOV extension. These are not
++// connected to the runtime or enabled by any game profile.
++typedef enum {
++    DM_VERTICAL_FOV_INVALID = 0,
++    DM_VERTICAL_FOV_UNCHANGED,
++    DM_VERTICAL_FOV_TRANSFORMED,
++    DM_VERTICAL_FOV_SKIPPED,
++} dm_vertical_fov_result;
++
++// Keep horizontal half-FOV tangent constant while changing aspect. The output
++// is written only for valid input; equal aspects return the input float exactly.
++// A result that float precision cannot represent within the geometry tolerance
++// is rejected rather than returned with a materially different horizontal view.
++dm_vertical_fov_result dm_vertical_fov_preserve_horizontal(
++    float fovy_radians, float source_aspect, float target_aspect,
++    float *out_fovy_radians);
++
++// Conservative prototype policy: only extend a valid 16:9 input to 4:3.
++// Square, offscreen, and other aspect paths are skipped with the original FOV.
++// The aspect comparison tolerance handles float representation of 16/9 and 4/3.
++dm_vertical_fov_result dm_vertical_fov_extend_16_9_to_4_3(
++    float fovy_radians, float source_aspect, float target_aspect,
++    float *out_fovy_radians);
++
++#endif
+diff --git a/dm/host/tests/t_obs_frame.c b/dm/host/tests/t_obs_frame.c
+new file mode 100644
+index 0000000..c40e232
+--- /dev/null
++++ b/dm/host/tests/t_obs_frame.c
+@@ -0,0 +1,52 @@
++#include "dm_obs_frame.h"
++
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++static void fill(uint8_t *bytes, size_t size) {
++    for (size_t i = 0; i < size; i++) bytes[i] = (uint8_t)(i * 37u + 11u);
++}
++
++int main(void) {
++    uint8_t frame[DM_OBS_FRAME_BYTES];
++    uint8_t original[DM_OBS_FRAME_BYTES];
++    uint8_t expected_lane[sizeof(float)];
++    float got = -7.0f;
++
++    assert(sizeof(dm_obs_frame) == DM_OBS_FRAME_BYTES);
++    fill(original, sizeof original);
++    for (unsigned reg = 0; reg < DM_OBS_FRAME_Q_COUNT; reg++) {
++        memcpy(frame, original, sizeof frame);
++        const float value = (float)reg + 0.25f;
++        memcpy(expected_lane, &value, sizeof value);
++        const size_t lane_offset = DM_OBS_FRAME_Q_OFFSET +
++                                   (size_t)reg * DM_OBS_FRAME_Q_STRIDE;
++
++        assert(dm_obs_frame_write_s(frame, sizeof frame, reg, value));
++        assert(dm_obs_frame_read_s(frame, sizeof frame, reg, &got));
++        assert(got == value);
++        for (size_t i = 0; i < sizeof frame; i++) {
++            const uint8_t expected = (i >= lane_offset && i < lane_offset + sizeof value)
++                ? expected_lane[i - lane_offset]
++                : original[i];
++            assert(frame[i] == expected);
++        }
++    }
++
++    memcpy(frame, original, sizeof frame);
++    got = 123.5f;
++    assert(!dm_obs_frame_read_s(NULL, sizeof frame, 2, &got));
++    assert(got == 123.5f);
++    assert(!dm_obs_frame_read_s(frame, sizeof frame, 2, NULL));
++    assert(!dm_obs_frame_read_s(frame, sizeof frame - 1, 2, &got));
++    assert(!dm_obs_frame_read_s(frame, sizeof frame, DM_OBS_FRAME_Q_COUNT, &got));
++    assert(!dm_obs_frame_write_s(NULL, sizeof frame, 2, 1.0f));
++    assert(!dm_obs_frame_write_s(frame, sizeof frame - 1, 2, 1.0f));
++    assert(!dm_obs_frame_write_s(frame, sizeof frame, DM_OBS_FRAME_Q_COUNT, 1.0f));
++    assert(memcmp(frame, original, sizeof frame) == 0);
++
++    puts("PASS: S-lane access validates null/length/index and changes only the selected low 32 bits");
++    return 0;
++}
+diff --git a/dm/host/tests/t_vertical_fov.c b/dm/host/tests/t_vertical_fov.c
+new file mode 100644
+index 0000000..79c74d1
+--- /dev/null
++++ b/dm/host/tests/t_vertical_fov.c
+@@ -0,0 +1,122 @@
++#include "dm_vertical_fov.h"
++
++#include <assert.h>
++#include <math.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++#define PI 3.14159265358979323846264338327950288
++
++static float rad(float degrees) { return (float)((double)degrees * PI / 180.0); }
++
++static void assert_horizontal_tangent(float fovy_in, float aspect_in,
++                                      float fovy_out, float aspect_out) {
++    const double before = (double)aspect_in * tan((double)fovy_in * 0.5);
++    const double after = (double)aspect_out * tan((double)fovy_out * 0.5);
++    assert(fabs(before - after) < 0.000001);
++}
++
++static void assert_invalid_preserves_output(float fovy, float source, float target) {
++    const uint32_t sentinel_bits = 0x3f123456u;
++    float out;
++    memcpy(&out, &sentinel_bits, sizeof out);
++    assert(dm_vertical_fov_preserve_horizontal(fovy, source, target, &out) ==
++           DM_VERTICAL_FOV_INVALID);
++    uint32_t after_bits;
++    memcpy(&after_bits, &out, sizeof after_bits);
++    assert(after_bits == sentinel_bits);
++}
++
++int main(void) {
++    const float wide = 16.0f / 9.0f;
++    const float classic = 4.0f / 3.0f;
++    const float sixty_degrees = rad(60.0f);
++    float out = -1.0f;
++
++    assert(dm_vertical_fov_preserve_horizontal(sixty_degrees, wide, classic, &out) ==
++           DM_VERTICAL_FOV_TRANSFORMED);
++    assert(fabs((double)out - 1.3121067481206792) < 0.000001);
++    assert_horizontal_tangent(sixty_degrees, wide, out, classic);
++
++    // Reverse aspect change shrinks vertical FOV but preserves horizontal extent.
++    float narrower = -1.0f;
++    assert(dm_vertical_fov_preserve_horizontal(out, classic, wide, &narrower) ==
++           DM_VERTICAL_FOV_TRANSFORMED);
++    assert(narrower < out);
++    assert_horizontal_tangent(out, classic, narrower, wide);
++
++    // Exact equal-aspect path is bit-identical and bypasses all math.
++    const float special = 0.73123455f;
++    uint32_t special_bits, out_bits;
++    memcpy(&special_bits, &special, sizeof special_bits);
++    out = -1.0f;
++    assert(dm_vertical_fov_preserve_horizontal(special, classic, classic, &out) ==
++           DM_VERTICAL_FOV_UNCHANGED);
++    memcpy(&out_bits, &out, sizeof out_bits);
++    assert(out_bits == special_bits);
++
++    // The 16:9->4:3 policy applies only to valid, matching aspects.
++    out = -1.0f;
++    assert(dm_vertical_fov_extend_16_9_to_4_3(sixty_degrees, wide, classic, &out) ==
++           DM_VERTICAL_FOV_TRANSFORMED);
++    assert_horizontal_tangent(sixty_degrees, wide, out, classic);
++    float repeated = -1.0f;
++    uint32_t repeated_bits;
++    assert(dm_vertical_fov_extend_16_9_to_4_3(sixty_degrees, wide, classic, &repeated) ==
++           DM_VERTICAL_FOV_TRANSFORMED);
++    memcpy(&out_bits, &out, sizeof out_bits);
++    memcpy(&repeated_bits, &repeated, sizeof repeated_bits);
++    assert(out_bits == repeated_bits);  // Same fresh input has no cached/recursive state.
++    out = -1.0f;
++    assert(dm_vertical_fov_extend_16_9_to_4_3(sixty_degrees, 1.0f, classic, &out) ==
++           DM_VERTICAL_FOV_SKIPPED);
++    assert(out == sixty_degrees);  // Known square-aspect caller stays unchanged.
++    out = -1.0f;
++    assert(dm_vertical_fov_extend_16_9_to_4_3(special, classic, classic, &out) ==
++           DM_VERTICAL_FOV_UNCHANGED);
++    memcpy(&out_bits, &out, sizeof out_bits);
++    assert(out_bits == special_bits);
++    out = -1.0f;
++    assert(dm_vertical_fov_extend_16_9_to_4_3(sixty_degrees, wide, 2.0f, &out) ==
++           DM_VERTICAL_FOV_SKIPPED);
++    assert(out == sixty_degrees);
++    out = -1.0f;
++    assert(dm_vertical_fov_extend_16_9_to_4_3(sixty_degrees, wide + 0.00005f,
++                                               classic - 0.00005f, &out) ==
++           DM_VERTICAL_FOV_TRANSFORMED);
++
++    assert_invalid_preserves_output(0.0f, wide, classic);
++    assert_invalid_preserves_output(-0.1f, wide, classic);
++    assert_invalid_preserves_output((float)PI, wide, classic);
++    assert_invalid_preserves_output(NAN, wide, classic);
++    assert_invalid_preserves_output(INFINITY, wide, classic);
++    assert_invalid_preserves_output(sixty_degrees, 0.0f, classic);
++    assert_invalid_preserves_output(sixty_degrees, wide, -1.0f);
++    assert_invalid_preserves_output(sixty_degrees, NAN, classic);
++    assert_invalid_preserves_output(sixty_degrees, wide, INFINITY);
++    const float smallest_positive = nextafterf(0.0f, 1.0f);
++    assert_invalid_preserves_output(smallest_positive, wide, classic);
++    const float small_representable_fovy = 0.0001f;
++    out = -1.0f;
++    assert(dm_vertical_fov_preserve_horizontal(small_representable_fovy, wide, classic, &out) ==
++           DM_VERTICAL_FOV_TRANSFORMED);
++    assert(out > 0.0f && isfinite(out));
++    const float closest_float_below_pi = nextafterf((float)PI, 0.0f);
++    assert_invalid_preserves_output(closest_float_below_pi, wide, classic);
++    // Still accept a large FOV when the transformed float preserves geometry.
++    const float large_fovy = rad(170.0f);
++    out = -1.0f;
++    assert(dm_vertical_fov_preserve_horizontal(large_fovy, wide, classic, &out) ==
++           DM_VERTICAL_FOV_TRANSFORMED);
++    const double large_before = (double)wide * tan((double)large_fovy * 0.5);
++    const double large_after = (double)classic * tan((double)out * 0.5);
++    assert(fabs(large_before - large_after) / large_before < 0.00001);
++    out = 12.0f;
++    assert(dm_vertical_fov_preserve_horizontal(sixty_degrees, wide, classic, NULL) ==
++           DM_VERTICAL_FOV_INVALID);
++    assert(out == 12.0f);
++
++    puts("PASS: horizontal-FOV geometry, 16:9-to-4:3 eligibility, exact identity, and invalid edges");
++    return 0;
++}
+diff --git a/dm/tools/tests/run_obs_frame_native.py b/dm/tools/tests/run_obs_frame_native.py
+new file mode 100644
+index 0000000..128e34c
+--- /dev/null
++++ b/dm/tools/tests/run_obs_frame_native.py
+@@ -0,0 +1,242 @@
++#!/usr/bin/env python3
++"""Run the saved-Q-lane fixture on macOS ARM64 against the real _dm_gate body.
++
++The Windows/Zig C fixtures are separate and cover the portable frame/math APIs.
++This native test additionally executes the extracted assembly body and replays
++the actual first instruction of the projection wrapper in isolation. It does
++not execute a game, install a hook, or test a complete OBS rewrite stub.
++"""
++from pathlib import Path
++import platform
++import re
++import shutil
++import subprocess
++import sys
++import tempfile
++
++
++ROOT = Path(__file__).resolve().parents[3]
++
++
++def extract_gate_body(entry):
++    start = entry.index(".globl _dm_gate")
++    end = entry.index(".globl _dm_thread_enter", start)
++    return entry[start:end]
++
++
++def first_gate_instruction(body):
++    instructions = body.split("_dm_gate:", 1)[1].splitlines()
++    for line in instructions:
++        instruction = line.split("//", 1)[0].strip()
++        if instruction:
++            return instruction
++    raise ValueError("_dm_gate body has no instructions")
++
++
++def main():
++    if sys.platform != "darwin":
++        print("SKIP: native _dm_gate fixture requires macOS ARM64 and Xcode; portable C fixtures are separate")
++        return 77
++    if platform.machine().lower() not in ("arm64", "aarch64"):
++        print("SKIP: native _dm_gate fixture requires an ARM64 Mac")
++        return 77
++    xcrun = shutil.which("xcrun")
++    if not xcrun or subprocess.run([xcrun, "--find", "clang"], capture_output=True).returncode != 0:
++        print("SKIP: native _dm_gate fixture requires Xcode clang")
++        return 77
++
++    entry_path = ROOT / "dm/host/entry.S"
++    entry = entry_path.read_text(encoding="utf-8")
++    actual_gate_body = extract_gate_body(entry)
++    gate_first_instruction = first_gate_instruction(actual_gate_body)
++    if not gate_first_instruction.startswith("sub sp, sp, #800"):
++        raise SystemExit(f"unexpected _dm_gate entry instruction: {gate_first_instruction}")
++
++    # Independently replay the verified retail wrapper's first instruction.
++    # main+0x73de60 decoded as STP D11,D10,[SP,#-0x40]! (word 0x6dbc2beb,
++    # little-endian bytes eb2bbc6d); this test does not read or patch the NSO.
++    projection_entry_instruction = "stp d11, d10, [sp, #-0x40]!"
++
++    qloads = "\n".join(
++        f"    ldp q{q}, q{q + 1}, [x19, #{q * 16}]" for q in range(0, 32, 2))
++    qstores = "\n".join(
++        f"    stp q{q}, q{q + 1}, [x20, #{q * 16}]" for q in range(0, 32, 2))
++    projection_entry_replay = f"""
++.globl _dm_test_replay_projection_entry
++.p2align 2
++_dm_test_replay_projection_entry:
++    stp d10, d11, [sp, #-16]!
++    ldr d10, [x0]
++    ldr d11, [x0, #8]
++    mov x9, sp
++    {projection_entry_instruction}
++    ldr x10, [sp]
++    str x10, [x1]
++    ldr x10, [sp, #8]
++    str x10, [x1, #8]
++    sub x10, x9, sp
++    str x10, [x1, #16]
++    add sp, sp, #64
++    cmp sp, x9
++    cset w0, eq
++    ldp d10, d11, [sp], #16
++    ret
++"""
++    test_call_gate = f"""
++.globl _dm_test_invoke_gate
++.p2align 2
++_dm_test_invoke_gate:
++    stp x29, x30, [sp, #-160]!
++    mov x29, sp
++    stp x19, x20, [sp, #16]
++    str x21, [sp, #32]
++    stp d8, d9, [sp, #48]
++    stp d10, d11, [sp, #64]
++    stp d12, d13, [sp, #80]
++    stp d14, d15, [sp, #96]
++    mrs x9, fpcr
++    str x9, [sp, #128]
++    mrs x9, fpsr
++    str x9, [sp, #136]
++    mrs x9, nzcv
++    str x9, [sp, #144]
++    mov x19, x0
++    mov x20, x1
++    mov x21, x5
++{qloads}
++    msr nzcv, x2
++    msr fpsr, x3
++    msr fpcr, x4
++    bl _dm_gate
++{qstores}
++    mrs x9, nzcv
++    str x9, [x21]
++    mrs x9, fpsr
++    str x9, [x21, #8]
++    mrs x9, fpcr
++    str x9, [x21, #16]
++    ldp d8, d9, [sp, #48]
++    ldp d10, d11, [sp, #64]
++    ldp d12, d13, [sp, #80]
++    ldp d14, d15, [sp, #96]
++    ldp x19, x20, [sp, #16]
++    ldr x21, [sp, #32]
++    ldr x9, [sp, #128]
++    msr fpcr, x9
++    ldr x9, [sp, #136]
++    msr fpsr, x9
++    ldr x9, [sp, #144]
++    msr nzcv, x9
++    ldp x29, x30, [sp], #160
++    ret
++"""
++    assembly = ".text\n" + actual_gate_body + "\n" + projection_entry_replay + "\n" + test_call_gate
++    harness = r'''#include "dm_obs_frame.h"
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++extern void dm_test_invoke_gate(const uint8_t *, uint8_t *, uint64_t, uint64_t,
++                                uint64_t, uint64_t *);
++extern int dm_test_replay_projection_entry(const uint64_t *, uint64_t *);
++
++static _Alignas(16) uint8_t q_input[32 * 16];
++static _Alignas(16) uint8_t q_output[32 * 16];
++static uint8_t frame_before[DM_OBS_FRAME_BYTES];
++static uint64_t status_after[3];
++static const uint64_t initial_nzcv = 0xa0000000u;
++static const uint64_t initial_fpsr = 0x00000011u;
++static const uint64_t initial_fpcr = 0x00400000u;
++static int callback_count;
++static const float input_fovy = 1.125f;
++static const float input_aspect = 16.0f / 9.0f;
++static const float changed_fovy = 1.375f;
++static const float changed_aspect = 4.0f / 3.0f;
++
++uint64_t gate_dispatch(uint64_t ret_addr, uint64_t *regs) {
++    assert(ret_addr != 0);
++    assert(regs != NULL);
++    callback_count++;
++    memcpy(frame_before, regs, sizeof frame_before);
++    assert(memcmp((const uint8_t *)regs + DM_OBS_FRAME_Q_OFFSET,
++                  q_input, sizeof q_input) == 0);
++    assert(*(const uint64_t *)((const uint8_t *)regs + DM_OBS_FRAME_NZCV_OFFSET) == initial_nzcv);
++    assert(*(const uint64_t *)((const uint8_t *)regs + DM_OBS_FRAME_FPSR_OFFSET) == initial_fpsr);
++    assert(*(const uint64_t *)((const uint8_t *)regs + DM_OBS_FRAME_FPCR_OFFSET) == initial_fpcr);
++
++    float fovy = 0.0f, aspect = 0.0f;
++    assert(dm_obs_frame_read_s(regs, DM_OBS_FRAME_BYTES, 2, &fovy));
++    assert(dm_obs_frame_read_s(regs, DM_OBS_FRAME_BYTES, 3, &aspect));
++    assert(fovy == input_fovy && aspect == input_aspect);
++    assert(dm_obs_frame_write_s(regs, DM_OBS_FRAME_BYTES, 2, changed_fovy));
++    assert(dm_obs_frame_write_s(regs, DM_OBS_FRAME_BYTES, 3, changed_aspect));
++
++    const uint8_t *now = (const uint8_t *)regs;
++    for (size_t i = 0; i < DM_OBS_FRAME_BYTES; i++) {
++        const int target_lane = (i >= DM_OBS_FRAME_Q_OFFSET + 2 * DM_OBS_FRAME_Q_STRIDE &&
++                                 i < DM_OBS_FRAME_Q_OFFSET + 2 * DM_OBS_FRAME_Q_STRIDE + sizeof(float)) ||
++                                (i >= DM_OBS_FRAME_Q_OFFSET + 3 * DM_OBS_FRAME_Q_STRIDE &&
++                                 i < DM_OBS_FRAME_Q_OFFSET + 3 * DM_OBS_FRAME_Q_STRIDE + sizeof(float));
++        if (!target_lane) assert(now[i] == frame_before[i]);
++    }
++    assert(*(const uint64_t *)now == *(const uint64_t *)frame_before);  // x0 unchanged
++
++    // Make the callback disturb CPU flags/control state; _dm_gate must restore
++    // its pre-callback NZCV, FPSR, and FPCR from its real stack frame.
++    const uint64_t changed_nzcv = 0x50000000u, changed_fpsr = 0, changed_fpcr = 0;
++    __asm__ volatile("msr nzcv, %0\n\tmsr fpsr, %1\n\tmsr fpcr, %2"
++                     : : "r"(changed_nzcv), "r"(changed_fpsr), "r"(changed_fpcr)
++                     : "cc", "memory");
++    return 0;
++}
++
++int main(void) {
++    for (size_t i = 0; i < sizeof q_input; i++) q_input[i] = (uint8_t)(i * 29u + 7u);
++    memcpy(q_input + 2 * 16, &input_fovy, sizeof input_fovy);
++    memcpy(q_input + 3 * 16, &input_aspect, sizeof input_aspect);
++    memset(q_output, 0, sizeof q_output);
++    dm_test_invoke_gate(q_input, q_output, initial_nzcv, initial_fpsr, initial_fpcr, status_after);
++    assert(callback_count == 1);
++
++    uint8_t expected_q[sizeof q_input];
++    memcpy(expected_q, q_input, sizeof expected_q);
++    memcpy(expected_q + 2 * 16, &changed_fovy, sizeof changed_fovy);
++    memcpy(expected_q + 3 * 16, &changed_aspect, sizeof changed_aspect);
++    assert(memcmp(q_output, expected_q, sizeof expected_q) == 0);
++    assert(status_after[0] == initial_nzcv);
++    assert(status_after[1] == initial_fpsr);
++    assert(status_after[2] == initial_fpcr);
++
++    const uint64_t entry_pair[2] = {0x1122334455667788u, 0x99aabbccddeeff00u};
++    uint64_t entry_saved[3] = {0, 0, 0};
++    assert(dm_test_replay_projection_entry(entry_pair, entry_saved) == 1);
++    assert(entry_saved[0] == entry_pair[1]);  // STP d11,d10 stores d11 first.
++    assert(entry_saved[1] == entry_pair[0]);
++    assert(entry_saved[2] == 64);             // Exact instruction's pre-index stack delta.
++
++    puts("PASS: extracted _dm_gate accepted only S2/S3 frame edits, restored other Q lanes and CPU status; isolated projection-entry STP balanced its stack");
++    return 0;
++}
++'''
++
++    with tempfile.TemporaryDirectory(prefix="obs-frame-native-") as td:
++        directory = Path(td)
++        asm_path = directory / "entry_fixture.S"
++        c_path = directory / "harness.c"
++        executable = directory / "test_obs_frame"
++        asm_path.write_text(assembly, encoding="utf-8", newline="\n")
++        c_path.write_text(harness, encoding="utf-8", newline="\n")
++        assembler = directory / "entry_fixture.o"
++        c_object = directory / "harness.o"
++        target_flags = ["-arch", "arm64", "-mmacosx-version-min=15.0"]
++        subprocess.run([xcrun, "clang", *target_flags, "-c", str(asm_path), "-o", str(assembler)], check=True)
++        subprocess.run([xcrun, "clang", *target_flags, "-std=c11", "-O1", "-UNDEBUG", "-Wall", "-Wextra", "-Werror",
++                        "-I", str(ROOT / "dm/host"), "-c", str(c_path), "-o", str(c_object)], check=True)
++        subprocess.run([xcrun, "clang", *target_flags, str(assembler), str(c_object), "-o", str(executable)], check=True)
++        subprocess.run([str(executable)], check=True)
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/dm/tools/tests/test_projection_prereqs.py b/dm/tools/tests/test_projection_prereqs.py
+new file mode 100644
+index 0000000..ce85342
+--- /dev/null
++++ b/dm/tools/tests/test_projection_prereqs.py
+@@ -0,0 +1,85 @@
++"""CPU and source-layout tests for the unconnected projection prerequisites."""
++from pathlib import Path
++import re
++import shutil
++import subprocess
++import sys
++import tempfile
++import unittest
++from dm.tools.tests.run_obs_frame_native import extract_gate_body, first_gate_instruction
++
++
++ROOT = Path(__file__).resolve().parents[3]
++HOST = ROOT / "dm/host"
++
++
++class ProjectionPrereqTests(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.entry = (HOST / "entry.S").read_text(encoding="utf-8")
++        cls.frame_header = (HOST / "dm_obs_frame.h").read_text(encoding="utf-8")
++        cls.native_runner = (ROOT / "dm/tools/tests/run_obs_frame_native.py").read_text(encoding="utf-8")
++
++    def test_typed_frame_offsets_match_real_entry_assembly(self):
++        gate = self.entry.split("_dm_gate:", 1)[1].split("// 3) dm_thread_enter", 1)[0]
++        qstores = [tuple(map(int, m.groups())) for m in re.finditer(
++            r"\bstp\s+q(\d+),\s*q(\d+),\s*\[sp,\s*#(\d+)\]", gate)]
++        qloads = [tuple(map(int, m.groups())) for m in re.finditer(
++            r"\bldp\s+q(\d+),\s*q(\d+),\s*\[sp,\s*#(\d+)\]", gate)]
++        expected = [(q, q + 1, 256 + q * 16) for q in range(0, 32, 2)]
++        self.assertEqual(qstores, expected)
++        self.assertEqual(qloads, expected)
++        self.assertRegex(gate, r"sub\s+sp,\s*sp,\s*#800")
++        self.assertRegex(gate, r"add\s+sp,\s*sp,\s*#800")
++        for status, offset in (("nzcv", 768), ("fpsr", 776), ("fpcr", 784)):
++            self.assertRegex(gate, rf"mrs\s+x9,\s*{status}\s*\n\s*str\s+x9,\s*\[sp,\s*#{offset}\]")
++            self.assertRegex(gate, rf"ldr\s+x9,\s*\[sp,\s*#{offset}\]\s*\n\s*msr\s+{status},\s*x9")
++        self.assertIn("DM_OBS_FRAME_Q_OFFSET = 256", self.frame_header)
++        self.assertIn("DM_OBS_FRAME_Q_STRIDE = 16", self.frame_header)
++        self.assertIn("offsetof(dm_obs_frame, q) == DM_OBS_FRAME_Q_OFFSET", self.frame_header)
++        self.assertIn("sizeof(dm_obs_frame) == DM_OBS_FRAME_BYTES", self.frame_header)
++
++    def test_native_runner_extracts_gate_and_has_explicit_platform_skip(self):
++        self.assertEqual(first_gate_instruction(extract_gate_body(self.entry)), "sub sp, sp, #800")
++        self.assertIn('entry.index(".globl _dm_gate")', self.native_runner)
++        self.assertIn('entry.index(".globl _dm_thread_enter", start)', self.native_runner)
++        self.assertIn('sys.platform != "darwin"', self.native_runner)
++        self.assertIn('platform.machine().lower()', self.native_runner)
++        self.assertIn("gate_first_instruction", self.native_runner)
++        self.assertIn('projection_entry_instruction = "stp d11, d10, [sp, #-0x40]!"', self.native_runner)
++
++    def test_cpu_c_fixtures(self):
++        if sys.platform == "darwin" and shutil.which("xcrun"):
++            compiler = [shutil.which("xcrun"), "clang"]
++        elif shutil.which("zig"):
++            compiler = [shutil.which("zig"), "cc"]
++        elif shutil.which("clang") or shutil.which("cc"):
++            compiler = [shutil.which("clang") or shutil.which("cc")]
++        else:
++            self.skipTest("A C compiler is required")
++
++        cases = [
++            ("t_obs_frame.c", [str(HOST / "tests/t_obs_frame.c")]),
++            ("t_vertical_fov.c", [str(HOST / "tests/t_vertical_fov.c"),
++                                   str(HOST / "dm_vertical_fov.c"), "-lm"]),
++        ]
++        with tempfile.TemporaryDirectory(prefix="projection-prereq-") as td:
++            for name, sources in cases:
++                executable = Path(td) / Path(name).stem
++                command = compiler + ["-std=c11", "-O1", "-UNDEBUG", "-Wall", "-Wextra", "-Werror",
++                           "-I", str(HOST), *sources, "-o", str(executable)]
++                try:
++                    built = subprocess.run(command, text=True, capture_output=True, check=True)
++                except subprocess.CalledProcessError as exc:
++                    detail = (exc.stdout or "") + (exc.stderr or "")
++                    if "unable to find zig installation directory" in detail:
++                        self.skipTest("Zig is present but its WinGet package cannot locate its bundled lib directory")
++                    self.fail(f"C fixture compile failed: {command!r}\n{detail}")
++                self.assertEqual(built.returncode, 0)
++                ran = subprocess.run([str(executable)], text=True, capture_output=True)
++                self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
++                self.assertIn("PASS:", ran.stdout)
++
++
++if __name__ == "__main__":
++    unittest.main()
