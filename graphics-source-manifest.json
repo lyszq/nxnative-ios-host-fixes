@@ -1,7 +1,7 @@
 {
-  "source_local_commit": "05e328242a9fd4914b5f4e0f002efe8d63dde955",
+  "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "f6a1ef81dd8c0e66d3e2a8bfa3a56c71f81c0edddbc2709a9e8069b6ac46207b",
+  "patch_sha256": "eb66cccab11dc1cacb24481a8ef3e913be749f27498d7bb4ebfe828c43e775bb",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
@@ -9,7 +9,7 @@
     },
     {
       "path": "dm/gfx/nvn/dm_shell_msl.h",
-      "normalized_sha256": "56aad66a21699968731fa9d06c95ab4dcecbb6cc553b48ba2abad88e9ec3c258"
+      "normalized_sha256": "0b25bcd14e9b9f2ab9726a0e0989e121bf3d4bbaa3d3d7c8a2b90fcfdfeaa41d"
     },
     {
       "path": "dm/gfx/nvn/dmsh_chain.h",
@@ -25,7 +25,7 @@
     },
     {
       "path": "dm/gfx/nvn/nvn_mtl.m",
-      "normalized_sha256": "1efbd55b66e6da17071a20c9a23ba0e1613b9ca9277dc210ba5190b016838162"
+      "normalized_sha256": "b26bad6c532e4a1f7bed4caf51c4f8ff05f96d872a125ed7f3c25b25d032b385"
     },
     {
       "path": "dm/gfx/tests/run_nvn_resource_rebind_native.py",
@@ -80,6 +80,10 @@
       "normalized_sha256": "eee3cbd5312c3dd182d078a3bbc7041e55b2c74e4c4d218f9a1df75af98d6d8b"
     },
     {
+      "path": "dm/ios/Sources/dm_shader_learn.h",
+      "normalized_sha256": "dd45664518eaf983c1eb4de09223fc18319ea1135544bcd1253a0b52b7092f83"
+    },
+    {
       "path": "dm/ios/tools/ios_metal.py",
       "normalized_sha256": "5126f742b8d7286c9553c0ab2c7bf64c254cc7694c4d98139ad4541d412365d7"
     },
@@ -89,7 +93,7 @@
     },
     {
       "path": "dm/tools/tests/run_shell_msl_native.py",
-      "normalized_sha256": "9c23e7eccd11caff1ba478ab89c07e9988472d6035db0d8218eccddac983f6d1"
+      "normalized_sha256": "9f8c82e5905065697ed7e8d82b8a6e44d437d02cec4da6f51f280c23b5543a2c"
     },
     {
       "path": "dm/tools/tests/test_shell_identity_policy.py",
@@ -97,7 +101,7 @@
     },
     {
       "path": "dm/tools/tests/test_shell_msl_policy.py",
-      "normalized_sha256": "fdfe5fe818e14d9d50e229b3bf4fe367f857fbdbf5a1ecdf701d30227d0413d1"
+      "normalized_sha256": "63618a395b4868ea48b80da46c80f32313138707f3498a66fd422f817c366f07"
     },
     {
       "path": "dm/tools/tests/test_windows_metal.py",
