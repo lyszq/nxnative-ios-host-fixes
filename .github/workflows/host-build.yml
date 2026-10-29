@@ -115,10 +115,14 @@ jobs:
               for case in cases:
                   result = subprocess.run([str(asset),case],capture_output=True,text=True,check=True)
                   assert f'PASS: Odyssey display fixture scenario {case}' in result.stdout, case
+                  diagnostics = result.stdout + result.stderr
                   if case == 'projection-trace':
-                      assert result.stdout.count(' first input ') == 32, result.stdout
-                      assert result.stdout.count(' lifetime calls=') == 8 * 32, result.stdout
-                  else: assert 'Odyssey projection trace' not in result.stdout, case
+                      assert diagnostics.count(' first input ') == 32, diagnostics
+                      assert diagnostics.count(' lifetime calls=') == 8 * 32, diagnostics
+                      summaries = [line for line in diagnostics.splitlines() if 'Odyssey projection trace counts:' in line]
+                      assert len(summaries) == 8, diagnostics
+                      assert all('tracked=32' in line and 'invalid=1' in line and 'overflow=1' in line for line in summaries), diagnostics
+                  else: assert 'Odyssey projection trace' not in diagnostics, case
               for case in ('high-wrong-build','high-missing-gate'):
                   result = subprocess.run([str(asset),case],capture_output=True)
                   assert result.returncode != 0, case
