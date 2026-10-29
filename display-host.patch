@@ -2298,7 +2298,7 @@ index 0000000..d079600
 +if __name__ == "__main__":
 +    raise SystemExit(main())
 diff --git a/dm/tools/tests/test_launcher_settings.py b/dm/tools/tests/test_launcher_settings.py
-index cd43d2d..3931f2b 100644
+index cd43d2d..847a23a 100644
 --- a/dm/tools/tests/test_launcher_settings.py
 +++ b/dm/tools/tests/test_launcher_settings.py
 @@ -14,15 +14,15 @@ spec = importlib.util.spec_from_file_location('launcher_settings', ROOT / 'dm/ga
@@ -2320,7 +2320,7 @@ index cd43d2d..3931f2b 100644
  
  
  class LauncherSettingsTests(unittest.TestCase):
-@@ -80,6 +80,72 @@ class LauncherSettingsTests(unittest.TestCase):
+@@ -80,6 +80,74 @@ class LauncherSettingsTests(unittest.TestCase):
          with self.assertRaisesRegex(SystemExit, 'SETTINGS_PLATFORM must be ios or mac'):
              build(WONDER, 'nvn', 'mca')
  
@@ -2369,6 +2369,8 @@ index cd43d2d..3931f2b 100644
 +                self.assertEqual(rows['DM_ODYSSEY_4_3']['default'], '0')
 +
 +        profile_path = ROOT / 'dm/games/0100000000010000/patches.py'
++        if not profile_path.is_file():
++            return  # The public host-only CI capsule excludes local Guest rewrite profiles.
 +        with patch.dict(os.environ, {}, clear=False):
 +            os.environ.pop('DM_ODYSSEY_DISPLAY_PROFILE', None)
 +            os.environ['DM_ODYSSEY_DISPLAY_PROFILE'] = 'launcher-highres'
@@ -2393,7 +2395,7 @@ index cd43d2d..3931f2b 100644
      def test_malformed_platform_defaults_are_rejected(self):
          for default in ('1|', '|0', '1|0|1'):
              with self.subTest(default=default), tempfile.TemporaryDirectory() as tmp:
-@@ -100,10 +166,11 @@ class LauncherSettingsTests(unittest.TestCase):
+@@ -100,10 +168,11 @@ class LauncherSettingsTests(unittest.TestCase):
          self.assertFalse({'level', 'needs'} & set(rows['DM_METAL_HUD']), 'a row without meta has no optional fields')
  
      def test_meta_is_strict(self):
@@ -2407,7 +2409,7 @@ index cd43d2d..3931f2b 100644
              with self.subTest(bad=bad), self.assertRaises(SystemExit) as e:
                  settings.meta(bad, 1)
              self.assertIn(why, str(e.exception))
-@@ -163,6 +230,19 @@ class LauncherSettingsTests(unittest.TestCase):
+@@ -163,6 +232,19 @@ class LauncherSettingsTests(unittest.TestCase):
                  self.assertIn(why, str(e.exception))
  
  

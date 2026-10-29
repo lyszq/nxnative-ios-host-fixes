@@ -1,7 +1,7 @@
 {
-  "source_local_commit": "525186cb10fec8c1f9963629429b490853cd5aa9",
+  "source_local_commit": "4c6ae4dafcd4ad3cb79d4bdec3ebf18df2eb6bbf",
   "base_local_commit": "ff01d62f72a70f51657b70bcd7c5bd3809163dc0",
-  "patch_sha256": "19e25ef3b8f2ba516cf76d983835bf5d6c9ecec7ebb087976a2412fe53cb8257",
+  "patch_sha256": "926354aa73930ac623b054a4c04850815686f2ad746dd4ef087893c7ce9b804f",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
@@ -109,7 +109,7 @@
     },
     {
       "path": "dm/tools/tests/test_launcher_settings.py",
-      "normalized_sha256": "f1e9fb8e1b83fcb6ffb60ec82c93d41f5c141404a7dc0fff0ad2b5c3d1fca350"
+      "normalized_sha256": "e8f749f6c6517553b3f2e4c3e2e86f62315fa23c5f4ce700e0df74452251d650"
     },
     {
       "path": "docs/frontends.md",
