@@ -1,0 +1,2497 @@
+diff --git a/dm/games/0100000000010000/README.md b/dm/games/0100000000010000/README.md
+index 1b11b42..4d5d838 100644
+--- a/dm/games/0100000000010000/README.md
++++ b/dm/games/0100000000010000/README.md
+@@ -88,3 +88,10 @@ General host and tool changes first needed here; each applies to every game:
+ - The silent first minute of sound.
+ - development.md calls SDK 7.3.2 "the oldest so far"; Mario Kart 8 Deluxe (SDK 4.4.0) is older now.
+ - `game.tsv` says values marked "Mario's" are not measured yet, but none is marked.
++
++
++## Experimental launcher display profile
++
++The opt-in `DM_ODYSSEY_DISPLAY_PROFILE=launcher` rewrite pairs four original-word-checked observation gates with the host's `ODYSSEY_DISPLAY_V1` controls. It supports stock, 720p, 900p and 1080p targets plus optional vertical FOV extension to 4:3. The host reads the choice after the launcher and preloader join, verifies the exact main build and paired gates, checks the selected private graphics-quality overlay hash, then changes only the saved dimension arguments and projection S2/S3 values. The original projection setter recalculates its caches and frustum. Square and already-4:3 inputs are skipped. The iOS view and touch normalization use the accepted picture aspect.
++
++Stock/off leaves the register frame and existing overlays unchanged. Handheld mode ignores stale display choices. The quality overlays preserve all non-dimension fields; no shader source, compiler options, cache epoch or PSO key schema changes. The full dynamic quality ladder still applies, so a target is not a per-frame resolution guarantee. Native CPU/frame fixtures exist; iPad scene attachments, HUD/cutscene correctness, frame pacing and performance remain unvalidated. Keep the original Guest and RomFS for rollback. Higher modes require separately coordinated memory pools and are not implied by this capability.
+diff --git a/dm/games/settings.py b/dm/games/settings.py
+index d16b9cb..12ca4f8 100644
+--- a/dm/games/settings.py
++++ b/dm/games/settings.py
+@@ -17,6 +17,7 @@ SCHEMA = 1   # launcher.json's version (docs/launcher.schema.json); it grows onl
+ META = {
+     'level': r'basic',                       # a setting a front end shows first; without it, the front end decides
+     'needs': r'DM_[A-Z0-9_]+=[^;=]+',        # <VAR>=<value>: a sub-setting, drawn only while the row that sets <VAR> has that value
++    'control': r'slider',                    # discrete choice slider; option values remain the stored environment values
+ }
+ 
+ 
+@@ -32,6 +33,26 @@ def meta(text, n):
+     return out
+ 
+ 
++def choice_options(values, n, capabilities=None):
++    """Parse value=label options; a final [cap:NAME] limits an option to a packaged runtime capability."""
++    out = []
++    for raw in values.split(','):
++        value, eq, label = raw.partition('=')
++        if not eq or not value or not label:
++            sys.exit(f'settings.tsv:{n}: choice values are value=label,...')
++        capability = None
++        if '[cap' in label:
++            m = re.fullmatch(r'(.+)\[cap:([A-Z][A-Z0-9_]*)\]', label)
++            if not m:
++                sys.exit(f'settings.tsv:{n}: malformed choice capability annotation in {label!r}; expected [cap:CAPABILITY_NAME]')
++            label, capability = m.groups()
++        if not label:
++            sys.exit(f'settings.tsv:{n}: choice labels must not be empty')
++        if capability is None or capabilities is None or capability in capabilities:
++            out.append([value, label])
++    return out
++
++
+ def render_base(g):
+     """The profile's render_base ("<w>x<h> <w>x<h>": the 3D views' base size docked, then handheld, which DM_RENDER_SCALE scales) as
+     {"docked": [w, h], "handheld": [w, h]}, for a front end to show the render scale in pixels; None when the profile has none"""
+@@ -56,8 +77,12 @@ def fixups_keys(path):   # '# KEY<TAB>value' header rows of a rewriter table
+     return {m[1] for m in re.finditer(r'^# (\w+)\t', path.read_text(encoding='utf-8'), re.M)}
+ 
+ 
+-def build(gid, patched, control):
++def build(gid, patched, control, capabilities=()):
++    """Build the manifest; capability-gated rows require an explicitly packaged runtime consumer."""
+     platform = os.environ.get('SETTINGS_PLATFORM') or 'ios'
++    capabilities = set(capabilities or ())
++    if any(not isinstance(c, str) or not re.fullmatch(r'[A-Z][A-Z0-9_]*', c) for c in capabilities):
++        sys.exit(f'invalid settings capability: {", ".join(sorted(map(str, capabilities)))}')
+     if platform not in ('ios', 'mac'): sys.exit(f'SETTINGS_PLATFORM must be ios or mac: {platform}')
+     g = game.load(gid)
+     macros = dict(re.findall(r'^#define (DM_GAME_\w+) (.*)$', game.header(g), re.M))   # the host's own defaults, as it is compiled for this game
+@@ -72,6 +97,10 @@ def build(gid, patched, control):
+         if cond == 'always': return True
+         if cond == 'languages>1': return len(langs) > 1
+         if cond.startswith('fixups:'): return cond[7:] in keys
++        if cond.startswith('capability:'):
++            name = cond[len('capability:'):]
++            if not re.fullmatch(r'[A-Z][A-Z0-9_]*', name): sys.exit(f'settings.tsv:{n}: invalid capability condition {cond!r}')
++            return name in capabilities
+         if cond.startswith('gfxapi:'): return os.environ.get('GFXAPI', '') == cond[7:]
+         if cond.startswith('platform:'): return platform == cond[9:]
+         m = re.fullmatch(r'(DM_GAME_\w+)(!=|==)(.*)', cond)
+@@ -89,14 +118,15 @@ def build(gid, patched, control):
+             return {'YES': '1', 'NO': '0', '': '0'}.get(v, v)   # build_ipa.sh's yes / no switches
+         return d
+ 
+-    def takes(kind, values):   # the values a row's variable can take, for needs; None when any (a range, the game's languages)
++    def takes(kind, values, n):   # the values a row's variable can take, for needs; None when any (a range, the game's languages)
+         if kind == 'toggle': return {'1', '0'} if values == '-' else set(values.split('/'))
+-        if kind == 'choice' and values != 'languages': return {v.split('=', 1)[0] for v in values.split(',')}
++        if kind == 'choice' and values != 'languages': return {o[0] for o in choice_options(values, n)}
+         return None
+ 
+-    out, table, base = [], {r[1][0]: takes(r[1][1], r[1][2]) for r in rows()}, render_base(g)
++    out, table, base = [], {r[1][0]: takes(r[1][1], r[1][2], r[0]) for r in rows()}, render_base(g)
+     for n, (var, kind, values, default, cond, section, label, note, extra) in rows():
+         m = meta(extra, n)
++        if 'control' in m and kind != 'choice': sys.exit(f'settings.tsv:{n}: control=slider requires kind choice')
+         if 'needs' in m:
+             need, want = m['needs'].split('=', 1)
+             if need not in table: sys.exit(f'settings.tsv:{n}: needs names a variable no row sets: {m["needs"]}')
+@@ -106,8 +136,11 @@ def build(gid, patched, control):
+         s = {'env': var, 'kind': kind, 'section': section, 'label': label, 'note': note, 'default': value(default, n), **m}
+         if var == 'DM_RENDER_SCALE' and base: s['base'] = base   # the render scale in pixels, for the console mode chosen
+         if kind == 'choice':
+-            opts = [list(l) for l in langs] if values == 'languages' else [v.split('=', 1) for v in values.split(',')]
+-            if any(len(o) != 2 for o in opts): sys.exit(f'settings.tsv:{n}: choice values are value=label,...')
++            opts = [list(l) for l in langs] if values == 'languages' else choice_options(values, n, capabilities)
++            if not opts: sys.exit(f'settings.tsv:{n}: no choice options are available for the packaged capabilities')
++            if m.get('control') == 'slider':
++                if len(opts) < 2: sys.exit(f'settings.tsv:{n}: control=slider needs at least two choice options')
++                if len({o[0] for o in opts}) != len(opts): sys.exit(f'settings.tsv:{n}: control=slider choice values must be unique')
+             if s['default'] not in [o[0] for o in opts]: s['default'] = opts[0][0]   # a default the game does not offer (a language it lacks): its first
+             s['options'] = opts
+         elif kind == 'range':
+diff --git a/dm/games/settings.tsv b/dm/games/settings.tsv
+index 688d5d0..03e632e 100644
+--- a/dm/games/settings.tsv
++++ b/dm/games/settings.tsv
+@@ -7,18 +7,22 @@
+ #             toggle: values - (on sets 1, off 0) or <on>/<off>, the two values the variable takes (on/off)
+ #   default   a value (a toggle's: 1 on, 0 off); DM_GAME_<NAME>: the host's own default from the game profile (game_profile.h, game.py); build:<VAR>: the IPA build's setting (build_ipa.sh)
+ #             <ios>|<mac> selects the platform's default before resolving a profile macro or build variable
+-#   shown     always; DM_GAME_<NAME>!=<value> or ==<value>; fixups:<KEY>: main's rewriter table has that key (a stub in the game's build, patch_nso.py); languages>1; gfxapi:<API>: the packer's GFXAPI;
++#   shown     always; DM_GAME_<NAME>!=<value> or ==<value>; fixups:<KEY>: main's rewriter table has that key (a stub in the game's build, patch_nso.py); capability:<NAME>: explicitly enabled by the packager;
++#             languages>1; gfxapi:<API>: the packer's GFXAPI;
+ #             platform:<ios | mac>: the app's platform (SETTINGS_PLATFORM, ios when unset), for a switch only that platform's front end reads
+ #   section   Game, Controls or Performance: a heading on the single settings screen. Rows appear in table order within each section
+ #             Reset to tested defaults clears all launcher choices; values fixed by an env file stay
+ #   label, note  the setting's name and the line under it (may be empty; only for a setting with a cost: latency, memory, heat)
+ #   meta      optional, key=value pairs separated by ; (settings.py META lists the keys; docs/frontends.md, The settings list, describes them):
+-#             level=basic  a setting a front end shows first;  needs=<VAR>=<value>  a sub-setting, drawn only while the row that sets <VAR> has that value
++#             level=basic  a setting a front end shows first;  needs=<VAR>=<value>  a sub-setting, drawn only while the row that sets <VAR> has that value;
++#             control=slider  a choice rendered as a discrete slider over its options
+ DM_FPS_TARGET	choice	30=30 fps,60=60 fps	DM_GAME_FPS_TARGET	DM_GAME_FPS_TARGET!=0	Game	Frame rate		level=basic
+ DM_DYNAMIC_RESOLUTION	toggle	-	0	fixups:DYNAMIC_RESOLUTION	Game	Dynamic resolution	Adjusts resolution between 70% and 100% under load. Turn off to keep full resolution for the selected console mode.
+ DM_RENDER_SCALE	range	0.5:1.0:0.05	1.0	fixups:RENDER_SCALE	Game	Render scale		level=basic
+ DM_OPMODE	choice	1=Docked,0=Handheld	DM_GAME_OPMODE	always	Game	Console mode		level=basic
+ DM_PRESENT_UPSCALE	choice	off=Standard,metalfx=MetalFX	off	always	Game	Upscaling	Uses more GPU time and can increase heat.
++DM_ODYSSEY_RESOLUTION	choice	stock=Original (dynamic),720p=720p,900p=900p,1080p=1080p,1440p=1440p[cap:ODYSSEY_DISPLAY_HIGHRES],native=Native iPad[cap:ODYSSEY_DISPLAY_NATIVE_IPAD]	stock	capability:ODYSSEY_DISPLAY_V1	Game	Resolution target	High targets use more render target and game heap memory. Stability and frame rate are unvalidated. Native output requires a 2732x2048 iPad panel.	level=basic; control=slider; needs=DM_OPMODE=1
++DM_ODYSSEY_4_3	toggle	-	0	capability:ODYSSEY_DISPLAY_V1	Game	4:3 view	Experimental: extends vertical view. Restart required.	level=basic; needs=DM_OPMODE=1
+ DM_LANG	choice	languages	build:DM_LANG	languages>1	Game	Game language		level=basic
+ DM_FULLSCREEN	choice	0=Window,1=Fullscreen	0	platform:mac	Game	Display mode		level=basic
+ DM_SHOW_FPS	toggle	-	build:DM_SHOW_FPS	platform:ios	Game	Frame-rate counter
+diff --git a/dm/host/Makefile b/dm/host/Makefile
+index 410b6ce..e752e85 100644
+--- a/dm/host/Makefile
++++ b/dm/host/Makefile
+@@ -16,7 +16,7 @@ endif
+ GAME_H = gen/$(GAME)/game_profile.h
+ CFLAGS=-O1 -g -Wall -Wno-unused-function
+ # Service-layer takeover hle_*.c files are included by wildcard: adding a file does not touch this line (avoids merge conflicts)
+-SRC=main.c loader.c hle.c crash.c probe.c thread.c memstat.m haptics_apple.m $(sort $(wildcard hle_*.c)) front_mac.m entry.S
++SRC=main.c loader.c hle.c crash.c probe.c thread.c dm_odyssey_display_policy.c dm_vertical_fov.c memstat.m haptics_apple.m $(sort $(wildcard hle_*.c)) front_mac.m entry.S
+ # NVN null device + nn::vi + the Vulkan layer (dm/gfx/)
+ # Sources under dm/gfx, dm/gfx/nvn, dm/gfx/tex, dm/gfx/vk and dm/gfx/gl are included by wildcard (tests/ and metal/ do not go into the host): adding a file does not touch this line
+ GFX=$(sort $(wildcard ../gfx/*.c ../gfx/nvn/*.c ../gfx/nvn/*.m ../gfx/nvn/*.S ../gfx/tex/*.c ../gfx/tex/*.m ../gfx/vk/*.m ../gfx/gl/*.m))
+@@ -50,7 +50,7 @@ endif
+ endif
+ .PHONY: FORCE
+ FORCE:
+-dmhost: $(SRC) $(GFX) ../third_party/stb_vorbis/stb_vorbis.c dm.h hle.h romfs_image.h dm_input.h pad_slots.h hle_haptics.h haptics_apple.h motion_fusion.h motion_apple.h motion_pro.h motion_pro_mac.h front.h $(GFX_H) $(GAME_H) $(GAME_STAMP) $(VPX_LIB)
++dmhost: $(SRC) $(GFX) ../third_party/stb_vorbis/stb_vorbis.c dm.h dm_odyssey_display.h dm_obs_frame.h dm_vertical_fov.h hle.h romfs_image.h dm_input.h pad_slots.h hle_haptics.h haptics_apple.h motion_fusion.h motion_apple.h motion_pro.h motion_pro_mac.h front.h $(GFX_H) $(GAME_H) $(GAME_STAMP) $(VPX_LIB)
+ 	clang $(CFLAGS) -I../gfx/nvn/include -I../third_party/vulkan-headers/include -I$(dir $(GAME_H)) -I$(VPX) -I../third_party/stb_vorbis -fobjc-arc -o $@ $(SRC) $(GFX) $(VPX_LIB) -framework Cocoa -framework QuartzCore -framework Metal -framework MetalFX -framework GameController -framework CoreHaptics -framework IOKit -framework AudioToolbox -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework ImageIO -framework UniformTypeIdentifiers
+ clean:   # the host and everything make generates for it (gen/: the profile headers, the game stamp and the libvpx build; dmhost_* and *.dSYM beside them, as in .gitignore)
+ 	rm -rf gen dmhost dmhost_* *.dSYM
+diff --git a/dm/host/dm.h b/dm/host/dm.h
+index c1be8d4..e369d49 100644
+--- a/dm/host/dm.h
++++ b/dm/host/dm.h
+@@ -91,16 +91,21 @@ void *guest_sym(const char *name);
+ module_t *module_of(const void *p);
+ // Gate dispatch: rewritten svc / timer reads come in through the common entry, ret_addr = the return point of that gate block, regs points to the saved x0..x30
+ uint64_t gate_dispatch(uint64_t ret_addr, uint64_t *regs);
+-// Observation gates (rewriter OBS tables in the profiles' patches.py, applied by patch_nso.py; numbering matches): read-only callbacks, called on a gate hit once attached
++// Observation gates (rewriter OBS tables in the profiles' patches.py, applied by patch_nso.py; numbering matches): callbacks run against the saved register frame. A callback may update saved values only where its exact-build profile declares the site.
+ // IDs 19 / 20 belonged to the removed movie request-ring workaround. Old rewritten modules may still contain them; without callbacks those gates are harmless passes through.
+ enum { OBS_UE_MALLOC = 21,                                       // DRAGON QUEST VII Reimagined 1.2.0: Unreal's allocator object just made (hle_uemalloc.c)
+        OBS_REGION_ASK = 22, OBS_REGION_GOT = 23, OBS_REGION_FREE = 24,   // the SDK's address regions, gates the rewriter places by symbol in every sdk (patch_nso.py "Address regions", hle_svc.c)
+        OBS_STDALLOC_INIT = 25,                                         // StandardAllocator::Initialize's entry, the same way: the one gate whose callback writes a register (hle_svc.c)
+-       OBS_MAX = 26 };
+-// A gate number's bits from 8 up are a parameter for its callback (OBS_REGION_GOT: the register that holds the address). Callbacks read the registers; a write to x0–x29 takes
+-// effect when the gate returns (entry.S restores them from the frame), which only OBS_STDALLOC_INIT does
++       OBS_ODYSSEY_PROJECTION = 26,                                    // Odyssey 1.4.1 ALProjection::set entry: optional S2/S3 transform
++       OBS_ODYSSEY_PACKED_SIZE = 27, OBS_ODYSSEY_CANVAS_SIZE = 28, OBS_ODYSSEY_CROP_SIZE = 29,
++       OBS_ODYSSEY_RT_HEAP = 30, OBS_ODYSSEY_RT_POOL = 31, OBS_ODYSSEY_GLOBAL_HEAP = 32,
++       OBS_MAX = 33 };
++// A gate number's bits from 8 up are a parameter for its callback (OBS_REGION_GOT: the register that holds the address). The saved frame exposes x0–x29 and q0–q31; entry.S restores x0–x17 and x19–x29, plus all Q registers, from that frame. x18 stays platform-reserved.
+ void gate_obs_set(int id, void (*fn)(uint64_t *regs, int param));
+ int gate_obs_present(int id);
++void dm_odyssey_display_init(void);
++float dm_odyssey_display_aspect(void);  // accepted viewport width/height; defaults to 16:9 until its profile and overlay pass validation
++int dm_opmode(void);                   // current operation mode; 0 = handheld, 1 = docked
+ uint64_t now_ns(void);
+ uint64_t guest_ns(void);              // Guest clock (hle_os.c; does not advance while frozen, guest_clock_freeze)
+ int dm_detclock_enabled(void);
+diff --git a/dm/host/dm_obs_frame.h b/dm/host/dm_obs_frame.h
+new file mode 100644
+index 0000000..2db96c8
+--- /dev/null
++++ b/dm/host/dm_obs_frame.h
+@@ -0,0 +1,71 @@
++#ifndef DM_OBS_FRAME_H
++#define DM_OBS_FRAME_H
++
++// Typed view of the 800-byte register frame used by dm/host/entry.S::_dm_gate.
++// S-lane helpers operate on exactly four bytes at the start of Qn; they do not
++// touch the rest of that vector, any other vector, GPRs, or saved status.
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <string.h>
++
++enum {
++    DM_OBS_FRAME_X_COUNT = 31,
++    DM_OBS_FRAME_Q_COUNT = 32,
++    DM_OBS_FRAME_Q_OFFSET = 256,
++    DM_OBS_FRAME_Q_STRIDE = 16,
++    DM_OBS_FRAME_NZCV_OFFSET = 768,
++    DM_OBS_FRAME_FPSR_OFFSET = 776,
++    DM_OBS_FRAME_FPCR_OFFSET = 784,
++    DM_OBS_FRAME_BYTES = 800,
++};
++
++typedef struct {
++    uint64_t x[DM_OBS_FRAME_X_COUNT];
++    uint64_t reserved_after_x;
++    uint8_t q[DM_OBS_FRAME_Q_COUNT][DM_OBS_FRAME_Q_STRIDE];
++    uint64_t nzcv;
++    uint64_t fpsr;
++    uint64_t fpcr;
++    uint64_t reserved_tail;
++} dm_obs_frame;
++
++_Static_assert(sizeof(float) == 4, "saved S lanes are 32-bit floats");
++_Static_assert(offsetof(dm_obs_frame, x) == 0, "saved GPR frame offset changed");
++_Static_assert(offsetof(dm_obs_frame, reserved_after_x) == 248, "saved frame padding after GPRs changed");
++_Static_assert(offsetof(dm_obs_frame, q) == DM_OBS_FRAME_Q_OFFSET, "saved Q frame offset changed");
++_Static_assert(offsetof(dm_obs_frame, nzcv) == DM_OBS_FRAME_NZCV_OFFSET, "saved NZCV offset changed");
++_Static_assert(offsetof(dm_obs_frame, fpsr) == DM_OBS_FRAME_FPSR_OFFSET, "saved FPSR offset changed");
++_Static_assert(offsetof(dm_obs_frame, fpcr) == DM_OBS_FRAME_FPCR_OFFSET, "saved FPCR offset changed");
++_Static_assert(offsetof(dm_obs_frame, reserved_tail) == 792, "saved frame tail changed");
++_Static_assert(sizeof(dm_obs_frame) == DM_OBS_FRAME_BYTES, "saved gate-frame size changed");
++
++// frame_bytes must describe the accessible buffer; this API can validate the
++// supplied length and S-register index, but C cannot discover allocation size.
++// The low 32 bits of Qn contain Sn on the supported little-endian Apple ARM64
++// host. memcpy avoids alignment and strict-aliasing assumptions.
++static inline bool dm_obs_frame_read_s(const void *frame, size_t frame_bytes,
++                                       unsigned sreg, float *value) {
++    if (!frame || !value || sreg >= DM_OBS_FRAME_Q_COUNT ||
++        frame_bytes < DM_OBS_FRAME_BYTES) return false;
++
++    float lane;
++    const uint8_t *bytes = (const uint8_t *)frame;
++    const size_t offset = DM_OBS_FRAME_Q_OFFSET + (size_t)sreg * DM_OBS_FRAME_Q_STRIDE;
++    memcpy(&lane, bytes + offset, sizeof lane);
++    *value = lane;
++    return true;
++}
++
++static inline bool dm_obs_frame_write_s(void *frame, size_t frame_bytes,
++                                        unsigned sreg, float value) {
++    if (!frame || sreg >= DM_OBS_FRAME_Q_COUNT ||
++        frame_bytes < DM_OBS_FRAME_BYTES) return false;
++
++    uint8_t *bytes = (uint8_t *)frame;
++    const size_t offset = DM_OBS_FRAME_Q_OFFSET + (size_t)sreg * DM_OBS_FRAME_Q_STRIDE;
++    memcpy(bytes + offset, &value, sizeof value);
++    return true;
++}
++
++#endif
+diff --git a/dm/host/dm_odyssey_display.h b/dm/host/dm_odyssey_display.h
+new file mode 100644
+index 0000000..0085525
+--- /dev/null
++++ b/dm/host/dm_odyssey_display.h
+@@ -0,0 +1,60 @@
++#ifndef DM_ODYSSEY_DISPLAY_H
++#define DM_ODYSSEY_DISPLAY_H
++
++#include <stddef.h>
++#include <stdint.h>
++
++// Shell packaging requires display-aware high-gate restoration from ABI 2.
++#define DM_ODYSSEY_DISPLAY_ABI 2
++
++typedef enum {
++    DM_ODYSSEY_PRESET_STOCK = 0,
++    DM_ODYSSEY_PRESET_720P,
++    DM_ODYSSEY_PRESET_900P,
++    DM_ODYSSEY_PRESET_1080P,
++    DM_ODYSSEY_PRESET_1440P,
++    DM_ODYSSEY_PRESET_NATIVE,
++    DM_ODYSSEY_PRESET_COUNT,
++} dm_odyssey_preset;
++
++typedef enum {
++    DM_ODYSSEY_ASPECT_16X9 = 0,
++    DM_ODYSSEY_ASPECT_4X3,
++} dm_odyssey_aspect;
++
++typedef struct {
++    dm_odyssey_preset preset;
++    dm_odyssey_aspect aspect;
++    uint32_t width;
++    uint32_t height;
++    uint32_t rt_pool_mib;       // nonzero only above the shipped 1080p pool threshold
++    uint32_t rt_heap_mib;       // pool plus the game's fixed 70 MiB allocator overhead
++    uint32_t app_pool_extra_mib; // render-target pool increase above the shipped 100 MiB
++    int active;
++    int highres;
++    int native_panel;
++} dm_odyssey_display_config;
++
++// Parse only the launcher's finite option set. NULL means the tested defaults:
++// stock resolution and 16:9. Returns 1 on a valid configuration, 0 otherwise.
++int dm_odyssey_display_policy_parse(const char *resolution,
++                                    const char *four_three,
++                                    dm_odyssey_display_config *out);
++
++const char *dm_odyssey_display_preset_name(dm_odyssey_preset preset);
++const char *dm_odyssey_display_aspect_name(dm_odyssey_aspect aspect);
++
++// Reads the exact twelve-row profiles.tsv format and verifies the selected
++// regular asset's declared length and SHA-256. The returned overlay root is
++// made only from the validated aspect/preset enums, never from manifest text.
++int dm_odyssey_display_validate_asset(const char *root,
++                                      const dm_odyssey_display_config *config,
++                                      char *overlay_root, size_t overlay_root_size,
++                                      char *error, size_t error_size);
++
++void dm_odyssey_display_init(void);  // after launcher and the early preloader join, before guest constructors
++uint64_t dm_odyssey_display_pool_extra(void);  // accepted high-resolution increment, otherwise zero
++int dm_odyssey_display_pool_total(uint64_t cached_base, uint64_t extra, uint64_t *total);
++int dm_odyssey_display_add_mib(uint32_t base_mib, uint32_t extra_mib, uint32_t *total_mib);
++
++#endif
+diff --git a/dm/host/dm_odyssey_display_policy.c b/dm/host/dm_odyssey_display_policy.c
+new file mode 100644
+index 0000000..8a88724
+--- /dev/null
++++ b/dm/host/dm_odyssey_display_policy.c
+@@ -0,0 +1,97 @@
++#include "dm_odyssey_display.h"
++
++#include <string.h>
++
++const char *dm_odyssey_display_preset_name(dm_odyssey_preset preset) {
++    static const char *const names[DM_ODYSSEY_PRESET_COUNT] = {
++        "stock", "720p", "900p", "1080p", "1440p", "native",
++    };
++    return preset >= 0 && preset < DM_ODYSSEY_PRESET_COUNT ? names[preset] : NULL;
++}
++
++const char *dm_odyssey_display_aspect_name(dm_odyssey_aspect aspect) {
++    switch (aspect) {
++        case DM_ODYSSEY_ASPECT_16X9: return "16x9";
++        case DM_ODYSSEY_ASPECT_4X3: return "4x3";
++        default: return NULL;
++    }
++}
++
++static int parse_preset(const char *value, dm_odyssey_preset *preset) {
++    if (!value || !strcmp(value, "stock")) *preset = DM_ODYSSEY_PRESET_STOCK;
++    else if (!strcmp(value, "720p")) *preset = DM_ODYSSEY_PRESET_720P;
++    else if (!strcmp(value, "900p")) *preset = DM_ODYSSEY_PRESET_900P;
++    else if (!strcmp(value, "1080p")) *preset = DM_ODYSSEY_PRESET_1080P;
++    else if (!strcmp(value, "1440p")) *preset = DM_ODYSSEY_PRESET_1440P;
++    else if (!strcmp(value, "native")) *preset = DM_ODYSSEY_PRESET_NATIVE;
++    else return 0;
++    return 1;
++}
++
++static int parse_aspect(const char *value, dm_odyssey_aspect *aspect) {
++    if (!value || !strcmp(value, "0")) *aspect = DM_ODYSSEY_ASPECT_16X9;
++    else if (!strcmp(value, "1")) *aspect = DM_ODYSSEY_ASPECT_4X3;
++    else return 0;
++    return 1;
++}
++
++static void dimensions(dm_odyssey_preset preset, dm_odyssey_aspect aspect,
++                      uint32_t *width, uint32_t *height) {
++    static const uint16_t wide[DM_ODYSSEY_PRESET_COUNT][2] = {
++        {1600, 900}, {1280, 720}, {1600, 900}, {1920, 1080},
++        {2560, 1440}, {2732, 1536},
++    };
++    static const uint16_t classic[DM_ODYSSEY_PRESET_COUNT][2] = {
++        {1200, 900}, {960, 720}, {1200, 900}, {1440, 1080},
++        {1920, 1440}, {2732, 2048},
++    };
++    const uint16_t (*selected)[2] = aspect == DM_ODYSSEY_ASPECT_4X3 ? classic : wide;
++    *width = selected[preset][0];
++    *height = selected[preset][1];
++}
++
++int dm_odyssey_display_policy_parse(const char *resolution,
++                                    const char *four_three,
++                                    dm_odyssey_display_config *out) {
++    if (!out) return 0;
++
++    dm_odyssey_display_config config = {0};
++    if (!parse_preset(resolution, &config.preset) ||
++        !parse_aspect(four_three, &config.aspect)) return 0;
++
++    if (config.preset < 0 || config.preset >= DM_ODYSSEY_PRESET_COUNT ||
++        (config.aspect != DM_ODYSSEY_ASPECT_16X9 && config.aspect != DM_ODYSSEY_ASPECT_4X3)) return 0;
++    dimensions(config.preset, config.aspect, &config.width, &config.height);
++    config.active = config.preset != DM_ODYSSEY_PRESET_STOCK ||
++                    config.aspect == DM_ODYSSEY_ASPECT_4X3;
++    config.highres = config.preset == DM_ODYSSEY_PRESET_1440P ||
++                     config.preset == DM_ODYSSEY_PRESET_NATIVE;
++    config.native_panel = config.preset == DM_ODYSSEY_PRESET_NATIVE;
++    if (config.highres) {
++        // Exact profiles from the reviewed pool plan, derived from the pinned
++        // reference sizing rule. This is a sizing contract, not device proof.
++        static const uint16_t pool_mib[2][2] = {
++            {160, 192}, // 1440p / native, 16:9
++            {128, 256}, // 1440p / native, 4:3
++        };
++        const unsigned a = config.aspect == DM_ODYSSEY_ASPECT_4X3;
++        const unsigned p = config.preset == DM_ODYSSEY_PRESET_NATIVE;
++        config.rt_pool_mib = pool_mib[a][p];
++        if (!dm_odyssey_display_add_mib(config.rt_pool_mib, 70u, &config.rt_heap_mib)) return 0;
++        config.app_pool_extra_mib = config.rt_pool_mib - 100u;
++    }
++    *out = config;
++    return 1;
++}
++
++int dm_odyssey_display_pool_total(uint64_t cached_base, uint64_t extra, uint64_t *total) {
++    if (!total || UINT64_MAX - cached_base < extra) return 0;
++    *total = cached_base + extra;
++    return 1;
++}
++
++int dm_odyssey_display_add_mib(uint32_t base_mib, uint32_t extra_mib, uint32_t *total_mib) {
++    if (!total_mib || UINT32_MAX - base_mib < extra_mib) return 0;
++    *total_mib = base_mib + extra_mib;
++    return 1;
++}
+diff --git a/dm/host/dm_vertical_fov.c b/dm/host/dm_vertical_fov.c
+new file mode 100644
+index 0000000..5426c6e
+--- /dev/null
++++ b/dm/host/dm_vertical_fov.c
+@@ -0,0 +1,93 @@
++#include "dm_vertical_fov.h"
++
++#include <math.h>
++
++#define DM_VERTICAL_FOV_PI 3.14159265358979323846264338327950288
++#define DM_VERTICAL_FOV_ASPECT_TOLERANCE 0.0001
++#define DM_VERTICAL_FOV_RELATIVE_GEOMETRY_TOLERANCE 0.00001
++
++static int valid_fovy(float fovy) {
++    return isfinite((double)fovy) && fovy > 0.0f &&
++           (double)fovy < DM_VERTICAL_FOV_PI;
++}
++
++static int valid_aspect(float aspect) {
++    return isfinite((double)aspect) && aspect > 0.0f;
++}
++
++static int aspect_near(float actual, double expected) {
++    return fabs((double)actual - expected) <= DM_VERTICAL_FOV_ASPECT_TOLERANCE;
++}
++
++dm_vertical_fov_result dm_vertical_fov_preserve_horizontal(
++        float fovy_radians, float source_aspect, float target_aspect,
++        float *out_fovy_radians) {
++    if (!out_fovy_radians || !valid_fovy(fovy_radians) ||
++        !valid_aspect(source_aspect) || !valid_aspect(target_aspect)) {
++        return DM_VERTICAL_FOV_INVALID;
++    }
++
++    if (source_aspect == target_aspect) {
++        *out_fovy_radians = fovy_radians;
++        return DM_VERTICAL_FOV_UNCHANGED;
++    }
++
++    const double half_fovy = (double)fovy_radians * 0.5;
++    const double horizontal_tangent = (double)source_aspect / (double)target_aspect * tan(half_fovy);
++    const double result = 2.0 * atan(horizontal_tangent);
++    const float narrowed = (float)result;
++    if (!isfinite(result) || !isfinite((double)narrowed) || narrowed <= 0.0f ||
++        (double)narrowed >= DM_VERTICAL_FOV_PI) {
++        return DM_VERTICAL_FOV_INVALID;
++    }
++
++    const double before = (double)source_aspect * tan(half_fovy);
++    const double after = (double)target_aspect * tan((double)narrowed * 0.5);
++    if (!isfinite(before) || !isfinite(after) || before <= 0.0 || after <= 0.0 ||
++        fabs(after - before) / before > DM_VERTICAL_FOV_RELATIVE_GEOMETRY_TOLERANCE) {
++        return DM_VERTICAL_FOV_INVALID;
++    }
++
++    *out_fovy_radians = narrowed;
++    return DM_VERTICAL_FOV_TRANSFORMED;
++}
++
++dm_vertical_fov_result dm_vertical_fov_extend_16_9_to_4_3(
++        float fovy_radians, float source_aspect, float target_aspect,
++        float *out_fovy_radians) {
++    if (!out_fovy_radians || !valid_fovy(fovy_radians) ||
++        !valid_aspect(source_aspect) || !valid_aspect(target_aspect))
++        return DM_VERTICAL_FOV_INVALID;
++    if (source_aspect == target_aspect) {
++        *out_fovy_radians = fovy_radians;
++        return DM_VERTICAL_FOV_UNCHANGED;
++    }
++    if (!aspect_near(target_aspect, 4.0 / 3.0)) {
++        *out_fovy_radians = fovy_radians;
++        return DM_VERTICAL_FOV_SKIPPED;
++    }
++    return dm_vertical_fov_extend_16_9_to_aspect(
++        fovy_radians, source_aspect, target_aspect, out_fovy_radians);
++}
++
++dm_vertical_fov_result dm_vertical_fov_extend_16_9_to_aspect(
++        float fovy_radians, float source_aspect, float target_aspect,
++        float *out_fovy_radians) {
++    if (!out_fovy_radians || !valid_fovy(fovy_radians) ||
++        !valid_aspect(source_aspect) || !valid_aspect(target_aspect)) {
++        return DM_VERTICAL_FOV_INVALID;
++    }
++
++    if (source_aspect == target_aspect) {
++        *out_fovy_radians = fovy_radians;
++        return DM_VERTICAL_FOV_UNCHANGED;
++    }
++
++    if (!aspect_near(source_aspect, 16.0 / 9.0)) {
++        *out_fovy_radians = fovy_radians;
++        return DM_VERTICAL_FOV_SKIPPED;
++    }
++
++    return dm_vertical_fov_preserve_horizontal(
++        fovy_radians, source_aspect, target_aspect, out_fovy_radians);
++}
+diff --git a/dm/host/dm_vertical_fov.h b/dm/host/dm_vertical_fov.h
+new file mode 100644
+index 0000000..0eb5362
+--- /dev/null
++++ b/dm/host/dm_vertical_fov.h
+@@ -0,0 +1,35 @@
++#ifndef DM_VERTICAL_FOV_H
++#define DM_VERTICAL_FOV_H
++
++// Stateless geometry helpers for a vertical-FOV extension. These are not
++// connected to the runtime or enabled by any game profile.
++typedef enum {
++    DM_VERTICAL_FOV_INVALID = 0,
++    DM_VERTICAL_FOV_UNCHANGED,
++    DM_VERTICAL_FOV_TRANSFORMED,
++    DM_VERTICAL_FOV_SKIPPED,
++} dm_vertical_fov_result;
++
++// Keep horizontal half-FOV tangent constant while changing aspect. The output
++// is written only for valid input; equal aspects return the input float exactly.
++// A result that float precision cannot represent within the geometry tolerance
++// is rejected rather than returned with a materially different horizontal view.
++dm_vertical_fov_result dm_vertical_fov_preserve_horizontal(
++    float fovy_radians, float source_aspect, float target_aspect,
++    float *out_fovy_radians);
++
++// Conservative prototype policy: only extend a valid 16:9 input to 4:3.
++// Square, offscreen, and other aspect paths are skipped with the original FOV.
++// The aspect comparison tolerance handles float representation of 16/9 and 4/3.
++dm_vertical_fov_result dm_vertical_fov_extend_16_9_to_4_3(
++    float fovy_radians, float source_aspect, float target_aspect,
++    float *out_fovy_radians);
++
++// Runtime policy used by the display profile: accept only finite 16:9 input,
++// then preserve horizontal coverage at any validated target viewport ratio.
++// Existing target-aspect and non-16:9 projections are returned unchanged.
++dm_vertical_fov_result dm_vertical_fov_extend_16_9_to_aspect(
++    float fovy_radians, float source_aspect, float target_aspect,
++    float *out_fovy_radians);
++
++#endif
+diff --git a/dm/host/front.h b/dm/host/front.h
+index a64831f..581064b 100644
+--- a/dm/host/front.h
++++ b/dm/host/front.h
+@@ -18,6 +18,9 @@ int front_screen_max_fps(void);
+ // The frame rate the display link paces the game at (60, 30, 120; nvn_mtl.m link_sync): in fullscreen, a screen whose refresh rate is not a multiple of it is switched, while the game runs,
+ // to a mode of the same size whose rate is, and back when the window leaves fullscreen or that screen (front_mac.m; none on iOS). Called from the present thread
+ void front_screen_match(int fps);
++// The accepted display profile changed the picture aspect; iOS lays out its
++// Metal view on the main thread. Windowless/Mac front ends may ignore this.
++void front_display_aspect_changed(void);
+ // Progress screen of the first-start prepare step (nvn_mtl.m warm_prepare: "Preparing shaders" while the pipelines of the prewarm lists are built before the game's first frame):
+ // title and done of total shown over the game's view (a dark screen, the title, a bar and a count), updated on each call; title NULL hides it. Any thread; the front end switches to its main
+ // thread and does not block. Nothing is shown without a window
+diff --git a/dm/host/front_mac.m b/dm/host/front_mac.m
+index 7ad34df..4cd4ace 100644
+--- a/dm/host/front_mac.m
++++ b/dm/host/front_mac.m
+@@ -86,6 +86,7 @@ void front_screen_match(int fps) {
+     if (!g_layer || g_match_want == fps) return;   // no window (a windowless run's main thread runs the guest), or the rate as before
+     g_match_want = fps; dispatch_async(dispatch_get_main_queue(), ^{ screen_match_apply(); });
+ }
++void front_display_aspect_changed(void) { }  // No Metal picture view in the windowless host path.
+ static void push(void) {
+     int32_t lx = (g_d - g_a) * 32767, ly = (g_w - g_s) * 32767;
+     dm_input_set(g_btn, lx, ly, 0, 0);
+diff --git a/dm/host/hle_odyssey_display.c b/dm/host/hle_odyssey_display.c
+new file mode 100644
+index 0000000..b909399
+--- /dev/null
++++ b/dm/host/hle_odyssey_display.c
+@@ -0,0 +1,465 @@
++#include "dm.h"
++#include "dm_obs_frame.h"
++#include "dm_odyssey_display.h"
++#include "dm_vertical_fov.h"
++
++#include <CommonCrypto/CommonDigest.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <limits.h>
++#include <math.h>
++#include <stdarg.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <stdatomic.h>
++#include <string.h>
++#include <sys/stat.h>
++#include <unistd.h>
++
++#define DM_ODYSSEY_MAIN_BUILD "b424be150a8e7d78701cbe7a439d9ebf"
++#define DM_ODYSSEY_PROFILE_HEADER "#odyssey-display-v1"
++#define DM_ODYSSEY_MANIFEST_MAX 8192u
++#define DM_ODYSSEY_ASSET_MAX 65536u
++#define DM_ROMFS_OVERLAY_MAX 4095u
++#define DM_ODYSSEY_MIB (1024u * 1024u)
++#define DM_ODYSSEY_BASE_RT_POOL_MIB 100u
++#define DM_ODYSSEY_BASE_GLOBAL_HEAP UINT32_C(0xc3000000)
++
++typedef struct {
++    dm_odyssey_display_config config;
++    int active;
++} odyssey_display_state;
++
++static odyssey_display_state g_display;
++// Width and height publish together, so native iPad's slightly non-4:3 panel
++// ratio is visible consistently to the front end and the projection hook.
++static _Atomic uint64_t g_published_viewport = UINT64_C(1600) | (UINT64_C(900) << 32);
++// The app-pool SVC can be queried from host threads that run before/after the
++// display initializer; publish only the accepted scalar increment atomically.
++static _Atomic uint64_t g_published_pool_extra;
++
++float dm_odyssey_display_aspect(void) {
++    const uint64_t packed = atomic_load_explicit(&g_published_viewport, memory_order_acquire);
++    const uint32_t width = (uint32_t)packed;
++    const uint32_t height = (uint32_t)(packed >> 32);
++    return width && height ? (float)width / (float)height : 16.0f / 9.0f;
++}
++
++uint64_t dm_odyssey_display_pool_extra(void) {
++    return atomic_load_explicit(&g_published_pool_extra, memory_order_acquire);
++}
++
++static int fail(char *error, size_t error_size, const char *format, ...) {
++    if (error && error_size) {
++        va_list ap;
++        va_start(ap, format);
++        vsnprintf(error, error_size, format, ap);
++        va_end(ap);
++    }
++    return 0;
++}
++
++static int open_regular(const char *path, size_t max_size, struct stat *st,
++                        char *error, size_t error_size) {
++    int flags = O_RDONLY;
++#ifdef O_CLOEXEC
++    flags |= O_CLOEXEC;
++#endif
++#ifdef O_NOFOLLOW
++    flags |= O_NOFOLLOW;
++#endif
++    int fd = open(path, flags);
++    if (fd < 0) {
++        fail(error, error_size, "cannot open selected display file (errno %d)", errno);
++        return -1;
++    }
++    if (fstat(fd, st) || !S_ISREG(st->st_mode) || st->st_size < 0 ||
++        (uint64_t)st->st_size > max_size) {
++        close(fd);
++        fail(error, error_size, "display file is not a bounded regular file");
++        return -1;
++    }
++    return fd;
++}
++
++static int read_exact(int fd, uint8_t *out, size_t size) {
++    size_t used = 0;
++    while (used < size) {
++        ssize_t n = read(fd, out + used, size - used);
++        if (n < 0 && errno == EINTR) continue;
++        if (n <= 0) return 0;
++        used += (size_t)n;
++    }
++    return 1;
++}
++
++static int parse_decimal(const char *text, uint32_t *value) {
++    if (!text || !*text || !value) return 0;
++    uint32_t n = 0;
++    for (const unsigned char *p = (const unsigned char *)text; *p; p++) {
++        if (*p < '0' || *p > '9') return 0;
++        uint32_t digit = *p - '0';
++        if (n > (UINT32_MAX - digit) / 10u) return 0;
++        n = n * 10u + digit;
++    }
++    *value = n;
++    return 1;
++}
++
++static int parse_sha256(const char *text) {
++    if (!text || strlen(text) != CC_SHA256_DIGEST_LENGTH * 2u) return 0;
++    for (const unsigned char *p = (const unsigned char *)text; *p; p++)
++        if (!((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f'))) return 0;
++    return 1;
++}
++
++static int hash_asset(const char *path, uint32_t expected_bytes,
++                      const char *expected_sha, char *error, size_t error_size) {
++    struct stat st;
++    int fd = open_regular(path, DM_ODYSSEY_ASSET_MAX, &st, error, error_size);
++    if (fd < 0) return 0;
++    if ((uint64_t)st.st_size != expected_bytes || expected_bytes == 0) {
++        close(fd);
++        return fail(error, error_size, "selected display asset length does not match profiles.tsv");
++    }
++
++    uint8_t bytes[DM_ODYSSEY_ASSET_MAX];
++    if (!read_exact(fd, bytes, expected_bytes)) {
++        close(fd);
++        return fail(error, error_size, "cannot read the complete selected display asset");
++    }
++    close(fd);
++
++    uint8_t digest[CC_SHA256_DIGEST_LENGTH];
++    if (!CC_SHA256(bytes, (CC_LONG)expected_bytes, digest))
++        return fail(error, error_size, "CommonCrypto could not hash the selected display asset");
++    char actual[CC_SHA256_DIGEST_LENGTH * 2u + 1u];
++    static const char hex[] = "0123456789abcdef";
++    for (size_t i = 0; i < sizeof digest; i++) {
++        actual[i * 2] = hex[digest[i] >> 4];
++        actual[i * 2 + 1] = hex[digest[i] & 15];
++    }
++    actual[sizeof actual - 1] = 0;
++    if (strcmp(actual, expected_sha))
++        return fail(error, error_size, "selected display asset SHA-256 does not match profiles.tsv");
++    return 1;
++}
++
++static int split_row(char *line, char *field[6]) {
++    char *cursor = line;
++    for (unsigned i = 0; i < 5; i++) {
++        field[i] = cursor;
++        char *tab = strchr(cursor, '\t');
++        if (!tab) return 0;
++        *tab = 0;
++        cursor = tab + 1;
++    }
++    field[5] = cursor;
++    return strchr(cursor, '\t') == NULL && *field[0] && *field[1] && *field[2] &&
++           *field[3] && *field[4] && *field[5];
++}
++
++static int aspect_index(dm_odyssey_aspect aspect) {
++    return aspect == DM_ODYSSEY_ASPECT_16X9 ? 0 : 1;
++}
++
++static int validate_manifest(const char *root,
++                             const dm_odyssey_display_config *config,
++                             char *selected_sha, size_t selected_sha_size,
++                             uint32_t *selected_bytes,
++                             char *error, size_t error_size) {
++    char manifest_path[PATH_MAX];
++    int n = snprintf(manifest_path, sizeof manifest_path, "%s/profiles.tsv", root);
++    if (n < 0 || (size_t)n >= sizeof manifest_path)
++        return fail(error, error_size, "display profiles.tsv path is too long");
++
++    struct stat st;
++    int fd = open_regular(manifest_path, DM_ODYSSEY_MANIFEST_MAX, &st, error, error_size);
++    if (fd < 0) return 0;
++    if (st.st_size == 0) {
++        close(fd);
++        return fail(error, error_size, "display profiles.tsv is empty");
++    }
++    size_t file_size = (size_t)st.st_size;
++    char data[DM_ODYSSEY_MANIFEST_MAX + 1];
++    if (!read_exact(fd, (uint8_t *)data, file_size)) {
++        close(fd);
++        return fail(error, error_size, "cannot read complete display profiles.tsv");
++    }
++    close(fd);
++    data[file_size] = 0;
++
++    char *line = data;
++    char *end = memchr(line, '\n', file_size);
++    if (!end) return fail(error, error_size, "display profiles.tsv has no row header");
++    *end = 0;
++    if (end > line && end[-1] == '\r') end[-1] = 0;
++    if (strcmp(line, DM_ODYSSEY_PROFILE_HEADER))
++        return fail(error, error_size, "display profiles.tsv header is invalid");
++
++    int seen[DM_ODYSSEY_PRESET_COUNT][2] = {{0}};
++    char selected_expected_sha[CC_SHA256_DIGEST_LENGTH * 2u + 1u] = {0};
++    uint32_t selected_expected_bytes = 0;
++    unsigned rows = 0;
++    line = end + 1;
++    while (line < data + file_size) {
++        end = memchr(line, '\n', (size_t)(data + file_size - line));
++        char *line_end = end ? end : data + file_size;
++        if (line_end > line && line_end[-1] == '\r') line_end[-1] = 0;
++        if (line_end == line) return fail(error, error_size, "display profiles.tsv contains an empty row");
++        if (rows >= DM_ODYSSEY_PRESET_COUNT * 2u)
++            return fail(error, error_size, "display profiles.tsv has extra rows");
++        if (end) *end = 0;
++
++        char *fields[6];
++        if (!split_row(line, fields)) return fail(error, error_size, "display profiles.tsv row must have six tab-separated fields");
++
++        dm_odyssey_preset preset = DM_ODYSSEY_PRESET_COUNT;
++        for (int i = 0; i < DM_ODYSSEY_PRESET_COUNT; i++)
++            if (!strcmp(fields[0], dm_odyssey_display_preset_name((dm_odyssey_preset)i))) preset = (dm_odyssey_preset)i;
++        dm_odyssey_aspect aspect;
++        if (preset == DM_ODYSSEY_PRESET_COUNT)
++            return fail(error, error_size, "display profiles.tsv has an unknown preset or aspect");
++        if (!strcmp(fields[1], "16x9")) aspect = DM_ODYSSEY_ASPECT_16X9;
++        else if (!strcmp(fields[1], "4x3")) aspect = DM_ODYSSEY_ASPECT_4X3;
++        else return fail(error, error_size, "display profiles.tsv has an unknown preset or aspect");
++
++        const int ai = aspect_index(aspect);
++        if (seen[preset][ai]++) return fail(error, error_size, "display profiles.tsv duplicates a preset/aspect row");
++        uint32_t width = 0, height = 0, bytes = 0;
++        dm_odyssey_display_config expected;
++        if (!dm_odyssey_display_policy_parse(fields[0], ai ? "1" : "0", &expected) ||
++            !parse_decimal(fields[2], &width) || !parse_decimal(fields[3], &height) ||
++            !parse_decimal(fields[5], &bytes) || !parse_sha256(fields[4]) ||
++            width > 2732 || height > 2048 || width != expected.width || height != expected.height ||
++            bytes == 0 || bytes > DM_ODYSSEY_ASSET_MAX)
++            return fail(error, error_size, "display profiles.tsv row dimensions, hash, or byte count are invalid");
++
++        if (preset == config->preset && aspect == config->aspect) {
++            memcpy(selected_expected_sha, fields[4], sizeof selected_expected_sha);
++            selected_expected_bytes = bytes;
++        }
++        rows++;
++        line = end ? end + 1 : data + file_size;
++    }
++
++    if (rows != DM_ODYSSEY_PRESET_COUNT * 2u)
++        return fail(error, error_size, "display profiles.tsv must contain exactly twelve rows");
++    for (unsigned p = 0; p < DM_ODYSSEY_PRESET_COUNT; p++)
++        for (unsigned a = 0; a < 2; a++)
++            if (seen[p][a] != 1) return fail(error, error_size, "display profiles.tsv is missing a preset/aspect row");
++    if (!selected_expected_bytes || !selected_expected_sha[0] || selected_sha_size < sizeof selected_expected_sha)
++        return fail(error, error_size, "selected display profile row is missing or invalid");
++    memcpy(selected_sha, selected_expected_sha, sizeof selected_expected_sha);
++    *selected_bytes = selected_expected_bytes;
++    return 1;
++}
++
++int dm_odyssey_display_validate_asset(const char *root,
++                                      const dm_odyssey_display_config *config,
++                                      char *overlay_root, size_t overlay_root_size,
++                                      char *error, size_t error_size) {
++    if (error && error_size) error[0] = 0;
++    if (!root || !*root || !config || !config->active || !overlay_root || !overlay_root_size)
++        return fail(error, error_size, "display profile request is incomplete");
++    if (!dm_odyssey_display_preset_name(config->preset) ||
++        !dm_odyssey_display_aspect_name(config->aspect))
++        return fail(error, error_size, "display profile enums are invalid");
++    if (strchr(root, ':'))
++        return fail(error, error_size, "display asset root cannot contain ':' because overlay roots use it as a separator");
++
++    char expected_sha[CC_SHA256_DIGEST_LENGTH * 2u + 1u];
++    uint32_t expected_bytes = 0;
++    if (!validate_manifest(root, config, expected_sha, sizeof expected_sha,
++                           &expected_bytes, error, error_size)) return 0;
++
++    const char *aspect = dm_odyssey_display_aspect_name(config->aspect);
++    const char *preset = dm_odyssey_display_preset_name(config->preset);
++    char profile_root[PATH_MAX], asset_path[PATH_MAX];
++    int n = snprintf(profile_root, sizeof profile_root, "%s/%s/%s", root, aspect, preset);
++    if (n < 0 || (size_t)n >= sizeof profile_root)
++        return fail(error, error_size, "selected display overlay path is too long");
++    n = snprintf(asset_path, sizeof asset_path,
++                 "%s/SystemData/ProjectGraphicsQuality.szs", profile_root);
++    if (n < 0 || (size_t)n >= sizeof asset_path)
++        return fail(error, error_size, "selected display asset path is too long");
++    if (!hash_asset(asset_path, expected_bytes, expected_sha, error, error_size)) return 0;
++    if ((size_t)snprintf(overlay_root, overlay_root_size, "%s", profile_root) >= overlay_root_size)
++        return fail(error, error_size, "selected display overlay root output is too small");
++    return 1;
++}
++
++static int set_overlay_root(const char *selected, char *error, size_t error_size) {
++    const char *existing = getenv("DM_ROMFS_OVERLAY");
++    size_t selected_len = strlen(selected), existing_len = existing ? strlen(existing) : 0;
++    size_t need = selected_len + (existing_len ? 1u + existing_len : 0u);
++    if (need > DM_ROMFS_OVERLAY_MAX)
++        return fail(error, error_size, "combined ROMFS overlay roots exceed the host limit");
++    char combined[DM_ROMFS_OVERLAY_MAX + 1];
++    memcpy(combined, selected, selected_len);
++    size_t used = selected_len;
++    if (existing_len) {
++        combined[used++] = ':';
++        memcpy(combined + used, existing, existing_len);
++        used += existing_len;
++    }
++    combined[used] = 0;
++    if (setenv("DM_ROMFS_OVERLAY", combined, 1))
++        return fail(error, error_size, "cannot install selected ROMFS overlay (errno %d)", errno);
++    return 1;
++}
++
++static void projection_adjust(uint64_t *regs, int param) {
++    (void)param;
++    if (!g_display.active) return;
++
++    float fovy = 0.0f, source_aspect = 0.0f;
++    if (!dm_obs_frame_read_s(regs, DM_OBS_FRAME_BYTES, 2, &fovy) ||
++        !dm_obs_frame_read_s(regs, DM_OBS_FRAME_BYTES, 3, &source_aspect)) return;
++    const float target_aspect = dm_odyssey_display_aspect();
++    float transformed_fovy = fovy;
++    if (dm_vertical_fov_extend_16_9_to_aspect(
++            fovy, source_aspect, target_aspect, &transformed_fovy) != DM_VERTICAL_FOV_TRANSFORMED) return;
++    if (!dm_obs_frame_write_s(regs, DM_OBS_FRAME_BYTES, 2, transformed_fovy)) return;
++    (void)dm_obs_frame_write_s(regs, DM_OBS_FRAME_BYTES, 3, target_aspect);
++}
++
++static void packed_size_adjust(uint64_t *regs, int param) {
++    (void)param;
++    if (!g_display.active || regs[9] != (UINT64_C(1600) | (UINT64_C(900) << 32))) return;
++    regs[9] = (uint64_t)g_display.config.width | ((uint64_t)g_display.config.height << 32);
++}
++
++static void canvas_size_adjust(uint64_t *regs, int param) {
++    (void)param;
++    if (!g_display.active || regs[4] != 1600 || regs[5] != 900) return;
++    regs[4] = g_display.config.width;
++    regs[5] = g_display.config.height;
++}
++
++static void crop_size_adjust(uint64_t *regs, int param) {
++    (void)param;
++    if (!g_display.active || regs[3] != 1600 || regs[4] != 900) return;
++    regs[3] = g_display.config.width;
++    regs[4] = g_display.config.height;
++}
++
++static void rt_heap_adjust(uint64_t *regs, int param) {
++    (void)param;
++    if (!g_display.active || !g_display.config.rt_heap_mib) return;
++    regs[0] = (uint32_t)(g_display.config.rt_heap_mib * DM_ODYSSEY_MIB);
++}
++
++static void rt_pool_adjust(uint64_t *regs, int param) {
++    (void)param;
++    if (!g_display.active || !g_display.config.rt_pool_mib) return;
++    regs[8] = (uint32_t)(g_display.config.rt_pool_mib * DM_ODYSSEY_MIB);
++}
++
++// launcher-highres CUTs the original MOVZ at this site to NOP. Install this
++// callback before any policy early return so the guest always receives either
++// the exact original pool value or the fully validated high-resolution value.
++static void global_heap_adjust(uint64_t *regs, int param) {
++    (void)param;
++    regs[0] = DM_ODYSSEY_BASE_GLOBAL_HEAP + (uint32_t)dm_odyssey_display_pool_extra();
++}
++
++static int native_panel_supported(void) {
++    const char *value = getenv("DM_ODYSSEY_NATIVE_PANEL");
++    return value && !strcmp(value, "1");
++}
++
++static int viewport_aspect_changed(uint32_t width, uint32_t height) {
++    const float aspect = (float)width / (float)height;
++    return fabsf(aspect - 16.0f / 9.0f) > 0.0001f;
++}
++
++void dm_odyssey_display_init(void) {
++    const int exact_build = !strcmp(dm_main_build(), DM_ODYSSEY_MAIN_BUILD);
++    const int have_rt_heap_gate = gate_obs_present(OBS_ODYSSEY_RT_HEAP);
++    const int have_rt_pool_gate = gate_obs_present(OBS_ODYSSEY_RT_POOL);
++    const int have_global_heap_gate = gate_obs_present(OBS_ODYSSEY_GLOBAL_HEAP);
++    const int any_highres_gate = have_rt_heap_gate || have_rt_pool_gate || have_global_heap_gate;
++    const int complete_highres_gates = have_rt_heap_gate && have_rt_pool_gate && have_global_heap_gate;
++
++    // The high profile replaces the global heap-size MOVZ with a NOP. Fail
++    // closed for stale/partial gate sets and attach its restore callback first.
++    if (any_highres_gate) {
++        if (!exact_build) die("Odyssey high-resolution memory gate belongs to main %s, found %s",
++                              DM_ODYSSEY_MAIN_BUILD, dm_main_build());
++        if (!complete_highres_gates)
++            die("Odyssey high-resolution memory profile has an incomplete RT/global heap gate pair");
++        gate_obs_set(OBS_ODYSSEY_GLOBAL_HEAP, global_heap_adjust);
++    }
++
++    dm_odyssey_display_config config;
++    if (!dm_odyssey_display_policy_parse(getenv("DM_ODYSSEY_RESOLUTION"),
++                                         getenv("DM_ODYSSEY_4_3"), &config)) {
++        LOG("[RED] Odyssey display choice is invalid; keeping stock resolution and aspect");
++        return;
++    }
++    if (!config.active) return;
++
++    const int opmode = dm_opmode();
++    if (opmode == 0) {
++        LOG("Odyssey display choices ignored in handheld mode (DM_OPMODE=0); using the stock picture and resolution");
++        return;
++    }
++    if (opmode != 1) {
++        LOG("[RED] Odyssey display choices require docked mode (DM_OPMODE=1); mode %d keeps stock", opmode);
++        return;
++    }
++
++    if (!exact_build) {
++        LOG("[RED] Odyssey display choice is unavailable for this main build; keeping stock");
++        return;
++    }
++    if (config.highres && !complete_highres_gates) {
++        LOG("[RED] Odyssey high-resolution choice requires the complete launcher-highres memory profile; keeping stock");
++        return;
++    }
++    if (config.native_panel && !native_panel_supported()) {
++        LOG("[RED] Odyssey native resolution requires a 2732x2048 iPad panel; keeping stock");
++        return;
++    }
++    if (!gate_obs_present(OBS_ODYSSEY_PROJECTION) ||
++        !gate_obs_present(OBS_ODYSSEY_PACKED_SIZE) ||
++        !gate_obs_present(OBS_ODYSSEY_CANVAS_SIZE) ||
++        !gate_obs_present(OBS_ODYSSEY_CROP_SIZE)) {
++        LOG("[RED] Odyssey display choice is missing one or more paired main gates; keeping stock");
++        return;
++    }
++
++    char selected_root[PATH_MAX], error[256];
++    if (!dm_odyssey_display_validate_asset(getenv("DM_ODYSSEY_DISPLAY_ROOT"), &config,
++                                           selected_root, sizeof selected_root,
++                                           error, sizeof error)) {
++        LOG("[RED] Odyssey display choice is unavailable: %s; keeping stock", error);
++        return;
++    }
++    if (!set_overlay_root(selected_root, error, sizeof error)) {
++        LOG("[RED] Odyssey display choice is unavailable: %s; keeping stock", error);
++        return;
++    }
++
++    g_display.config = config;
++    g_display.active = 1;
++    atomic_store_explicit(&g_published_viewport,
++                          (uint64_t)config.width | ((uint64_t)config.height << 32),
++                          memory_order_release);
++    atomic_store_explicit(&g_published_pool_extra,
++                          (uint64_t)config.app_pool_extra_mib * DM_ODYSSEY_MIB,
++                          memory_order_release);
++    gate_obs_set(OBS_ODYSSEY_PROJECTION, projection_adjust);
++    gate_obs_set(OBS_ODYSSEY_PACKED_SIZE, packed_size_adjust);
++    gate_obs_set(OBS_ODYSSEY_CANVAS_SIZE, canvas_size_adjust);
++    gate_obs_set(OBS_ODYSSEY_CROP_SIZE, crop_size_adjust);
++    if (complete_highres_gates) {
++        gate_obs_set(OBS_ODYSSEY_RT_HEAP, rt_heap_adjust);
++        gate_obs_set(OBS_ODYSSEY_RT_POOL, rt_pool_adjust);
++    }
++    if (viewport_aspect_changed(config.width, config.height)) front_display_aspect_changed();
++    LOG("Odyssey display enabled: %s %s, %ux%u; selected overlay SHA-256 verified; vertical FOV changes only for finite 16:9 projections",
++        dm_odyssey_display_preset_name(config.preset),
++        dm_odyssey_display_aspect_name(config.aspect), config.width, config.height);
++}
+diff --git a/dm/host/hle_svc.c b/dm/host/hle_svc.c
+index 8a8135a..bb49260 100644
+--- a/dm/host/hle_svc.c
++++ b/dm/host/hle_svc.c
+@@ -1,6 +1,7 @@
+ // Horizon kernel system calls (triggered by the SDK runtime once the SDK is loaded). Only what the P1 boot chain needs is implemented: memory layout + heap + query + debug output + timing.
+ // Register convention: inputs w1.. / outputs w0=Result, x1=value (GetInfo / SetHeapSize), consistent with the public Horizon ABI.
+ #include "dm.h"
++#include "dm_odyssey_display.h"
+ #include <sys/mman.h>
+ #include <errno.h>
+ #include <unistd.h>
+@@ -24,7 +25,13 @@ static uint64_t env_u64(const char *k, uint64_t dflt) {
+     const char *v = getenv(k);
+     return v && *v ? strtoull(v, NULL, 0) : dflt;
+ }
+-static uint64_t app_pool(void) { if (!g_app_pool) g_app_pool = env_u64("DM_APP_POOL", DM_GAME_APP_POOL); return g_app_pool; }
++static uint64_t app_pool(void) {
++    if (!g_app_pool) g_app_pool = env_u64("DM_APP_POOL", DM_GAME_APP_POOL); // cache the profile base before launcher policy is published
++    uint64_t total;
++    if (!dm_odyssey_display_pool_total(g_app_pool, dm_odyssey_display_pool_extra(), &total))
++        die("application pool plus accepted Odyssey render-target increment overflows");
++    return total;
++}
+ static uint64_t mem_used(void) { if (!g_mem_used) g_mem_used = env_u64("DM_MEM_USED", DM_GAME_MEM_USED); return g_mem_used; }
+ // The NPDM's system resource size: the shell is compiled from the placeholder profile, and a build that declares one
+ // where the profile says none gets a wrong answer to GetInfo and mis-sizes its heap (Absolum 1.0.4 declares 16 MB)
+diff --git a/dm/host/main.c b/dm/host/main.c
+index 01f5641..8b5bdb3 100644
+--- a/dm/host/main.c
++++ b/dm/host/main.c
+@@ -136,6 +136,7 @@ int main(int argc, char **argv) {
+         LOG("host loading already finished early in the background (dm_host_preload_start)");
+     } else host_preload(argc, argv);
+     { void dm_fps_state_apply(void); dm_fps_state_apply(); }   // frame rate and render scale into the frame step state page (loader.c): the iOS launcher sets them after the loading began
++    dm_odyssey_display_init();   // resolve the iOS launcher's selected Odyssey profile after loading joined; validate and publish before front_run can run guest constructors
+     front_run(guest_main);
+     return 0;
+ }
+diff --git a/dm/host/tests/t_obs_frame.c b/dm/host/tests/t_obs_frame.c
+new file mode 100644
+index 0000000..c40e232
+--- /dev/null
++++ b/dm/host/tests/t_obs_frame.c
+@@ -0,0 +1,52 @@
++#include "dm_obs_frame.h"
++
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++static void fill(uint8_t *bytes, size_t size) {
++    for (size_t i = 0; i < size; i++) bytes[i] = (uint8_t)(i * 37u + 11u);
++}
++
++int main(void) {
++    uint8_t frame[DM_OBS_FRAME_BYTES];
++    uint8_t original[DM_OBS_FRAME_BYTES];
++    uint8_t expected_lane[sizeof(float)];
++    float got = -7.0f;
++
++    assert(sizeof(dm_obs_frame) == DM_OBS_FRAME_BYTES);
++    fill(original, sizeof original);
++    for (unsigned reg = 0; reg < DM_OBS_FRAME_Q_COUNT; reg++) {
++        memcpy(frame, original, sizeof frame);
++        const float value = (float)reg + 0.25f;
++        memcpy(expected_lane, &value, sizeof value);
++        const size_t lane_offset = DM_OBS_FRAME_Q_OFFSET +
++                                   (size_t)reg * DM_OBS_FRAME_Q_STRIDE;
++
++        assert(dm_obs_frame_write_s(frame, sizeof frame, reg, value));
++        assert(dm_obs_frame_read_s(frame, sizeof frame, reg, &got));
++        assert(got == value);
++        for (size_t i = 0; i < sizeof frame; i++) {
++            const uint8_t expected = (i >= lane_offset && i < lane_offset + sizeof value)
++                ? expected_lane[i - lane_offset]
++                : original[i];
++            assert(frame[i] == expected);
++        }
++    }
++
++    memcpy(frame, original, sizeof frame);
++    got = 123.5f;
++    assert(!dm_obs_frame_read_s(NULL, sizeof frame, 2, &got));
++    assert(got == 123.5f);
++    assert(!dm_obs_frame_read_s(frame, sizeof frame, 2, NULL));
++    assert(!dm_obs_frame_read_s(frame, sizeof frame - 1, 2, &got));
++    assert(!dm_obs_frame_read_s(frame, sizeof frame, DM_OBS_FRAME_Q_COUNT, &got));
++    assert(!dm_obs_frame_write_s(NULL, sizeof frame, 2, 1.0f));
++    assert(!dm_obs_frame_write_s(frame, sizeof frame - 1, 2, 1.0f));
++    assert(!dm_obs_frame_write_s(frame, sizeof frame, DM_OBS_FRAME_Q_COUNT, 1.0f));
++    assert(memcmp(frame, original, sizeof frame) == 0);
++
++    puts("PASS: S-lane access validates null/length/index and changes only the selected low 32 bits");
++    return 0;
++}
+diff --git a/dm/host/tests/t_odyssey_display_asset.c b/dm/host/tests/t_odyssey_display_asset.c
+new file mode 100644
+index 0000000..d2040b2
+--- /dev/null
++++ b/dm/host/tests/t_odyssey_display_asset.c
+@@ -0,0 +1,400 @@
++#include "dm.h"
++#include "dm_obs_frame.h"
++#include "dm_odyssey_display.h"
++#include "dm_vertical_fov.h"
++
++#include <CommonCrypto/CommonDigest.h>
++#include <assert.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <limits.h>
++#include <math.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/stat.h>
++#include <unistd.h>
++
++#define TEST_BUILD_ID "b424be150a8e7d78701cbe7a439d9ebf"
++
++static module_t fake_main;
++module_t *g_mod = &fake_main;
++int g_nmod = 1;
++
++static const char *g_case;
++static int g_missing_gate;
++static int g_opmode = 1;
++static int g_highres_profile;
++static const char *g_selected_aspect = "4x3";
++static const char *g_selected_preset = "720p";
++static int g_gate_set_count;
++static int g_aspect_notifications;
++static void (*g_callbacks[OBS_MAX])(uint64_t *, int);
++
++int dm_opmode(void) { return g_opmode; }
++int gate_obs_present(int id) {
++    if (id <= 0 || id >= OBS_MAX) return 0;
++    if (id == g_missing_gate) return 0;
++    return id < OBS_ODYSSEY_RT_HEAP || g_highres_profile;
++}
++void gate_obs_set(int id, void (*fn)(uint64_t *, int)) {
++    assert(id > 0 && id < OBS_MAX && fn);
++    g_callbacks[id] = fn;
++    g_gate_set_count++;
++}
++void front_display_aspect_changed(void) { g_aspect_notifications++; }
++
++static void write_all(int fd, const void *data, size_t size) {
++    const char *p = data;
++    while (size) {
++        ssize_t n = write(fd, p, size);
++        assert(n > 0);
++        p += n;
++        size -= (size_t)n;
++    }
++}
++
++static void make_dir(const char *path) {
++    assert(mkdir(path, 0700) == 0 || errno == EEXIST);
++}
++
++static void sha256_hex(const char *data, size_t size, char out[65]) {
++    uint8_t digest[CC_SHA256_DIGEST_LENGTH];
++    assert(CC_SHA256(data, (CC_LONG)size, digest));
++    static const char hex[] = "0123456789abcdef";
++    for (size_t i = 0; i < sizeof digest; i++) {
++        out[i * 2] = hex[digest[i] >> 4];
++        out[i * 2 + 1] = hex[digest[i] & 15];
++    }
++    out[64] = 0;
++}
++
++static void write_manifest(const char *root) {
++    char path[PATH_MAX], digest[65];
++    assert(snprintf(path, sizeof path, "%s/profiles.tsv", root) < (int)sizeof path);
++    sha256_hex("abc", 3, digest);
++    FILE *f = fopen(path, "w");
++    assert(f);
++    fputs("#odyssey-display-v1\n", f);
++    static const struct { const char *preset, *aspect; unsigned width, height; } rows[] = {
++        {"stock", "16x9", 1600, 900}, {"stock", "4x3", 1200, 900},
++        {"720p", "16x9", 1280, 720}, {"720p", "4x3", 960, 720},
++        {"900p", "16x9", 1600, 900}, {"900p", "4x3", 1200, 900},
++        {"1080p", "16x9", 1920, 1080}, {"1080p", "4x3", 1440, 1080},
++        {"1440p", "16x9", 2560, 1440}, {"1440p", "4x3", 1920, 1440},
++        {"native", "16x9", 2732, 1536}, {"native", "4x3", 2732, 2048},
++    };
++    for (size_t i = 0; i < sizeof rows / sizeof rows[0]; i++)
++        fprintf(f, "%s\t%s\t%u\t%u\t%s\t3\n",
++                rows[i].preset, rows[i].aspect, rows[i].width, rows[i].height, digest);
++    assert(fclose(f) == 0);
++}
++
++static void write_selected_asset(const char *root, const char *aspect, const char *preset,
++                                 const char *bytes) {
++    char aspect_path[PATH_MAX], preset_path[PATH_MAX], system_path[PATH_MAX], file_path[PATH_MAX];
++    assert(snprintf(aspect_path, sizeof aspect_path, "%s/%s", root, aspect) < (int)sizeof aspect_path);
++    assert(snprintf(preset_path, sizeof preset_path, "%s/%s", aspect_path, preset) < (int)sizeof preset_path);
++    assert(snprintf(system_path, sizeof system_path, "%s/SystemData", preset_path) < (int)sizeof system_path);
++    assert(snprintf(file_path, sizeof file_path, "%s/ProjectGraphicsQuality.szs", system_path) < (int)sizeof file_path);
++    make_dir(aspect_path); make_dir(preset_path); make_dir(system_path);
++    int fd = open(file_path, O_CREAT | O_TRUNC | O_WRONLY, 0600);
++    assert(fd >= 0);
++    write_all(fd, bytes, 3);
++    assert(close(fd) == 0);
++}
++
++static int frame_equal_except(const uint8_t *before, const uint8_t *after,
++                              size_t bytes, size_t offset_a, size_t length_a,
++                              size_t offset_b, size_t length_b) {
++    for (size_t i = 0; i < bytes; i++) {
++        int changed = (i >= offset_a && i < offset_a + length_a) ||
++                     (i >= offset_b && i < offset_b + length_b);
++        if (!changed && before[i] != after[i]) return 0;
++    }
++    return 1;
++}
++
++static void test_dimension_callback(int id, unsigned reg_a, uint64_t value_a,
++                                    unsigned reg_b, uint64_t value_b,
++                                    uint32_t target_width, uint32_t target_height) {
++    _Alignas(16) uint64_t frame[DM_OBS_FRAME_BYTES / sizeof(uint64_t)];
++    uint8_t before[DM_OBS_FRAME_BYTES];
++    memset(frame, 0xa5, sizeof frame);
++    frame[reg_a] = value_a;
++    if (reg_b != UINT32_MAX) frame[reg_b] = value_b;
++    memcpy(before, frame, sizeof before);
++    assert(g_callbacks[id]);
++    g_callbacks[id](frame, 0);
++    assert(frame[reg_a] == (id == OBS_ODYSSEY_PACKED_SIZE
++                           ? ((uint64_t)target_width | ((uint64_t)target_height << 32)) : target_width));
++    if (reg_b != UINT32_MAX) assert(frame[reg_b] == target_height);
++    size_t first = reg_a * sizeof(uint64_t);
++    size_t second = reg_b == UINT32_MAX ? 0 : reg_b * sizeof(uint64_t);
++    size_t len_a = sizeof(uint64_t), len_b = reg_b == UINT32_MAX ? 0 : sizeof(uint64_t);
++    assert(frame_equal_except(before, (const uint8_t *)frame, sizeof before,
++                              first, len_a, second, len_b));
++
++    // A site whose original inputs differ from the pinned pair is a no-op.
++    frame[reg_a] = 123;
++    if (reg_b != UINT32_MAX) frame[reg_b] = 456;
++    memcpy(before, frame, sizeof before);
++    g_callbacks[id](frame, 0);
++    assert(memcmp(before, frame, sizeof before) == 0);
++}
++
++static void test_projection_callback(void) {
++    _Alignas(16) uint64_t frame[DM_OBS_FRAME_BYTES / sizeof(uint64_t)];
++    uint8_t before[DM_OBS_FRAME_BYTES];
++    memset(frame, 0x6b, sizeof frame);
++    assert(dm_obs_frame_write_s(frame, sizeof frame, 2, 1.125f));
++    assert(dm_obs_frame_write_s(frame, sizeof frame, 3, 16.0f / 9.0f));
++    memcpy(before, frame, sizeof before);
++    g_callbacks[OBS_ODYSSEY_PROJECTION](frame, 0);
++    float fovy = 0, aspect = 0, expected_fovy = 0;
++    assert(dm_obs_frame_read_s(frame, sizeof frame, 2, &fovy));
++    assert(dm_obs_frame_read_s(frame, sizeof frame, 3, &aspect));
++    const float target_aspect = dm_odyssey_display_aspect();
++    assert(dm_vertical_fov_extend_16_9_to_aspect(1.125f, 16.0f / 9.0f,
++                                                  target_aspect, &expected_fovy) == DM_VERTICAL_FOV_TRANSFORMED);
++    assert(fabsf(fovy - expected_fovy) < 1e-6f);
++    assert(fabsf(aspect - target_aspect) < 1e-6f);
++    assert(frame_equal_except(before, (const uint8_t *)frame, sizeof before,
++                              DM_OBS_FRAME_Q_OFFSET + 2 * DM_OBS_FRAME_Q_STRIDE, sizeof(float),
++                              DM_OBS_FRAME_Q_OFFSET + 3 * DM_OBS_FRAME_Q_STRIDE, sizeof(float)));
++
++    // An already-target projection is outside this callback's 16:9 source contract.
++    memset(frame, 0x37, sizeof frame);
++    assert(dm_obs_frame_write_s(frame, sizeof frame, 2, 0.75f));
++    assert(dm_obs_frame_write_s(frame, sizeof frame, 3, target_aspect));
++    memcpy(before, frame, sizeof before);
++    g_callbacks[OBS_ODYSSEY_PROJECTION](frame, 0);
++    assert(memcmp(before, frame, sizeof before) == 0);
++
++    // Other valid source aspects, such as a square offscreen projection, are
++    // also left alone by the 16:9-only transform.
++    memset(frame, 0x4c, sizeof frame);
++    assert(dm_obs_frame_write_s(frame, sizeof frame, 2, 0.75f));
++    assert(dm_obs_frame_write_s(frame, sizeof frame, 3, 1.0f));
++    memcpy(before, frame, sizeof before);
++    g_callbacks[OBS_ODYSSEY_PROJECTION](frame, 0);
++    assert(memcmp(before, frame, sizeof before) == 0);
++}
++
++static void test_memory_callback(int id, unsigned reg, uint32_t expected) {
++    _Alignas(16) uint64_t frame[DM_OBS_FRAME_BYTES / sizeof(uint64_t)];
++    uint64_t before[DM_OBS_FRAME_BYTES / sizeof(uint64_t)];
++    for (size_t i = 0; i < sizeof frame / sizeof frame[0]; i++) frame[i] = UINT64_C(0xa5a5000000000000) + i;
++    assert(g_callbacks[id]);
++    g_callbacks[id](frame, 0);
++    assert(frame[reg] == expected);
++    for (size_t i = 0; i < sizeof frame / sizeof frame[0]; i++)
++        if (i != reg) assert(frame[i] == UINT64_C(0xa5a5000000000000) + i);
++    memcpy(before, frame, sizeof before);
++    g_callbacks[id](frame, 0);
++    assert(memcmp(before, frame, sizeof before) == 0);
++}
++
++static void test_pool_extra(uint32_t expected_extra_mib) {
++    const uint64_t base = UINT64_C(3120) * 1024 * 1024;
++    uint64_t total = 0;
++    const uint64_t extra = dm_odyssey_display_pool_extra();
++    assert(extra == (uint64_t)expected_extra_mib * 1024 * 1024);
++    assert(dm_odyssey_display_pool_total(base, extra, &total));
++    assert(total == base + extra);
++    assert(!dm_odyssey_display_pool_total(UINT64_MAX - 4, 5, &total));
++}
++
++static void assert_inactive(void) {
++    for (int i = 0; i < OBS_MAX; i++)
++        if (i != OBS_ODYSSEY_GLOBAL_HEAP) assert(!g_callbacks[i]);
++    assert(strcmp(getenv("DM_ROMFS_OVERLAY"), "/before/overlay") == 0);
++    assert(fabsf(dm_odyssey_display_aspect() - 16.0f / 9.0f) < 1e-6f);
++    assert(g_aspect_notifications == 0);
++    test_pool_extra(0);
++}
++
++int main(int argc, char **argv) {
++    assert(argc == 2);
++    g_case = argv[1];
++    strcpy(fake_main.name, "main");
++    strcpy(fake_main.build_id, TEST_BUILD_ID);
++
++    const int fatal_wrong_build = !strcmp(g_case, "high-wrong-build");
++    const int fatal_partial = !strcmp(g_case, "high-missing-gate");
++    if (fatal_wrong_build || fatal_partial) {
++        g_highres_profile = 1;
++        if (fatal_wrong_build) strcpy(fake_main.build_id, "ffffffffffffffffffffffffffffffff");
++        if (fatal_partial) g_missing_gate = OBS_ODYSSEY_RT_POOL;
++        // These invariants must be checked before parsing any setting or touching assets.
++        dm_odyssey_display_init();
++        return 3;
++    }
++
++    char root[] = "/tmp/odyssey-display-asset-XXXXXX";
++    assert(mkdtemp(root));
++    const char *resolution = "720p", *four_three = "1";
++    if (!strcmp(g_case, "stock") || !strcmp(g_case, "stock-high")) {
++        g_highres_profile = !strcmp(g_case, "stock-high");
++        resolution = "stock"; four_three = "0";
++    } else if (!strcmp(g_case, "invalid") || !strcmp(g_case, "invalid-high")) {
++        g_highres_profile = !strcmp(g_case, "invalid-high");
++        resolution = "2160p";
++    } else if (!strcmp(g_case, "bad-aspect")) {
++        four_three = "2";
++    } else if (!strcmp(g_case, "wrong-build")) {
++        strcpy(fake_main.build_id, "ffffffffffffffffffffffffffffffff");
++    } else if (!strcmp(g_case, "missing-gates")) {
++        g_missing_gate = OBS_ODYSSEY_CROP_SIZE;
++    } else if (!strcmp(g_case, "handheld")) {
++        g_opmode = 0;
++    } else if (!strcmp(g_case, "wide-active")) {
++        four_three = "0";
++        g_selected_aspect = "16x9";
++    } else if (!strcmp(g_case, "1440-wide")) {
++        g_highres_profile = 1; resolution = "1440p"; four_three = "0";
++        g_selected_aspect = "16x9"; g_selected_preset = "1440p";
++    } else if (!strcmp(g_case, "1440-4x3")) {
++        g_highres_profile = 1; resolution = "1440p";
++        g_selected_aspect = "4x3"; g_selected_preset = "1440p";
++    } else if (!strcmp(g_case, "native-wide")) {
++        g_highres_profile = 1; resolution = "native"; four_three = "0";
++        g_selected_aspect = "16x9"; g_selected_preset = "native";
++    } else if (!strcmp(g_case, "native-4x3")) {
++        g_highres_profile = 1; resolution = "native";
++        g_selected_aspect = "4x3"; g_selected_preset = "native";
++    } else if (!strcmp(g_case, "native-unsupported")) {
++        g_highres_profile = 1; resolution = "native";
++        g_selected_aspect = "4x3"; g_selected_preset = "native";
++    } else if (!strcmp(g_case, "high-missing-pair")) {
++        resolution = "1440p"; four_three = "0"; g_selected_aspect = "16x9"; g_selected_preset = "1440p";
++    } else if (!strcmp(g_case, "high-bad-hash") || !strcmp(g_case, "high-missing-asset")) {
++        g_highres_profile = 1; resolution = "native";
++        g_selected_aspect = "4x3"; g_selected_preset = "native";
++    } else if (!strcmp(g_case, "fd0-manifest") || !strcmp(g_case, "fd0-asset")) {
++        // Keep the 720p / 4:3 setting and deliberately omit one selected file.
++    } else if (!strcmp(g_case, "active") || !strcmp(g_case, "bad-hash")) {
++        // 720p / 4:3 default case.
++    } else {
++        fprintf(stderr, "unknown fixture scenario: %s\n", g_case);
++        return 2;
++    }
++
++    const int native_supported = strcmp(g_case, "native-unsupported") != 0;
++    assert(setenv("DM_ODYSSEY_NATIVE_PANEL", native_supported ? "1" : "0", 1) == 0);
++    assert(setenv("DM_ODYSSEY_DISPLAY_ROOT", root, 1) == 0);
++    assert(setenv("DM_ROMFS_OVERLAY", "/before/overlay", 1) == 0);
++    assert(setenv("DM_ODYSSEY_RESOLUTION", resolution, 1) == 0);
++    assert(setenv("DM_ODYSSEY_4_3", four_three, 1) == 0);
++
++    const int has_invalid_config = !strcmp(g_case, "invalid") || !strcmp(g_case, "invalid-high") ||
++                                   !strcmp(g_case, "bad-aspect") || !strcmp(g_case, "wrong-build") ||
++                                   !strcmp(g_case, "missing-gates") || !strcmp(g_case, "handheld") ||
++                                   !strcmp(g_case, "stock") || !strcmp(g_case, "stock-high") ||
++                                   !strcmp(g_case, "native-unsupported") || !strcmp(g_case, "high-missing-pair");
++    const int fd0_case = !strcmp(g_case, "fd0-manifest") || !strcmp(g_case, "fd0-asset");
++    const int has_manifest = !has_invalid_config && !(!strcmp(g_case, "fd0-manifest"));
++    const int has_asset = !has_invalid_config && !(!strcmp(g_case, "fd0-manifest")) && !(!strcmp(g_case, "fd0-asset")) &&
++                          !(!strcmp(g_case, "high-missing-asset"));
++    if (has_manifest) write_manifest(root);
++    const int bad_hash = !strcmp(g_case, "bad-hash") || !strcmp(g_case, "high-bad-hash");
++    if (has_asset) write_selected_asset(root, g_selected_aspect, g_selected_preset, bad_hash ? "abd" : "abc");
++
++    char guard_path[PATH_MAX];
++    int original_stdin = -1;
++    if (fd0_case) {
++        assert(snprintf(guard_path, sizeof guard_path, "%s/guard", root) < (int)sizeof guard_path);
++        int guard = open(guard_path, O_CREAT | O_TRUNC | O_RDWR, 0600);
++        assert(guard >= 0);
++        char guard_data[1024]; memset(guard_data, 'x', sizeof guard_data);
++        write_all(guard, guard_data, sizeof guard_data);
++        assert(lseek(guard, 0, SEEK_SET) == 0);
++        original_stdin = dup(STDIN_FILENO);
++        assert(dup2(guard, STDIN_FILENO) == STDIN_FILENO);
++        close(guard);
++    }
++
++    dm_odyssey_display_init();
++
++    const int expected_active = !has_invalid_config && !fd0_case && !bad_hash &&
++                                strcmp(g_case, "high-missing-asset") != 0;
++    if (expected_active) {
++        const int high = g_highres_profile;
++        assert(g_gate_set_count == (high ? 7 : 4));
++        assert(g_callbacks[OBS_ODYSSEY_PROJECTION]);
++        assert(g_callbacks[OBS_ODYSSEY_PACKED_SIZE]);
++        assert(g_callbacks[OBS_ODYSSEY_CANVAS_SIZE]);
++        assert(g_callbacks[OBS_ODYSSEY_CROP_SIZE]);
++        if (high) {
++            assert(g_callbacks[OBS_ODYSSEY_RT_HEAP]);
++            assert(g_callbacks[OBS_ODYSSEY_RT_POOL]);
++            assert(g_callbacks[OBS_ODYSSEY_GLOBAL_HEAP]);
++        }
++        char expected_overlay[PATH_MAX * 2];
++        assert(snprintf(expected_overlay, sizeof expected_overlay, "%s/%s/%s:/before/overlay",
++                        root, g_selected_aspect, g_selected_preset) < (int)sizeof expected_overlay);
++        assert(strcmp(getenv("DM_ROMFS_OVERLAY"), expected_overlay) == 0);
++
++        dm_odyssey_display_config config;
++        assert(dm_odyssey_display_policy_parse(resolution, four_three, &config));
++        const float expected_aspect = (float)config.width / (float)config.height;
++        assert(fabsf(dm_odyssey_display_aspect() - expected_aspect) < 1e-6f);
++        assert(g_aspect_notifications == (fabsf(expected_aspect - 16.0f / 9.0f) > 0.0001f));
++        test_dimension_callback(OBS_ODYSSEY_PACKED_SIZE, 9,
++                                (uint64_t)1600 | ((uint64_t)900 << 32), UINT32_MAX, 0,
++                                config.width, config.height);
++        test_dimension_callback(OBS_ODYSSEY_CANVAS_SIZE, 4, 1600, 5, 900,
++                                config.width, config.height);
++        test_dimension_callback(OBS_ODYSSEY_CROP_SIZE, 3, 1600, 4, 900,
++                                config.width, config.height);
++        if (fabsf(expected_aspect - 16.0f / 9.0f) > 0.0001f) test_projection_callback();
++        else {
++            _Alignas(16) uint64_t frame[DM_OBS_FRAME_BYTES / sizeof(uint64_t)];
++            uint8_t before[DM_OBS_FRAME_BYTES];
++            memset(frame, 0x5d, sizeof frame);
++            assert(dm_obs_frame_write_s(frame, sizeof frame, 2, 1.0f));
++            assert(dm_obs_frame_write_s(frame, sizeof frame, 3, 16.0f / 9.0f));
++            memcpy(before, frame, sizeof before);
++            g_callbacks[OBS_ODYSSEY_PROJECTION](frame, 0);
++            assert(memcmp(before, frame, sizeof before) == 0);
++        }
++        test_pool_extra(config.app_pool_extra_mib);
++        if (high) {
++            test_memory_callback(OBS_ODYSSEY_RT_HEAP, 0,
++                                 config.rt_heap_mib * 1024u * 1024u);
++            test_memory_callback(OBS_ODYSSEY_RT_POOL, 8,
++                                 config.rt_pool_mib * 1024u * 1024u);
++            test_memory_callback(OBS_ODYSSEY_GLOBAL_HEAP, 0,
++                                 UINT32_C(0xc3000000) + config.app_pool_extra_mib * 1024u * 1024u);
++        }
++    } else {
++        assert_inactive();
++        if (g_highres_profile) {
++            assert(g_gate_set_count == 1);
++            assert(g_callbacks[OBS_ODYSSEY_GLOBAL_HEAP]);
++            test_memory_callback(OBS_ODYSSEY_GLOBAL_HEAP, 0, UINT32_C(0xc3000000));
++        } else {
++            assert(g_gate_set_count == 0);
++        }
++    }
++
++    if (fd0_case) {
++        assert(fcntl(STDIN_FILENO, F_GETFD) >= 0);
++        if (original_stdin >= 0) {
++            assert(dup2(original_stdin, STDIN_FILENO) == STDIN_FILENO);
++            close(original_stdin);
++        } else close(STDIN_FILENO);
++    }
++
++    char asset_path[PATH_MAX], system_path[PATH_MAX], preset_path[PATH_MAX], aspect_path[PATH_MAX];
++    assert(snprintf(aspect_path, sizeof aspect_path, "%s/%s", root, g_selected_aspect) < (int)sizeof aspect_path);
++    assert(snprintf(preset_path, sizeof preset_path, "%s/%s", aspect_path, g_selected_preset) < (int)sizeof preset_path);
++    assert(snprintf(system_path, sizeof system_path, "%s/SystemData", preset_path) < (int)sizeof system_path);
++    assert(snprintf(asset_path, sizeof asset_path, "%s/ProjectGraphicsQuality.szs", system_path) < (int)sizeof asset_path);
++    if (has_asset) { unlink(asset_path); rmdir(system_path); rmdir(preset_path); rmdir(aspect_path); }
++    if (has_manifest) { char path[PATH_MAX]; snprintf(path, sizeof path, "%s/profiles.tsv", root); unlink(path); }
++    if (fd0_case) unlink(guard_path);
++    assert(rmdir(root) == 0);
++    printf("PASS: Odyssey display fixture scenario %s\n", g_case);
++    return 0;
++}
+diff --git a/dm/host/tests/t_odyssey_display_policy.c b/dm/host/tests/t_odyssey_display_policy.c
+new file mode 100644
+index 0000000..9c6f8ef
+--- /dev/null
++++ b/dm/host/tests/t_odyssey_display_policy.c
+@@ -0,0 +1,70 @@
++#include "dm_odyssey_display.h"
++
++#include <assert.h>
++#include <stdio.h>
++#include <string.h>
++
++typedef struct {
++    const char *preset;
++    const char *four_three;
++    uint32_t width;
++    uint32_t height;
++    int active;
++} policy_case;
++
++int main(void) {
++    static const policy_case cases[] = {
++        {NULL, NULL, 1600, 900, 0},
++        {"stock", "0", 1600, 900, 0},
++        {"stock", "1", 1200, 900, 1},
++        {"720p", "0", 1280, 720, 1},
++        {"720p", "1", 960, 720, 1},
++        {"900p", "0", 1600, 900, 1},
++        {"900p", "1", 1200, 900, 1},
++        {"1080p", "0", 1920, 1080, 1},
++        {"1080p", "1", 1440, 1080, 1},
++        {"1440p", "0", 2560, 1440, 1},
++        {"1440p", "1", 1920, 1440, 1},
++        {"native", "0", 2732, 1536, 1},
++        {"native", "1", 2732, 2048, 1},
++    };
++    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
++        dm_odyssey_display_config config;
++        assert(dm_odyssey_display_policy_parse(cases[i].preset, cases[i].four_three, &config));
++        assert(config.width == cases[i].width && config.height == cases[i].height);
++        assert(config.active == cases[i].active);
++        assert(dm_odyssey_display_preset_name(config.preset));
++        assert(dm_odyssey_display_aspect_name(config.aspect));
++        if (config.highres) {
++            static const uint32_t pool[4] = {160, 128, 192, 256};
++            static const uint32_t extra[4] = {60, 28, 92, 156};
++            static const uint32_t heap[4] = {230, 198, 262, 326};
++            size_t slot = (config.preset == DM_ODYSSEY_PRESET_NATIVE ? 2 : 0) +
++                          (config.aspect == DM_ODYSSEY_ASPECT_4X3 ? 1 : 0);
++            assert(config.rt_pool_mib == pool[slot]);
++            assert(config.rt_heap_mib == heap[slot]);
++            assert(config.app_pool_extra_mib == extra[slot]);
++            assert(config.native_panel == (config.preset == DM_ODYSSEY_PRESET_NATIVE));
++        } else {
++            assert(config.rt_pool_mib == 0 && config.rt_heap_mib == 0 &&
++                   config.app_pool_extra_mib == 0 && !config.highres && !config.native_panel);
++        }
++    }
++
++    dm_odyssey_display_config rejected;
++    assert(!dm_odyssey_display_policy_parse("2160p", "0", &rejected));
++    assert(!dm_odyssey_display_policy_parse("720p", "true", &rejected));
++    assert(!dm_odyssey_display_policy_parse("stock", "", &rejected));
++    assert(!dm_odyssey_display_policy_parse("stock", "0", NULL));
++    uint64_t total = 0;
++    const uint64_t base = UINT64_C(3120) * 1024 * 1024;
++    assert(dm_odyssey_display_pool_total(base, UINT64_C(156) * 1024 * 1024, &total));
++    assert(total == UINT64_C(3276) * 1024 * 1024);
++    assert(dm_odyssey_display_pool_total(base, 0, &total) && total == base);
++    assert(!dm_odyssey_display_pool_total(UINT64_MAX - 3, 4, &total));
++    uint32_t mib = 0;
++    assert(dm_odyssey_display_add_mib(3120, 156, &mib) && mib == 3276);
++    assert(!dm_odyssey_display_add_mib(UINT32_MAX - 3, 4, &mib));
++    puts("PASS: Odyssey display policy maps only the twelve reviewed targets and checked pool increments");
++    return 0;
++}
+diff --git a/dm/host/tests/t_vertical_fov.c b/dm/host/tests/t_vertical_fov.c
+new file mode 100644
+index 0000000..7b20304
+--- /dev/null
++++ b/dm/host/tests/t_vertical_fov.c
+@@ -0,0 +1,143 @@
++#include "dm_vertical_fov.h"
++
++#include <assert.h>
++#include <math.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++#define PI 3.14159265358979323846264338327950288
++
++static float rad(float degrees) { return (float)((double)degrees * PI / 180.0); }
++
++static void assert_horizontal_tangent(float fovy_in, float aspect_in,
++                                      float fovy_out, float aspect_out) {
++    const double before = (double)aspect_in * tan((double)fovy_in * 0.5);
++    const double after = (double)aspect_out * tan((double)fovy_out * 0.5);
++    assert(fabs(before - after) < 0.000001);
++}
++
++static void assert_invalid_preserves_output(float fovy, float source, float target) {
++    const uint32_t sentinel_bits = 0x3f123456u;
++    float out;
++    memcpy(&out, &sentinel_bits, sizeof out);
++    assert(dm_vertical_fov_preserve_horizontal(fovy, source, target, &out) ==
++           DM_VERTICAL_FOV_INVALID);
++    uint32_t after_bits;
++    memcpy(&after_bits, &out, sizeof after_bits);
++    assert(after_bits == sentinel_bits);
++}
++
++int main(void) {
++    const float wide = 16.0f / 9.0f;
++    const float classic = 4.0f / 3.0f;
++    const float sixty_degrees = rad(60.0f);
++    float out = -1.0f;
++
++    assert(dm_vertical_fov_preserve_horizontal(sixty_degrees, wide, classic, &out) ==
++           DM_VERTICAL_FOV_TRANSFORMED);
++    assert(fabs((double)out - 1.3121067481206792) < 0.000001);
++    assert_horizontal_tangent(sixty_degrees, wide, out, classic);
++
++    // Reverse aspect change shrinks vertical FOV but preserves horizontal extent.
++    float narrower = -1.0f;
++    assert(dm_vertical_fov_preserve_horizontal(out, classic, wide, &narrower) ==
++           DM_VERTICAL_FOV_TRANSFORMED);
++    assert(narrower < out);
++    assert_horizontal_tangent(out, classic, narrower, wide);
++
++    // Exact equal-aspect path is bit-identical and bypasses all math.
++    const float special = 0.73123455f;
++    uint32_t special_bits, out_bits;
++    memcpy(&special_bits, &special, sizeof special_bits);
++    out = -1.0f;
++    assert(dm_vertical_fov_preserve_horizontal(special, classic, classic, &out) ==
++           DM_VERTICAL_FOV_UNCHANGED);
++    memcpy(&out_bits, &out, sizeof out_bits);
++    assert(out_bits == special_bits);
++
++    // The 16:9->4:3 policy applies only to valid, matching aspects.
++    out = -1.0f;
++    assert(dm_vertical_fov_extend_16_9_to_4_3(sixty_degrees, wide, classic, &out) ==
++           DM_VERTICAL_FOV_TRANSFORMED);
++    assert_horizontal_tangent(sixty_degrees, wide, out, classic);
++    float repeated = -1.0f;
++    uint32_t repeated_bits;
++    assert(dm_vertical_fov_extend_16_9_to_4_3(sixty_degrees, wide, classic, &repeated) ==
++           DM_VERTICAL_FOV_TRANSFORMED);
++    memcpy(&out_bits, &out, sizeof out_bits);
++    memcpy(&repeated_bits, &repeated, sizeof repeated_bits);
++    assert(out_bits == repeated_bits);  // Same fresh input has no cached/recursive state.
++    out = -1.0f;
++    assert(dm_vertical_fov_extend_16_9_to_4_3(sixty_degrees, 1.0f, classic, &out) ==
++           DM_VERTICAL_FOV_SKIPPED);
++    assert(out == sixty_degrees);  // Known square-aspect caller stays unchanged.
++    out = -1.0f;
++    assert(dm_vertical_fov_extend_16_9_to_4_3(special, classic, classic, &out) ==
++           DM_VERTICAL_FOV_UNCHANGED);
++    memcpy(&out_bits, &out, sizeof out_bits);
++    assert(out_bits == special_bits);
++    out = -1.0f;
++    assert(dm_vertical_fov_extend_16_9_to_4_3(sixty_degrees, wide, 2.0f, &out) ==
++           DM_VERTICAL_FOV_SKIPPED);
++    assert(out == sixty_degrees);
++    out = -1.0f;
++    assert(dm_vertical_fov_extend_16_9_to_4_3(sixty_degrees, wide + 0.00005f,
++                                               classic - 0.00005f, &out) ==
++           DM_VERTICAL_FOV_TRANSFORMED);
++
++    // The runtime's generic policy accepts the two reviewed native ratios,
++    // while still filtering to incoming 16:9 projections.
++    const float native_4x3 = 2732.0f / 2048.0f;
++    const float native_16x9 = 2732.0f / 1536.0f;
++    out = -1.0f;
++    assert(dm_vertical_fov_extend_16_9_to_aspect(sixty_degrees, wide, native_4x3, &out) ==
++           DM_VERTICAL_FOV_TRANSFORMED);
++    assert_horizontal_tangent(sixty_degrees, wide, out, native_4x3);
++    out = -1.0f;
++    assert(dm_vertical_fov_extend_16_9_to_aspect(sixty_degrees, wide, native_16x9, &out) ==
++           DM_VERTICAL_FOV_TRANSFORMED);
++    assert_horizontal_tangent(sixty_degrees, wide, out, native_16x9);
++    out = -1.0f;
++    assert(dm_vertical_fov_extend_16_9_to_aspect(sixty_degrees, 1.0f, native_4x3, &out) ==
++           DM_VERTICAL_FOV_SKIPPED && out == sixty_degrees);
++    out = -1.0f;
++    assert(dm_vertical_fov_extend_16_9_to_aspect(special, native_4x3, native_4x3, &out) ==
++           DM_VERTICAL_FOV_UNCHANGED);
++    memcpy(&out_bits, &out, sizeof out_bits);
++    assert(out_bits == special_bits);
++
++    assert_invalid_preserves_output(0.0f, wide, classic);
++    assert_invalid_preserves_output(-0.1f, wide, classic);
++    assert_invalid_preserves_output((float)PI, wide, classic);
++    assert_invalid_preserves_output(NAN, wide, classic);
++    assert_invalid_preserves_output(INFINITY, wide, classic);
++    assert_invalid_preserves_output(sixty_degrees, 0.0f, classic);
++    assert_invalid_preserves_output(sixty_degrees, wide, -1.0f);
++    assert_invalid_preserves_output(sixty_degrees, NAN, classic);
++    assert_invalid_preserves_output(sixty_degrees, wide, INFINITY);
++    const float smallest_positive = nextafterf(0.0f, 1.0f);
++    assert_invalid_preserves_output(smallest_positive, wide, classic);
++    const float small_representable_fovy = 0.0001f;
++    out = -1.0f;
++    assert(dm_vertical_fov_preserve_horizontal(small_representable_fovy, wide, classic, &out) ==
++           DM_VERTICAL_FOV_TRANSFORMED);
++    assert(out > 0.0f && isfinite(out));
++    const float closest_float_below_pi = nextafterf((float)PI, 0.0f);
++    assert_invalid_preserves_output(closest_float_below_pi, wide, classic);
++    // Still accept a large FOV when the transformed float preserves geometry.
++    const float large_fovy = rad(170.0f);
++    out = -1.0f;
++    assert(dm_vertical_fov_preserve_horizontal(large_fovy, wide, classic, &out) ==
++           DM_VERTICAL_FOV_TRANSFORMED);
++    const double large_before = (double)wide * tan((double)large_fovy * 0.5);
++    const double large_after = (double)classic * tan((double)out * 0.5);
++    assert(fabs(large_before - large_after) / large_before < 0.00001);
++    out = 12.0f;
++    assert(dm_vertical_fov_preserve_horizontal(sixty_degrees, wide, classic, NULL) ==
++           DM_VERTICAL_FOV_INVALID);
++    assert(out == 12.0f);
++
++    puts("PASS: horizontal-FOV geometry, 16:9-to-4:3 eligibility, exact identity, and invalid edges");
++    return 0;
++}
+diff --git a/dm/ios/Sources/DmGamepad.m b/dm/ios/Sources/DmGamepad.m
+index 0f185a6..fcfe85b 100644
+--- a/dm/ios/Sources/DmGamepad.m
++++ b/dm/ios/Sources/DmGamepad.m
+@@ -312,12 +312,13 @@ static CGFloat dist(CGPoint a, CGPoint b) { return hypot(a.x - b.x, a.y - b.y);
+     if (changed || stick || _stickShown) [self refresh];   // also refresh on the stick release so the knob returns to the centre
+     _stickShown = stick;
+ }
+-// Touches no control takes (all of them while a physical controller is connected) go to the game's touch screen, normalized on the 16:9 picture that front_ios.m
++// Touches no control takes (all of them while a physical controller is connected) go to the game's touch screen, normalized on the accepted picture aspect that front_ios.m
+ // centres in the screen: Super Mario Galaxy's pointer in handheld mode (profile op_mode). The host reports them only in handheld mode, as on the Switch (hle_hid.c touch_read)
+ - (void)pushGame {
+     CGRect b = self.bounds; CGFloat w = b.size.width, h = b.size.height;
+     if (w <= 0 || h <= 0) return;
+-    if (w / h > 16.0 / 9.0) w = h * 16.0 / 9.0; else h = w * 9.0 / 16.0;
++    const CGFloat aspect = dm_odyssey_display_aspect();
++    if (w / h > aspect) w = h * aspect; else h = w / aspect;
+     CGFloat x0 = (b.size.width - w) / 2, y0 = (b.size.height - h) / 2;
+     dm_touch t[16]; int n = 0;
+     for (int i = 0; i < 16; i++) if (_game[i]) {
+diff --git a/dm/ios/Sources/LauncherRow.swift b/dm/ios/Sources/LauncherRow.swift
+index 82fa3b3..2fa3f23 100644
+--- a/dm/ios/Sources/LauncherRow.swift
++++ b/dm/ios/Sources/LauncherRow.swift
+@@ -20,6 +20,28 @@ struct SettingRow: View {
+                 set: { m.values[s.env] = String(format: "%.2f", $0) })
+     }
+     private var percentage: String { m.rangeLabel(s, rangeValue.wrappedValue) }
++    private var choiceSliderOptions: [[String]]? {
++        guard s.control == "slider", let options = s.options, options.count >= 2,
++              options.allSatisfy({ $0.count >= 2 }) else { return nil }
++        return options
++    }
++    private var selectedChoiceIndex: Int? {
++        let value = m.values[s.env] ?? s.def
++        return s.options?.firstIndex { $0.count >= 2 && $0[0] == value }
++    }
++    private var selectedChoiceLabel: String {
++        guard let index = selectedChoiceIndex, let options = s.options, options.indices.contains(index), options[index].count >= 2 else {
++            return "Unavailable"
++        }
++        return options[index][1]
++    }
++    private var choiceSliderValue: Binding<Double> {
++        Binding(get: { Double(self.selectedChoiceIndex ?? 0) }, set: { value in
++            guard let options = self.choiceSliderOptions else { return }
++            let index = min(options.count - 1, max(0, Int(value.rounded())))
++            self.m.values[self.s.env] = options[index][0]
++        })
++    }
+ 
+     private var settingLabel: some View {
+         VStack(alignment: .leading, spacing: 4) {
+@@ -32,12 +54,26 @@ struct SettingRow: View {
+         Group {
+             switch s.kind {
+             case "choice":
+-                Picker(selection: m.binding(s)) {
+-                    ForEach(s.options ?? [], id: \.[0]) { Text($0[1]).tag($0[0]) }
+-                } label: {
+-                    settingLabel
++                if let options = choiceSliderOptions {
++                    VStack(alignment: .leading, spacing: 8) {
++                        HStack {
++                            settingLabel
++                            Spacer(minLength: 8)
++                            Text(selectedChoiceLabel).monospacedDigit().foregroundStyle(.secondary)
++                        }
++                        Slider(value: choiceSliderValue, in: 0...Double(options.count - 1), step: 1)
++                            .accessibilityLabel(s.label)
++                            .accessibilityValue(selectedChoiceLabel)
++                            .accessibilityHint("Swipe up or down to change the selection.")
++                    }
++                } else {
++                    Picker(selection: m.binding(s)) {
++                        ForEach(s.options ?? [], id: \.[0]) { Text($0[1]).tag($0[0]) }
++                    } label: {
++                        settingLabel
++                    }
++                    .pickerStyle(.menu)
+                 }
+-                .pickerStyle(.menu)
+             case "range":
+                 VStack(alignment: .leading, spacing: 8) {
+                     HStack {
+diff --git a/dm/ios/Sources/LauncherSettings.swift b/dm/ios/Sources/LauncherSettings.swift
+index d03c557..ae8b20c 100644
+--- a/dm/ios/Sources/LauncherSettings.swift
++++ b/dm/ios/Sources/LauncherSettings.swift
+@@ -7,6 +7,7 @@ struct Setting: Decodable, Identifiable {
+     let section: String?   // heading on the settings screen; absent in older bundles
+     let needs: String?     // "<VAR>=<value>": a sub-setting, drawn only while that setting has that value
+     let level: String?     // "basic": shown first (the Mac window's Basic settings); any other or none: Advanced settings. The iPhone keeps one list
++    let control: String?   // "slider": a discrete slider over a choice's options; stored values remain the choice values
+     let base: Base?        // render scale: the 3D views' size at 1.0, docked and handheld, for the size in pixels (the Mac window)
+     struct Base: Decodable { let docked, handheld: [Int] }
+     let options: [[String]]?   // choice: [value, label]
+@@ -30,7 +31,7 @@ struct Setting: Decodable, Identifiable {
+         default: return true
+         }
+     }
+-    enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", section, needs, level, base, options, min, max, step, on, off }
++    enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", section, needs, level, control, base, options, min, max, step, on, off }
+ }
+ struct SettingsFile: Decodable { let settings: [Setting] }
+ 
+diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
+index 6878d3c..5718ba3 100644
+--- a/dm/ios/Sources/front_ios.m
++++ b/dm/ios/Sources/front_ios.m
+@@ -1,4 +1,4 @@
+-// iOS front end (the iOS implementation of front.h): a centered 16:9 Metal view (black bars on both sides) + a full-screen virtual gamepad layer (DmGamepad.m, controls drawn over the picture).
++// iOS front end (the iOS implementation of front.h): a centered launch-selected Metal view (black bars as needed) + a full-screen virtual gamepad layer (DmGamepad.m, controls drawn over the picture).
+ // The host runs on the big-stack thread started by main.m; front_run runs the guest directly on the calling thread.
+ #import <UIKit/UIKit.h>
+ #import <QuartzCore/CAMetalLayer.h>
+@@ -87,8 +87,9 @@ static void launcher_done(void) { [g_root startGame]; }
+ - (void)viewDidLayoutSubviews {
+     [super viewDidLayoutSubviews];
+     CGRect b = self.view.bounds; if (!self.game) return;
+-    CGFloat w = b.size.width, h = b.size.height;   // Fit 16:9 into the whole screen
+-    if (w / h > 16.0 / 9.0) w = h * 16.0 / 9.0; else h = w * 9.0 / 16.0;
++    const CGFloat aspect = dm_odyssey_display_aspect();
++    CGFloat w = b.size.width, h = b.size.height;   // Fit the accepted picture aspect into the whole screen
++    if (w / h > aspect) w = h * aspect; else h = w / aspect;
+     self.game.frame = CGRectMake(floor((b.size.width - w) / 2), floor((b.size.height - h) / 2), w, h);
+     if (self.fps) {   // the top row's free stretch: right of DmGamepad.m's L3 key (102 + 17 of its units from the safe edge), level with − / + (22 units down); u is its unit
+         CGRect s = UIEdgeInsetsInsetRect(b, self.view.safeAreaInsets); CGFloat u = MIN(b.size.height / 430.0, 1.3);
+@@ -111,6 +112,13 @@ static void launcher_done(void) { [g_root startGame]; }
+ - (BOOL)prefersStatusBarHidden { return YES; }
+ - (UIInterfaceOrientationMask)supportedInterfaceOrientations { return UIInterfaceOrientationMaskLandscape; }
+ @end
++void front_display_aspect_changed(void) {
++    dispatch_async(dispatch_get_main_queue(), ^{
++        if (!g_root || !g_root.game) return;
++        [g_root.view setNeedsLayout];
++        [g_root.view layoutIfNeeded];
++    });
++}
+ UIViewController *front_ios_root(void) { return [DmRootVC new]; }
+ 
+ // Thermal state and screen brightness for the power and present rows every 300 frames (hle_nvn.c; its weak defaults return -1 on the Mac). thermalState: 0 nominal, 1 fair, 2 serious, 3 critical.
+diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
+index 288bdf8..5a76083 100644
+--- a/dm/ios/Sources/main.m
++++ b/dm/ios/Sources/main.m
+@@ -136,6 +136,15 @@ static int boot_env(void) {
+     }
+     setenv("DM_ENV_FILE_KEYS", [from_file componentsJoinedByString:@" "].UTF8String, 1);   // the launcher keeps what an env file set (LauncherSettings.swift)
+     setenv("DM_ENV_LAUNCH_KEYS", [from_launch componentsJoinedByString:@" "].UTF8String, 1);   // and what the launch environment set (docs/frontends.md, Saved choices)
++    // Native Odyssey output is limited to the exact 2732x2048 M2 iPad panel
++    // family reviewed for the high-resolution memory plan. Never trust an
++    // env-file or launch override for this hardware capability.
++    { CGSize native = UIScreen.mainScreen.nativeBounds.size;
++      CGFloat long_edge = MAX(native.width, native.height), short_edge = MIN(native.width, native.height);
++      int supported = long_edge == 2732.0 && short_edge == 2048.0;
++      setenv("DM_ODYSSEY_NATIVE_PANEL", supported ? "1" : "0", 1);
++      fprintf(stderr, "boot: Odyssey native panel %s (native bounds %.0fx%.0f)\n",
++              supported ? "supported" : "unsupported", native.width, native.height); }
+     front_hud_env();   // before the early loading below can make a device
+     // Game language (nn::oe::GetDesiredLanguage, hle_oe.c): the one the IPA was packed with (the NSP script's LANGUAGE / --language → DMLanguage in Info.plist), unless an env file sets DM_LANG
+     // (or the launcher, which replaces this default before the game starts)
+@@ -159,6 +168,11 @@ static int boot_env(void) {
+     setenv("DM_SAVE", [doc stringByAppendingPathComponent:@"save"].fileSystemRepresentation, 0);
+     setenv("DM_TEMP", [doc stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 0);
+     NSString *dm = [res stringByAppendingPathComponent:@"dm"];
++    // The selected Odyssey ROMFS overlay is bundled beside launcher.json. The
++    // host validates the manifest and selected file only after the launcher
++    // has applied its choices; stock startup never mounts this directory.
++    NSString *odysseyDisplay = [dm stringByAppendingPathComponent:@"odyssey-display"];
++    setenv("DM_ODYSSEY_DISPLAY_ROOT", odysseyDisplay.fileSystemRepresentation, 1);
+     setenv("DM_NVN_SHMAP", [dm stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);
+     setenv("DM_MSL_DIR", [res stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 0);
+     setenv("DM_FONT_DIR", [dm stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
+diff --git a/dm/ios/tests/launcher_storage_check.swift b/dm/ios/tests/launcher_storage_check.swift
+index 6ee211b..f0d2ed3 100644
+--- a/dm/ios/tests/launcher_storage_check.swift
++++ b/dm/ios/tests/launcher_storage_check.swift
+@@ -87,6 +87,19 @@ import Foundation
+         expect(launched.values["DM_OPMODE"] == "0" && d.string(forKey: "launcher.DM_OPMODE") == "1", "Reset then Play keeps the saved choice of a setting fixed at launch")
+         unsetenv("DM_OPMODE"); setenv("DM_ENV_LAUNCH_KEYS", "", 1); d.removeObject(forKey: "launcher.DM_OPMODE")
+         failed += checkLauncherLayout(LauncherModel(mac.settings, defaults: d), defaults: d)
++        unsetenv("DM_ODYSSEY_RESOLUTION"); unsetenv("DM_SAVED_CHOICES")
++        let discrete = try! JSONDecoder().decode(Setting.self, from: Data(#"{"env":"DM_ODYSSEY_RESOLUTION","kind":"choice","section":"Game","label":"Resolution target","note":"Target height; lower game DRS may apply. Experimental.","default":"stock","control":"slider","options":[["stock","Original (dynamic)"],["720p","720p"],["900p","900p"],["1080p","1080p"]]}"#.utf8))
++        expect(discrete.control == "slider" && discrete.accepts("900p") && !discrete.accepts("native"), "discrete slider metadata decodes and accepts only offered choice values")
++        d.set("1440p", forKey: "launcher.DM_ODYSSEY_RESOLUTION")
++        let v1Only = LauncherModel([discrete], defaults: d)
++        expect(v1Only.values["DM_ODYSSEY_RESOLUTION"] == "stock", "a saved high-resolution option no longer offered falls back to stock")
++        d.removeObject(forKey: "launcher.DM_ODYSSEY_RESOLUTION")
++        let resolution = LauncherModel([discrete], defaults: d)
++        resolution.values["DM_ODYSSEY_RESOLUTION"] = "900p"; resolution.apply()
++        expect(d.string(forKey: "launcher.DM_ODYSSEY_RESOLUTION") == "900p" && String(cString: getenv("DM_ODYSSEY_RESOLUTION")) == "900p", "discrete slider selection persists and is exported as its choice value")
++        resolution.values["DM_ODYSSEY_RESOLUTION"] = "stock"; resolution.apply()
++        expect(d.string(forKey: "launcher.DM_ODYSSEY_RESOLUTION") == nil && String(cString: getenv("DM_ODYSSEY_RESOLUTION")) == "stock", "selecting the discrete slider default clears its saved value")
++        unsetenv("DM_ODYSSEY_RESOLUTION")
+         print("launcher storage: \(failed) failed")
+         exit(failed == 0 ? 0 : 1)
+     }
+diff --git a/dm/tools/tests/run_obs_frame_native.py b/dm/tools/tests/run_obs_frame_native.py
+new file mode 100644
+index 0000000..d079600
+--- /dev/null
++++ b/dm/tools/tests/run_obs_frame_native.py
+@@ -0,0 +1,291 @@
++#!/usr/bin/env python3
++"""Run the saved-Q-lane and selected-GPR fixture on macOS ARM64 against _dm_gate.
++
++The Windows/Zig C fixtures are separate and cover the portable frame/math APIs.
++This native test additionally executes the extracted assembly body and replays
++the actual first instruction of the projection wrapper in isolation. It does
++not execute a game, install a hook, or test a complete OBS rewrite stub.
++"""
++from pathlib import Path
++import platform
++import re
++import shutil
++import subprocess
++import sys
++import tempfile
++
++
++ROOT = Path(__file__).resolve().parents[3]
++
++
++def extract_gate_body(entry):
++    start = entry.index(".globl _dm_gate")
++    end = entry.index(".globl _dm_thread_enter", start)
++    return entry[start:end]
++
++
++def first_gate_instruction(body):
++    instructions = body.split("_dm_gate:", 1)[1].splitlines()
++    for line in instructions:
++        instruction = line.split("//", 1)[0].strip()
++        if instruction:
++            return instruction
++    raise ValueError("_dm_gate body has no instructions")
++
++
++def build_assembly(entry):
++    start = entry.index(".globl _dm_gate")
++    end = entry.index(".globl _dm_thread_enter", start)
++    actual_gate_body = entry[start:end]
++    gate_first_instruction = first_gate_instruction(actual_gate_body)
++    if not gate_first_instruction.startswith("sub sp, sp, #800"):
++        raise ValueError(f"unexpected _dm_gate entry instruction: {gate_first_instruction}")
++
++    # Independently replay the verified retail wrapper's first instruction.
++    # main+0x73de60 decoded as STP D11,D10,[SP,#-0x40]! (word 0x6dbc2beb,
++    # little-endian bytes eb2bbc6d); this test does not read or patch the NSO.
++    projection_entry_instruction = "stp d11, d10, [sp, #-0x40]!"
++    qloads = "\n".join(
++        f"    ldp q{q}, q{q + 1}, [x16, #{q * 16}]" for q in range(0, 32, 2))
++    qstores = "\n".join(
++        f"    stp q{q}, q{q + 1}, [x16, #{q * 16}]" for q in range(0, 32, 2))
++    guest_gprs = tuple(range(18)) + tuple(range(19, 30))
++    gpr_stores = "\n".join(
++        f"    str x{reg}, [sp, #{256 + reg * 8}]" for reg in guest_gprs + (30,))
++    gpr_copies = "\n".join(
++        f"    ldr x17, [sp, #{256 + reg * 8}]\n    str x17, [x16, #{reg * 8}]"
++        for reg in guest_gprs + (30,))
++    gpr_sentinels = "\n".join(
++        f"    mov x{reg}, #{0x100 + reg}" for reg in guest_gprs)
++    projection_entry_replay = f"""
++.globl _dm_test_replay_projection_entry
++.p2align 2
++_dm_test_replay_projection_entry:
++    stp d10, d11, [sp, #-16]!
++    ldr d10, [x0]
++    ldr d11, [x0, #8]
++    mov x9, sp
++    {projection_entry_instruction}
++    ldr x10, [sp]
++    str x10, [x1]
++    ldr x10, [sp, #8]
++    str x10, [x1, #8]
++    mov x10, sp
++    sub x10, x9, x10
++    str x10, [x1, #16]
++    add sp, sp, #64
++    mov x10, sp
++    cmp x9, x10
++    cset w0, eq
++    ldp d10, d11, [sp], #16
++    ret
++"""
++    test_call_gate = f"""
++.globl _dm_test_invoke_gate
++.p2align 2
++_dm_test_invoke_gate:
++    sub sp, sp, #544
++    stp x29, x30, [sp, #0]
++    mov x29, sp
++    stp x19, x20, [sp, #16]
++    stp x21, x22, [sp, #32]
++    stp x23, x24, [sp, #48]
++    stp x25, x26, [sp, #64]
++    stp x27, x28, [sp, #80]
++    stp d8, d9, [sp, #96]
++    stp d10, d11, [sp, #112]
++    stp d12, d13, [sp, #128]
++    stp d14, d15, [sp, #144]
++    str x0, [sp, #184]
++    str x1, [sp, #192]
++    str x5, [sp, #200]
++    str x6, [sp, #208]
++    str x2, [sp, #160]
++    str x3, [sp, #168]
++    str x4, [sp, #176]
++    ldr x16, [sp, #184]
++{qloads}
++{gpr_sentinels}
++    ldr x16, [sp, #160]
++    msr nzcv, x16
++    ldr x16, [sp, #168]
++    msr fpsr, x16
++    ldr x16, [sp, #176]
++    msr fpcr, x16
++    mov x16, #272
++    mov x17, #273
++    bl _dm_gate
++{gpr_stores}
++    ldr x16, [sp, #192]
++{qstores}
++    mrs x9, nzcv
++    ldr x16, [sp, #200]
++    str x9, [x16]
++    mrs x9, fpsr
++    str x9, [x16, #8]
++    mrs x9, fpcr
++    str x9, [x16, #16]
++    ldr x16, [sp, #208]
++{gpr_copies}
++    ldp d8, d9, [sp, #96]
++    ldp d10, d11, [sp, #112]
++    ldp d12, d13, [sp, #128]
++    ldp d14, d15, [sp, #144]
++    ldp x19, x20, [sp, #16]
++    ldp x21, x22, [sp, #32]
++    ldp x23, x24, [sp, #48]
++    ldp x25, x26, [sp, #64]
++    ldp x27, x28, [sp, #80]
++    ldr x9, [sp, #176]
++    msr fpcr, x9
++    ldr x9, [sp, #168]
++    msr fpsr, x9
++    ldr x9, [sp, #160]
++    msr nzcv, x9
++    ldp x29, x30, [sp, #0]
++    add sp, sp, #544
++    ret
++"""
++    return ".text\n" + actual_gate_body + "\n" + projection_entry_replay + "\n" + test_call_gate
++
++
++def main():
++    if sys.platform != "darwin":
++        print("SKIP: native _dm_gate fixture requires macOS ARM64 and Xcode; portable C fixtures are separate")
++        return 77
++    if platform.machine().lower() not in ("arm64", "aarch64"):
++        print("SKIP: native _dm_gate fixture requires an ARM64 Mac")
++        return 77
++    xcrun = shutil.which("xcrun")
++    if not xcrun or subprocess.run([xcrun, "--find", "clang"], capture_output=True).returncode != 0:
++        print("SKIP: native _dm_gate fixture requires Xcode clang")
++        return 77
++
++    entry_path = ROOT / "dm/host/entry.S"
++    entry = entry_path.read_text(encoding="utf-8")
++    try:
++        assembly = build_assembly(entry)
++    except ValueError as exc:
++        raise SystemExit(str(exc)) from exc
++    harness = r'''#include "dm_obs_frame.h"
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++extern void dm_test_invoke_gate(const uint8_t *, uint8_t *, uint64_t, uint64_t,
++                                uint64_t, uint64_t *, uint64_t *);
++extern int dm_test_replay_projection_entry(const uint64_t *, uint64_t *);
++
++static _Alignas(16) uint8_t q_input[32 * 16];
++static _Alignas(16) uint8_t q_output[32 * 16];
++static uint8_t frame_before[DM_OBS_FRAME_BYTES];
++static uint64_t status_after[3];
++static uint64_t gpr_after[31];
++static uint64_t expected_x30;
++static const uint64_t changed_x9 = UINT64_C(0x9abcdef012345678);
++static const uint64_t initial_nzcv = 0xa0000000u;
++static const uint64_t initial_fpsr = 0x00000011u;
++static const uint64_t initial_fpcr = 0x00400000u;
++static int callback_count;
++static const float input_fovy = 1.125f;
++static const float input_aspect = 16.0f / 9.0f;
++static const float changed_fovy = 1.375f;
++static const float changed_aspect = 4.0f / 3.0f;
++
++uint64_t gate_dispatch(uint64_t ret_addr, uint64_t *regs) {
++    assert(ret_addr != 0);
++    expected_x30 = ret_addr;
++    assert(regs != NULL);
++    callback_count++;
++    memcpy(frame_before, regs, sizeof frame_before);
++    assert(memcmp((const uint8_t *)regs + DM_OBS_FRAME_Q_OFFSET,
++                  q_input, sizeof q_input) == 0);
++    assert(*(const uint64_t *)((const uint8_t *)regs + DM_OBS_FRAME_NZCV_OFFSET) == initial_nzcv);
++    assert(*(const uint64_t *)((const uint8_t *)regs + DM_OBS_FRAME_FPSR_OFFSET) == initial_fpsr);
++    assert(*(const uint64_t *)((const uint8_t *)regs + DM_OBS_FRAME_FPCR_OFFSET) == initial_fpcr);
++    for (unsigned i = 0; i < 18; i++) assert(regs[i] == 0x100u + i);
++    for (unsigned i = 19; i < 30; i++) assert(regs[i] == 0x100u + i);
++    assert(regs[30] == ret_addr);
++
++    float fovy = 0.0f, aspect = 0.0f;
++    assert(dm_obs_frame_read_s(regs, DM_OBS_FRAME_BYTES, 2, &fovy));
++    assert(dm_obs_frame_read_s(regs, DM_OBS_FRAME_BYTES, 3, &aspect));
++    assert(fovy == input_fovy && aspect == input_aspect);
++    assert(dm_obs_frame_write_s(regs, DM_OBS_FRAME_BYTES, 2, changed_fovy));
++    assert(dm_obs_frame_write_s(regs, DM_OBS_FRAME_BYTES, 3, changed_aspect));
++    regs[9] = changed_x9;
++
++    const uint8_t *now = (const uint8_t *)regs;
++    for (size_t i = 0; i < DM_OBS_FRAME_BYTES; i++) {
++        const int target_gpr = i >= 9 * sizeof(uint64_t) && i < 10 * sizeof(uint64_t);
++        const int target_lane = (i >= DM_OBS_FRAME_Q_OFFSET + 2 * DM_OBS_FRAME_Q_STRIDE &&
++                                 i < DM_OBS_FRAME_Q_OFFSET + 2 * DM_OBS_FRAME_Q_STRIDE + sizeof(float)) ||
++                                (i >= DM_OBS_FRAME_Q_OFFSET + 3 * DM_OBS_FRAME_Q_STRIDE &&
++                                 i < DM_OBS_FRAME_Q_OFFSET + 3 * DM_OBS_FRAME_Q_STRIDE + sizeof(float));
++        if (!target_gpr && !target_lane) assert(now[i] == frame_before[i]);
++    }
++    assert(*(const uint64_t *)now == *(const uint64_t *)frame_before);  // x0 unchanged
++
++    // Make the callback disturb CPU flags/control state; _dm_gate must restore
++    // its pre-callback NZCV, FPSR, and FPCR from its real stack frame.
++    const uint64_t changed_nzcv = 0x50000000u, changed_fpsr = 0, changed_fpcr = 0;
++    __asm__ volatile("msr nzcv, %0\n\tmsr fpsr, %1\n\tmsr fpcr, %2"
++                     : : "r"(changed_nzcv), "r"(changed_fpsr), "r"(changed_fpcr)
++                     : "cc", "memory");
++    return 0;
++}
++
++int main(void) {
++    for (size_t i = 0; i < sizeof q_input; i++) q_input[i] = (uint8_t)(i * 29u + 7u);
++    memcpy(q_input + 2 * 16, &input_fovy, sizeof input_fovy);
++    memcpy(q_input + 3 * 16, &input_aspect, sizeof input_aspect);
++    memset(q_output, 0, sizeof q_output);
++    dm_test_invoke_gate(q_input, q_output, initial_nzcv, initial_fpsr, initial_fpcr, status_after, gpr_after);
++    assert(callback_count == 1);
++
++    uint8_t expected_q[sizeof q_input];
++    memcpy(expected_q, q_input, sizeof expected_q);
++    memcpy(expected_q + 2 * 16, &changed_fovy, sizeof changed_fovy);
++    memcpy(expected_q + 3 * 16, &changed_aspect, sizeof changed_aspect);
++    assert(memcmp(q_output, expected_q, sizeof expected_q) == 0);
++    assert(status_after[0] == initial_nzcv);
++    assert(status_after[1] == initial_fpsr);
++    assert(status_after[2] == initial_fpcr);
++    for (unsigned i = 0; i < 18; i++)
++        assert(gpr_after[i] == (i == 9 ? changed_x9 : UINT64_C(0x100) + i));
++    for (unsigned i = 19; i < 30; i++) assert(gpr_after[i] == UINT64_C(0x100) + i);
++    assert(gpr_after[30] == expected_x30);
++
++    const uint64_t entry_pair[2] = {0x1122334455667788u, 0x99aabbccddeeff00u};
++    uint64_t entry_saved[3] = {0, 0, 0};
++    assert(dm_test_replay_projection_entry(entry_pair, entry_saved) == 1);
++    assert(entry_saved[0] == entry_pair[1]);  // STP d11,d10 stores d11 first.
++    assert(entry_saved[1] == entry_pair[0]);
++    assert(entry_saved[2] == 64);             // Exact instruction's pre-index stack delta.
++
++    puts("PASS: extracted _dm_gate restored every unmodified GPR/Q lane and CPU status, retained targeted x9/S2/S3 edits; projection-entry STP balanced its stack");
++    return 0;
++}
++'''
++
++    with tempfile.TemporaryDirectory(prefix="obs-frame-native-") as td:
++        directory = Path(td)
++        asm_path = directory / "entry_fixture.S"
++        c_path = directory / "harness.c"
++        executable = directory / "test_obs_frame"
++        asm_path.write_text(assembly, encoding="utf-8", newline="\n")
++        c_path.write_text(harness, encoding="utf-8", newline="\n")
++        assembler = directory / "entry_fixture.o"
++        c_object = directory / "harness.o"
++        target_flags = ["-arch", "arm64", "-mmacosx-version-min=15.0"]
++        subprocess.run([xcrun, "clang", *target_flags, "-c", str(asm_path), "-o", str(assembler)], check=True)
++        subprocess.run([xcrun, "clang", *target_flags, "-std=c11", "-O1", "-UNDEBUG", "-Wall", "-Wextra", "-Werror",
++                        "-I", str(ROOT / "dm/host"), "-c", str(c_path), "-o", str(c_object)], check=True)
++        subprocess.run([xcrun, "clang", *target_flags, str(assembler), str(c_object), "-o", str(executable)], check=True)
++        subprocess.run([str(executable)], check=True)
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/dm/tools/tests/test_launcher_settings.py b/dm/tools/tests/test_launcher_settings.py
+index cd43d2d..3931f2b 100644
+--- a/dm/tools/tests/test_launcher_settings.py
++++ b/dm/tools/tests/test_launcher_settings.py
+@@ -14,15 +14,15 @@ spec = importlib.util.spec_from_file_location('launcher_settings', ROOT / 'dm/ga
+ settings = importlib.util.module_from_spec(spec)
+ spec.loader.exec_module(settings)
+ 
+-BOTW, WONDER = '01007EF00011E000', '010015100B514000'
++BOTW, WONDER, ODYSSEY = '01007EF00011E000', '010015100B514000', '0100000000010000'
+ PERFORMANCE_NVN = ['DM_PRESENT_SNAP', 'DM_PSO_MTL4', 'DM_PSO_PREBUILD', 'DM_NVN_ENC_THREAD', 'DM_FPS_HOLD', 'DM_METAL_HUD']
+ 
+ 
+-def build(gid, api, platform=None):
++def build(gid, api, platform=None, capabilities=()):
+     env = {'GFXAPI': api, **({'SETTINGS_PLATFORM': platform} if platform else {})}
+     with tempfile.TemporaryDirectory() as tmp, patch.object(settings.nacp, 'languages', return_value=['en-US']), patch.dict(os.environ, env):
+         if not platform: os.environ.pop('SETTINGS_PLATFORM', None)
+-        return {s['env']: s for s in settings.build(gid, tmp, Path(tmp) / 'control.nacp')['settings']}
++        return {s['env']: s for s in settings.build(gid, tmp, Path(tmp) / 'control.nacp', capabilities=capabilities)['settings']}
+ 
+ 
+ class LauncherSettingsTests(unittest.TestCase):
+@@ -80,6 +80,72 @@ class LauncherSettingsTests(unittest.TestCase):
+         with self.assertRaisesRegex(SystemExit, 'SETTINGS_PLATFORM must be ios or mac'):
+             build(WONDER, 'nvn', 'mca')
+ 
++    def test_odyssey_display_settings_require_explicit_capability(self):
++        self.assertFalse({'DM_ODYSSEY_RESOLUTION', 'DM_ODYSSEY_4_3'} & build(ODYSSEY, 'nvn').keys())
++        rows = build(ODYSSEY, 'nvn', capabilities={'ODYSSEY_DISPLAY_V1'})
++        resolution = rows['DM_ODYSSEY_RESOLUTION']
++        self.assertEqual((resolution['kind'], resolution['control'], resolution['default'], resolution['section'], resolution['label']),
++                         ('choice', 'slider', 'stock', 'Game', 'Resolution target'))
++        self.assertEqual(resolution['options'], [['stock', 'Original (dynamic)'], ['720p', '720p'], ['900p', '900p'], ['1080p', '1080p']])
++        self.assertEqual(resolution['needs'], 'DM_OPMODE=1')
++        self.assertEqual(resolution['note'], 'High targets use more render target and game heap memory. Stability and frame rate are unvalidated. Native output requires a 2732x2048 iPad panel.')
++        aspect = rows['DM_ODYSSEY_4_3']
++        self.assertEqual((aspect['kind'], aspect['default'], aspect['on'], aspect['off']), ('toggle', '0', '1', '0'))
++        self.assertIn('Restart required', aspect['note'])
++        self.assertEqual(aspect['needs'], 'DM_OPMODE=1')
++        schema = json.loads((ROOT / 'docs/launcher.schema.json').read_text(encoding='utf-8'))
++        with tempfile.TemporaryDirectory() as tmp, patch.object(settings.nacp, 'languages', return_value=['en-US']), patch.dict(os.environ, {'GFXAPI': 'nvn'}):
++            listed = settings.build(ODYSSEY, tmp, Path(tmp) / 'control.nacp', capabilities={'ODYSSEY_DISPLAY_V1'})
++        self.assertEqual(conforms(listed, schema, schema), [])
++
++    def test_odyssey_resolution_options_follow_exact_packaged_capabilities(self):
++        original = [['stock', 'Original (dynamic)'], ['720p', '720p'], ['900p', '900p'], ['1080p', '1080p']]
++        cases = [
++            (set(), None),
++            ({'ODYSSEY_DISPLAY_HIGHRES'}, None),
++            ({'ODYSSEY_DISPLAY_NATIVE_IPAD'}, None),
++            ({'ODYSSEY_DISPLAY_V1'}, original),
++            ({'ODYSSEY_DISPLAY_V1', 'ODYSSEY_DISPLAY_HIGHRES'}, original + [['1440p', '1440p']]),
++            ({'ODYSSEY_DISPLAY_V1', 'ODYSSEY_DISPLAY_NATIVE_IPAD'}, original + [['native', 'Native iPad']]),
++            ({'ODYSSEY_DISPLAY_V1', 'ODYSSEY_DISPLAY_HIGHRES', 'ODYSSEY_DISPLAY_NATIVE_IPAD'},
++             original + [['1440p', '1440p'], ['native', 'Native iPad']]),
++        ]
++        schema = json.loads((ROOT / 'docs/launcher.schema.json').read_text(encoding='utf-8'))
++        for capabilities, options in cases:
++            with self.subTest(capabilities=capabilities):
++                rows = build(ODYSSEY, 'nvn', capabilities=capabilities)
++                if options is None:
++                    self.assertNotIn('DM_ODYSSEY_RESOLUTION', rows)
++                    continue
++                resolution = rows['DM_ODYSSEY_RESOLUTION']
++                self.assertEqual(resolution['options'], options)
++                self.assertEqual(resolution['default'], 'stock')
++                self.assertNotIn('[cap:', json.dumps(resolution))
++                self.assertEqual(conforms({'schema': 1, 'game': ODYSSEY, 'settings': [resolution]}, schema, schema), [])
++                self.assertEqual(rows['DM_ODYSSEY_4_3']['default'], '0')
++
++        profile_path = ROOT / 'dm/games/0100000000010000/patches.py'
++        with patch.dict(os.environ, {}, clear=False):
++            os.environ.pop('DM_ODYSSEY_DISPLAY_PROFILE', None)
++            os.environ['DM_ODYSSEY_DISPLAY_PROFILE'] = 'launcher-highres'
++            profile_spec = importlib.util.spec_from_file_location('odyssey_highres_capability_test', profile_path)
++            profile = importlib.util.module_from_spec(profile_spec)
++            profile_spec.loader.exec_module(profile)
++        actual_caps = set(profile.CAPABILITIES['b424be150a8e7d78701cbe7a439d9ebf'])
++        rows = build(ODYSSEY, 'nvn', capabilities=actual_caps)
++        self.assertEqual(rows['DM_ODYSSEY_RESOLUTION']['options'],
++                         original + [['1440p', '1440p'], ['native', 'Native iPad']])
++
++    def test_choice_capability_annotations_are_strict(self):
++        for annotation in ('[cap:]', '[cap:odyssey_display_v1]', '[cap:ODYSSEY_DISPLAY_V1',
++                           '[cap:ODYSSEY_DISPLAY_V1] trailing', '[cap:ODYSSEY_DISPLAY_V1]]'):
++            with self.subTest(annotation=annotation), tempfile.TemporaryDirectory() as tmp:
++                row = f'DM_X\tchoice\tstock=Stock,extra=Extra{annotation}\tstock\talways\tGame\tX\n'
++                (Path(tmp) / 'settings.tsv').write_text(row, encoding='utf-8')
++                with patch.object(settings, 'HERE', Path(tmp)), patch.object(settings.nacp, 'languages', return_value=['en-US']), \
++                        self.assertRaisesRegex(SystemExit, 'malformed choice capability annotation'):
++                    settings.build(BOTW, tmp, Path(tmp) / 'control.nacp')
++
+     def test_malformed_platform_defaults_are_rejected(self):
+         for default in ('1|', '|0', '1|0|1'):
+             with self.subTest(default=default), tempfile.TemporaryDirectory() as tmp:
+@@ -100,10 +166,11 @@ class LauncherSettingsTests(unittest.TestCase):
+         self.assertFalse({'level', 'needs'} & set(rows['DM_METAL_HUD']), 'a row without meta has no optional fields')
+ 
+     def test_meta_is_strict(self):
+-        self.assertEqual(settings.meta('level=basic; needs=DM_RUMBLE=1', 1), {'level': 'basic', 'needs': 'DM_RUMBLE=1'})
++        self.assertEqual(settings.meta('level=basic; needs=DM_RUMBLE=1; control=slider', 1), {'level': 'basic', 'needs': 'DM_RUMBLE=1', 'control': 'slider'})
+         self.assertEqual(settings.meta('', 1), {})
+         for bad, why in [('colour=red', 'unknown meta key'), ('level', 'unknown meta key'), ('level=basic;level=basic', 'twice'),
+-                         ('level=advanced', 'does not match'), ('needs=DM_RUMBLE', 'does not match'), ('needs=rumble=1', 'does not match')]:
++                         ('level=advanced', 'does not match'), ('needs=DM_RUMBLE', 'does not match'), ('needs=rumble=1', 'does not match'),
++                         ('control=menu', 'does not match')]:
+             with self.subTest(bad=bad), self.assertRaises(SystemExit) as e:
+                 settings.meta(bad, 1)
+             self.assertIn(why, str(e.exception))
+@@ -163,6 +230,19 @@ class LauncherSettingsTests(unittest.TestCase):
+                 self.assertIn(why, str(e.exception))
+ 
+ 
++    def test_discrete_slider_metadata_requires_a_multi_option_choice(self):
++        for row, why in [
++                ('DM_X\ttoggle\t-\t0\talways\tGame\tX\t\tcontrol=slider\n', 'requires kind choice'),
++                ('DM_X\tchoice\tonly=One\tonly\talways\tGame\tX\t\tcontrol=slider\n', 'at least two choice options'),
++                ('DM_X\tchoice\tx=First,x=Second\tx\talways\tGame\tX\t\tcontrol=slider\n', 'choice values must be unique')]:
++            with self.subTest(why=why), tempfile.TemporaryDirectory() as tmp:
++                (Path(tmp) / 'settings.tsv').write_text(row, encoding='utf-8')
++                manager = patch.object(settings, 'HERE', Path(tmp))
++                language = patch.object(settings.nacp, 'languages', return_value=['en-US'])
++                with manager, language, self.assertRaisesRegex(SystemExit, why):
++                    settings.build(BOTW, tmp, Path(tmp) / 'control.nacp')
++
++
+ def conforms(value, node, root, at='$'):
+     """The JSON Schema keywords launcher.schema.json uses (type, required, properties, items, enum, const, pattern, $ref, allOf with
+     if / then), as a list of problems: enough to hold the written lists to the contract without a jsonschema package"""
+diff --git a/docs/frontends.md b/docs/frontends.md
+index a22b941..9ce7b24 100644
+--- a/docs/frontends.md
++++ b/docs/frontends.md
+@@ -41,7 +41,10 @@ A built app carries the settings its game supports, as the iPhone app's settings
+ - `default`: the value for this app's platform ([Tested defaults](settings.md#tested-defaults)), with profile defaults resolved for its game. A front end that keeps only the choices that differ from it lets a newer build's tested defaults reach the player, as the iPhone app does.
+ - `base` (optional, render scale only): `{"docked": [w, h], "handheld": [w, h]}`, the 3D views' size that the scale multiplies, so a front end can show 0.75 as 1200×675 docked. It comes from the game's profile (`render_base`), and only some games have it.
+ - `level` (optional): `basic` marks a setting to show first, for a front end that shows a short list and puts the rest behind a second step. Without it, the front end decides.
++- `control` (optional): `slider` on a `choice` draws a discrete slider over its `options`; the selected option's value remains the environment value and saved choice.
+ - `needs` (optional): `<VAR>=<value>` makes the row a sub-setting of the row that sets `<VAR>`, drawn only while that row has that value (Rumble strength only while rumble is on). A row naming a variable the list does not have stays drawn.
++- A `capability:<NAME>` condition in `settings.tsv` includes a row only when the packager explicitly passes that runtime capability to `settings.build(..., capabilities=...)`. Capabilities default to empty, so a frontend does not advertise a setting whose consumer was not packaged.
++- A choice option in `settings.tsv` may end with `[cap:NAME]`, for example `1440p=1440p[cap:ODYSSEY_DISPLAY_HIGHRES]`. The packager includes that option only when it passes the named capability; it strips the annotation before writing the ordinary `[value, label]` pair to JSON. A capability annotation is valid only at the end of an option label and must name a non-empty uppercase capability. If filtering leaves a saved value unavailable, front ends use the setting's default. This extends the generated options list without changing launcher JSON or schema 1.
+ - An app without the file has no settings to offer: start it as it is.
+ 
+ **Compatibility.** [launcher.schema.json](launcher.schema.json) describes the file as a JSON Schema, so a front end can check it and generate its types from it. `schema` is 1, and schema 1 grows only by optional fields: a reader ignores fields it does not know, draws sections it does not know, and a field never changes its meaning. A new `kind` would be schema 2, since a reader cannot draw a kind it does not know. A list written before the field existed has no `schema` and is 1. In `settings.tsv`, the optional fields come from the last column, `meta` (`key=value` pairs separated by `;`); a new key is added in `settings.py`'s `META`, here and in the schema together, and `test_launcher_settings.py` fails when the three disagree.
+diff --git a/docs/launcher.schema.json b/docs/launcher.schema.json
+index 4bb97df..f8703f9 100644
+--- a/docs/launcher.schema.json
++++ b/docs/launcher.schema.json
+@@ -31,12 +31,14 @@
+         "base": {"description": "Render scale only: the 3D views' size the scale multiplies, docked and handheld, from the game's profile; absent for most games.", "type": "object", "required": ["docked", "handheld"],
+                  "properties": {"docked": {"$ref": "#/$defs/size"}, "handheld": {"$ref": "#/$defs/size"}}},
+         "level": {"description": "basic: a setting a front end shows first. Without it, the front end decides.", "const": "basic"},
++        "control": {"description": "Optional presentation for a choice; slider draws a discrete slider over its options while retaining the option values.", "enum": ["slider"]},
+         "needs": {"description": "<VAR>=<value>: a sub-setting, drawn only while the row that sets <VAR> has that value. A row naming a variable this list does not have stays drawn.", "type": "string", "pattern": "^DM_[A-Z0-9_]+=[^;=]+$"}
+       },
+       "allOf": [
+         {"if": {"properties": {"kind": {"const": "choice"}}}, "then": {"required": ["options"]}},
+         {"if": {"properties": {"kind": {"const": "range"}}}, "then": {"required": ["min", "max", "step"]}},
+-        {"if": {"properties": {"kind": {"const": "toggle"}}}, "then": {"required": ["on", "off"]}}
++        {"if": {"properties": {"kind": {"const": "toggle"}}}, "then": {"required": ["on", "off"]}},
++        {"if": {"required": ["control"], "properties": {"control": {"const": "slider"}}}, "then": {"properties": {"kind": {"const": "choice"}}}}
+       ]
+     }
+   }
+diff --git a/docs/projection-set-entry-observer-plan.md b/docs/projection-set-entry-observer-plan.md
+new file mode 100644
+index 0000000..f6b4800
+--- /dev/null
++++ b/docs/projection-set-entry-observer-plan.md
+@@ -0,0 +1,27 @@
++# Odyssey projection-set entry: observer-only next step
++
++## Pinned binary and hook site
++
++The inspected Odyssey 1.4.1 `main` is build ID `b424be150a8e7d78701cbe7a439d9ebf`, SHA-256 `47ac74a66234bc1eb717b18e01fe7c880d2dd50cf1115fd046f5e5878be5f85f`. The generic projection setter begins at `main+0x73de60`; its original first word is `0x6dbc2beb` (bytes `eb2bbc6d`), `stp d11, d10, [sp, #-0x40]!`.
++
++The setter has two direct callers, at `main+0x5ae098` and `main+0x77cce8`. Both supply FOV in `s2` from fresh global/caller inputs, so the proposed transform does not feed the previous cached FOV back into itself. The second caller supplies aspect `1.0`; the first loads aspect from caller state. Neither caller has been proven to own the active gameplay camera. A 16:9 aspect predicate is therefore a traffic filter, not a camera identity check.
++
++## Next isolated runtime observation
++
++Keep the first observer read-only and default-off. Register it only for the exact `main` build above, at `0x73de60`, with the original instruction word guarded by the rewriter. The rewriter’s `OBS` table is keyed by build ID and asserts the original word and a valid observation-gate location before emitting the gate (`dm/tools/patch_nso.py`). The current source tree has no Odyssey `patches.py` entry for this build, so no such gate is active today.
++
++The next host observation ID is `26`: `OBS_MAX` is currently the exclusive value `26`, which permits IDs `1..25`. A future observer would add an enum value such as `OBS_PROJECTION_TRACE = 26` and raise `OBS_MAX` to `27` in `dm/host/dm.h`, register a callback through the existing `gate_obs_set` path, and add the paired build-ID-specific `OBS` record to the selected private game profile/overlay. Keep the profile record and host callback paired so no other build can trigger this fixed address.
++
++At the entry callback, read `x0` as the projection receiver and use `dm_obs_frame_read_s` on `s0..s3` for near, far, FOV, and aspect. Aggregate a bounded count and representative/min/max values by receiver pointer; avoid a log line on every render call. Do not modify the saved frame in this phase. The helper API supports writes for later experiments, but the observer callback should call only read helpers.
++
++The generic OBS callback cannot identify its original caller through `regs[30]`: the rewriter stub saves the caller LR on its own stack, while `regs[30]` at the callback is the trampoline return address. If separating callsite origins becomes necessary, add separately reviewed callsite tags at relocatable instruction sites or extend the gate metadata; do not infer caller identity from the current register frame. The existing aspect value can separate the known square-aspect call in a sample, but it cannot distinguish gameplay from other 16:9 projections.
++
++## Evidence required before a transform
++
++The observer can establish which projection objects and aspect/FOV tuples are active, but it cannot alone label the main gameplay camera or prove which object feeds the scene color/depth passes. Correlate receiver identities with a captured stage-scene render pass and its color/depth viewport before enabling the FOV helper. Keep menu, cutscene, shadow, prepass, and offscreen paths unchanged unless their ownership is independently established.
++
++Only after that correlation should a later prototype consider changing incoming `s2` and `s3` together. The candidate helper is stateless, transforms only finite 16:9-to-4:3 inputs, preserves horizontal extent, and skips other aspects such as the known 1:1 path. The original setter would then recompute its projection caches and frustum bounds. This report describes a next-step plan; it does not enable a runtime transform or claim gameplay testing.
++
++## Fixture status
++
++The native fixture compiles the actual `_dm_gate` body extracted from `dm/host/entry.S`, and separately exercises the verified projection-entry `STP` stack save. Its generated assembly now copies `sp` into a general register before register-form subtraction/comparison. Local Windows Zig cross-assembly to an ARM64 Mach-O object passed; the fixture was not executed on an Apple ARM64 machine.

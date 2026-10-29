@@ -1,4 +1,4 @@
-name: Build reviewed game-free polish host
+name: Build tested launcher display host
 on:
   workflow_dispatch:
   push:
@@ -6,6 +6,8 @@ on:
       - host-fixes.patch
       - polish-fixes.patch
       - polish-source-manifest.json
+      - display-host.patch
+      - display-source-manifest.json
       - .github/workflows/host-build.yml
 permissions:
   contents: read
@@ -72,13 +74,49 @@ jobs:
           for entry in manifest['files']:
               data = (Path('shell') / entry['path']).read_bytes().replace(b'\r\n', b'\n')
               assert hashlib.sha256(data).hexdigest() == entry['normalized_sha256'], entry['path']
-          assert not Path('shell/dm/host/dm_obs_frame.h').exists(), 'experimental projection sources must stay out of this host'
-          print('PASS: reviewed stable polish source identities; original Guest ABI/cache interfaces')
+          PY
+          git -C shell apply --check "$GITHUB_WORKSPACE/display-host.patch"
+          git -C shell apply "$GITHUB_WORKSPACE/display-host.patch"
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          assert Path('shell/dm/host/dm_obs_frame.h').exists(), 'display frame helper missing'
+          display = json.loads(Path('display-source-manifest.json').read_text())
+          assert hashlib.sha256(Path('display-host.patch').read_bytes()).hexdigest() == display['patch_sha256']
+          for entry in display['files']:
+              data = (Path('shell') / entry['path']).read_bytes().replace(b'\r\n', b'\n')
+              assert hashlib.sha256(data).hexdigest() == entry['normalized_sha256'], entry['path']
+          print('PASS: reviewed stable and display source identities; no game inputs present')
           PY
           cd shell
           python3 -m unittest dm.tools.tests.test_shell_msl_policy dm.tools.tests.test_shell_identity_policy dm.gfx.tests.test_nvn_text_lines dm.gfx.tests.test_rt_survey dm.gfx.tests.test_nvn_timing dm.gfx.tests.test_nvn_pair_batch dm.gfx.tests.test_nvn_snapraw dm.gfx.tests.test_nvn_arc_ownership dm.tools.tests.test_regress -v
           python3 dm/tools/tests/run_shell_msl_native.py
           python3 dm/tools/tests/run_shell_identity_native.py
+          python3 -m unittest dm.tools.tests.test_launcher_settings dm.ios.tests.test_launcher_storage -v
+          python3 dm/tools/tests/run_obs_frame_native.py
+      - name: Actual display policy and CommonCrypto initialization fixtures
+        working-directory: shell
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, tempfile
+          host = Path('dm/host').resolve()
+          with tempfile.TemporaryDirectory() as td:
+              td = Path(td)
+              (td/'game_profile.h').write_text('/* synthetic profile */\n')
+              common = ['xcrun','clang','-std=c11','-O1','-UNDEBUG','-Wall','-Wextra','-Werror','-D_DARWIN_C_SOURCE','-I',str(td),'-I',str(host)]
+              policy = td/'policy'
+              subprocess.run(common+[str(host/'tests/t_odyssey_display_policy.c'),str(host/'dm_odyssey_display_policy.c'),'-o',str(policy)],check=True)
+              subprocess.run([str(policy)],check=True)
+              asset = td/'asset'
+              subprocess.run(common+[str(host/'tests/t_odyssey_display_asset.c'),str(host/'hle_odyssey_display.c'),str(host/'dm_odyssey_display_policy.c'),str(host/'dm_vertical_fov.c'),'-lm','-o',str(asset)],check=True)
+              cases = ('stock','stock-high','active','wide-active','invalid','invalid-high','bad-aspect','wrong-build','missing-gates','bad-hash','handheld','fd0-manifest','fd0-asset','high-missing-pair','high-bad-hash','high-missing-asset','native-unsupported','1440-wide','1440-4x3','native-wide','native-4x3')
+              for case in cases: subprocess.run([str(asset),case],check=True)
+              for case in ('high-wrong-build','high-missing-gate'):
+                  result = subprocess.run([str(asset),case],capture_output=True)
+                  assert result.returncode != 0, case
+          print('PASS: actual host policy, file/hash handling, default restoration and display callbacks')
+          PY
       - name: Install build dependencies
         run: |
           set -euo pipefail
@@ -109,3 +147,5 @@ jobs:
             source-manifest.json
             polish-source-manifest.json
             polish-fixes.patch
+            display-source-manifest.json
+            display-host.patch

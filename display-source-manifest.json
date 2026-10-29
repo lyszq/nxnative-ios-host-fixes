@@ -1,0 +1,135 @@
+{
+  "source_local_commit": "525186cb10fec8c1f9963629429b490853cd5aa9",
+  "base_local_commit": "ff01d62f72a70f51657b70bcd7c5bd3809163dc0",
+  "patch_sha256": "19e25ef3b8f2ba516cf76d983835bf5d6c9ecec7ebb087976a2412fe53cb8257",
+  "files": [
+    {
+      "path": "dm/games/0100000000010000/README.md",
+      "normalized_sha256": "856292e987ae774b56ee64dd867f509e028809cc90dcfc9835442fe6094a778b"
+    },
+    {
+      "path": "dm/games/settings.py",
+      "normalized_sha256": "777bbd5571e848ed36e80546146a13f29e0816697961a598b646858f20403324"
+    },
+    {
+      "path": "dm/games/settings.tsv",
+      "normalized_sha256": "294692b66c2237faa577cf5a0ae8ebaa2818a4f82acb6932ac0940b856d65fda"
+    },
+    {
+      "path": "dm/host/Makefile",
+      "normalized_sha256": "eeb74a0f85a358f04e7d0c3303c46bc736a20f83ca7693e8b2d1ad47d96c210e"
+    },
+    {
+      "path": "dm/host/dm.h",
+      "normalized_sha256": "b6c85b895f9bee12ee38e146886ed77ff6364e336a119da61ccb8e7659a346d3"
+    },
+    {
+      "path": "dm/host/dm_obs_frame.h",
+      "normalized_sha256": "e0e8af4cc02f8fa938b32fc10a6910b0e7fee30443e3fa237ffe7cdcc7b03162"
+    },
+    {
+      "path": "dm/host/dm_odyssey_display.h",
+      "normalized_sha256": "d06175bae62efaa29d98ab59c3b5d50aa52871f275ee98786a0a4abfedd75681"
+    },
+    {
+      "path": "dm/host/dm_odyssey_display_policy.c",
+      "normalized_sha256": "399482bbe852f7cd3612821d296518d8a47983621bf1391337d177565e8ec24e"
+    },
+    {
+      "path": "dm/host/dm_vertical_fov.c",
+      "normalized_sha256": "62d22af4984b53bd3531a532280fd2d1d94f30ae5e237aea1c72e67986065b83"
+    },
+    {
+      "path": "dm/host/dm_vertical_fov.h",
+      "normalized_sha256": "f8d22ec71d30f88346bb44e9eeebd32841d4fc73086ebf10f4a28823ab2f2072"
+    },
+    {
+      "path": "dm/host/front.h",
+      "normalized_sha256": "9a31bf612631392608dfcd8ec963f2cda480fc872f4ac50bce756f8d971dd04f"
+    },
+    {
+      "path": "dm/host/front_mac.m",
+      "normalized_sha256": "43c7b9c0b2849dcd29d555646e04889b821d44e74f742b91ea923a3fafdecaa7"
+    },
+    {
+      "path": "dm/host/hle_odyssey_display.c",
+      "normalized_sha256": "db6acc0f7736c8b34e275570ea57c910c99299e88d3347f4ee4a573f9b748393"
+    },
+    {
+      "path": "dm/host/hle_svc.c",
+      "normalized_sha256": "dd90c7a046d638b543831f29cb3dae96b1a206e87c9afa3d52b3a63be1d49e06"
+    },
+    {
+      "path": "dm/host/main.c",
+      "normalized_sha256": "83c1f83d722cbadc3f3b6d92920ab44e8b7f1b3d4b5dbdf11be2f1b9cec76356"
+    },
+    {
+      "path": "dm/host/tests/t_obs_frame.c",
+      "normalized_sha256": "0258d559c19d2d328572d1b5128652516afea6836f9aa89ef08a3610862311e4"
+    },
+    {
+      "path": "dm/host/tests/t_odyssey_display_asset.c",
+      "normalized_sha256": "1acf722e137bffb40fba7c8e481922693bd67406bca3dbbd94fec2423a2d575b"
+    },
+    {
+      "path": "dm/host/tests/t_odyssey_display_policy.c",
+      "normalized_sha256": "354c9eaac22d33ddc5a2b6ced1fdd6544d85526692c70e5061d7cb05f7ebd581"
+    },
+    {
+      "path": "dm/host/tests/t_vertical_fov.c",
+      "normalized_sha256": "d683c6ade8421fb4aff64eb52949d9d0b911e8aec7b1ca57f9bbb0edc2aeafac"
+    },
+    {
+      "path": "dm/ios/Sources/DmGamepad.m",
+      "normalized_sha256": "e04c957a69e23718e89cf81573438c40c521f47499fa71eaeb32784e3362ac57"
+    },
+    {
+      "path": "dm/ios/Sources/LauncherRow.swift",
+      "normalized_sha256": "0b67913bf9a4efb92cc74b71bbba418489e1b1d6aab84c3188fb17e5fe2a5efd"
+    },
+    {
+      "path": "dm/ios/Sources/LauncherSettings.swift",
+      "normalized_sha256": "8433d1c817a3649bdc761209ff62fcf1ff5af13829f706b624e90de169e8df49"
+    },
+    {
+      "path": "dm/ios/Sources/front_ios.m",
+      "normalized_sha256": "96c9a0b6a7e2aeeec62e2322f55c4346aeea4e515c033a3fb01e8e2e960f93ee"
+    },
+    {
+      "path": "dm/ios/Sources/main.m",
+      "normalized_sha256": "825a12ce0a37235b9d2a829ad1eae4de2cb312938fc3e66121eb168d4eac4fd5"
+    },
+    {
+      "path": "dm/ios/tests/launcher_storage_check.swift",
+      "normalized_sha256": "c8ee4d4ed1b79275fb173b2a6c07bb06b4ef6c5110719ccb6b88fe59988a464b"
+    },
+    {
+      "path": "dm/tools/tests/run_obs_frame_native.py",
+      "normalized_sha256": "89e1d821d5d5a67d563a52ba252d90f44d981f2c947cff8770fe3293b87fa3ef"
+    },
+    {
+      "path": "dm/tools/tests/test_launcher_settings.py",
+      "normalized_sha256": "f1e9fb8e1b83fcb6ffb60ec82c93d41f5c141404a7dc0fff0ad2b5c3d1fca350"
+    },
+    {
+      "path": "docs/frontends.md",
+      "normalized_sha256": "677baa00b8fb2a70e8e3eef1b5f3f4ea1b5f5100034c06b339a232e5d4895c37"
+    },
+    {
+      "path": "docs/launcher.schema.json",
+      "normalized_sha256": "7bc880318835abb1c3377b67faf15a345de42cad52935923946d342bd36f1e02"
+    },
+    {
+      "path": "docs/projection-set-entry-observer-plan.md",
+      "normalized_sha256": "87d1e7acfc56a8beda5d6465ce4c283986ebf7daecc1bec4115366ccf1304255"
+    }
+  ],
+  "excluded_local_rewrite_sources": [
+    "dm/games/0100000000010000/patches.py",
+    "dm/tools/patch_nso.py",
+    "dm/tools/tests/test_odyssey_display.py",
+    "dm/tools/tests/test_projection_prereqs.py"
+  ],
+  "scope": "game-free host/UI and synthetic CPU/native fixtures; no Guest, game resources, keys or device logs",
+  "device_validated": false
+}

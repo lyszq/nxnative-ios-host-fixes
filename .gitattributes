@@ -1,3 +1,5 @@
 # A patch contains the original source line endings as data.
 polish-fixes.patch -text
 aspect-prereqs.patch -text
+
+display-host.patch -text

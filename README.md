@@ -33,3 +33,12 @@ compilation. The original Guest ABI and shader cache policy/epoch are retained.
 The separate unused projection prerequisite patch is checked by the check-only
 workflow, and is deliberately excluded from this stable host build. Resolution
 and camera Guest variants remain private local experiments and are not uploaded.
+
+
+The display test build additionally applies `display-host.patch` and verifies its
+manifest. Native callback/file/hash cases, Swift storage and the real ARM64 gate
+fixture run before host compilation. Only host/UI code and synthetic fixtures
+are uploaded; private Guest rewrite profiles, game configuration files, game
+binaries and device logs stay local. Source/native tests do not establish iPad
+rendering correctness or frame rate. The build stamp is unchanged; local packing
+requires the exact tested host identity when pairing new observation-gated Guests.
