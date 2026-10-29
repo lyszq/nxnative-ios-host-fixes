@@ -605,11 +605,12 @@ index 7ad34df..4cd4ace 100644
      dm_input_set(g_btn, lx, ly, 0, 0);
 diff --git a/dm/host/hle_odyssey_display.c b/dm/host/hle_odyssey_display.c
 new file mode 100644
-index 0000000..b909399
+index 0000000..b4e0e85
 --- /dev/null
 +++ b/dm/host/hle_odyssey_display.c
-@@ -0,0 +1,465 @@
+@@ -0,0 +1,466 @@
 +#include "dm.h"
++#include "front.h"
 +#include "dm_obs_frame.h"
 +#include "dm_odyssey_display.h"
 +#include "dm_vertical_fov.h"
