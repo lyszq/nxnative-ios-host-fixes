@@ -379,10 +379,10 @@ index 0000000..79c74d1
 +}
 diff --git a/dm/tools/tests/run_obs_frame_native.py b/dm/tools/tests/run_obs_frame_native.py
 new file mode 100644
-index 0000000..128e34c
+index 0000000..f95c8b3
 --- /dev/null
 +++ b/dm/tools/tests/run_obs_frame_native.py
-@@ -0,0 +1,242 @@
+@@ -0,0 +1,252 @@
 +#!/usr/bin/env python3
 +"""Run the saved-Q-lane fixture on macOS ARM64 against the real _dm_gate body.
 +
@@ -418,30 +418,18 @@ index 0000000..128e34c
 +    raise ValueError("_dm_gate body has no instructions")
 +
 +
-+def main():
-+    if sys.platform != "darwin":
-+        print("SKIP: native _dm_gate fixture requires macOS ARM64 and Xcode; portable C fixtures are separate")
-+        return 77
-+    if platform.machine().lower() not in ("arm64", "aarch64"):
-+        print("SKIP: native _dm_gate fixture requires an ARM64 Mac")
-+        return 77
-+    xcrun = shutil.which("xcrun")
-+    if not xcrun or subprocess.run([xcrun, "--find", "clang"], capture_output=True).returncode != 0:
-+        print("SKIP: native _dm_gate fixture requires Xcode clang")
-+        return 77
-+
-+    entry_path = ROOT / "dm/host/entry.S"
-+    entry = entry_path.read_text(encoding="utf-8")
-+    actual_gate_body = extract_gate_body(entry)
++def build_assembly(entry):
++    start = entry.index(".globl _dm_gate")
++    end = entry.index(".globl _dm_thread_enter", start)
++    actual_gate_body = entry[start:end]
 +    gate_first_instruction = first_gate_instruction(actual_gate_body)
 +    if not gate_first_instruction.startswith("sub sp, sp, #800"):
-+        raise SystemExit(f"unexpected _dm_gate entry instruction: {gate_first_instruction}")
++        raise ValueError(f"unexpected _dm_gate entry instruction: {gate_first_instruction}")
 +
 +    # Independently replay the verified retail wrapper's first instruction.
 +    # main+0x73de60 decoded as STP D11,D10,[SP,#-0x40]! (word 0x6dbc2beb,
 +    # little-endian bytes eb2bbc6d); this test does not read or patch the NSO.
 +    projection_entry_instruction = "stp d11, d10, [sp, #-0x40]!"
-+
 +    qloads = "\n".join(
 +        f"    ldp q{q}, q{q + 1}, [x19, #{q * 16}]" for q in range(0, 32, 2))
 +    qstores = "\n".join(
@@ -459,10 +447,12 @@ index 0000000..128e34c
 +    str x10, [x1]
 +    ldr x10, [sp, #8]
 +    str x10, [x1, #8]
-+    sub x10, x9, sp
++    mov x10, sp
++    sub x10, x9, x10
 +    str x10, [x1, #16]
 +    add sp, sp, #64
-+    cmp sp, x9
++    mov x10, sp
++    cmp x9, x10
 +    cset w0, eq
 +    ldp d10, d11, [sp], #16
 +    ret
@@ -515,7 +505,27 @@ index 0000000..128e34c
 +    ldp x29, x30, [sp], #160
 +    ret
 +"""
-+    assembly = ".text\n" + actual_gate_body + "\n" + projection_entry_replay + "\n" + test_call_gate
++    return ".text\n" + actual_gate_body + "\n" + projection_entry_replay + "\n" + test_call_gate
++
++
++def main():
++    if sys.platform != "darwin":
++        print("SKIP: native _dm_gate fixture requires macOS ARM64 and Xcode; portable C fixtures are separate")
++        return 77
++    if platform.machine().lower() not in ("arm64", "aarch64"):
++        print("SKIP: native _dm_gate fixture requires an ARM64 Mac")
++        return 77
++    xcrun = shutil.which("xcrun")
++    if not xcrun or subprocess.run([xcrun, "--find", "clang"], capture_output=True).returncode != 0:
++        print("SKIP: native _dm_gate fixture requires Xcode clang")
++        return 77
++
++    entry_path = ROOT / "dm/host/entry.S"
++    entry = entry_path.read_text(encoding="utf-8")
++    try:
++        assembly = build_assembly(entry)
++    except ValueError as exc:
++        raise SystemExit(str(exc)) from exc
 +    harness = r'''#include "dm_obs_frame.h"
 +#include <assert.h>
 +#include <stdint.h>
@@ -627,10 +637,10 @@ index 0000000..128e34c
 +    raise SystemExit(main())
 diff --git a/dm/tools/tests/test_projection_prereqs.py b/dm/tools/tests/test_projection_prereqs.py
 new file mode 100644
-index 0000000..ce85342
+index 0000000..bb2d902
 --- /dev/null
 +++ b/dm/tools/tests/test_projection_prereqs.py
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,91 @@
 +"""CPU and source-layout tests for the unconnected projection prerequisites."""
 +from pathlib import Path
 +import re
@@ -639,11 +649,12 @@ index 0000000..ce85342
 +import sys
 +import tempfile
 +import unittest
-+from dm.tools.tests.run_obs_frame_native import extract_gate_body, first_gate_instruction
 +
 +
 +ROOT = Path(__file__).resolve().parents[3]
 +HOST = ROOT / "dm/host"
++sys.path.insert(0, str(ROOT))
++from dm.tools.tests.run_obs_frame_native import extract_gate_body, first_gate_instruction
 +
 +
 +class ProjectionPrereqTests(unittest.TestCase):
@@ -680,6 +691,11 @@ index 0000000..ce85342
 +        self.assertIn('platform.machine().lower()', self.native_runner)
 +        self.assertIn("gate_first_instruction", self.native_runner)
 +        self.assertIn('projection_entry_instruction = "stp d11, d10, [sp, #-0x40]!"', self.native_runner)
++        self.assertIn('def build_assembly(entry):', self.native_runner)
++        self.assertIn("mov x10, sp\n    sub x10, x9, x10", self.native_runner)
++        self.assertIn("mov x10, sp\n    cmp x9, x10", self.native_runner)
++        self.assertNotIn("sub x10, x9, sp", self.native_runner)
++        self.assertNotIn("cmp sp, x9", self.native_runner)
 +
 +    def test_cpu_c_fixtures(self):
 +        if sys.platform == "darwin" and shutil.which("xcrun"):
@@ -716,3 +732,36 @@ index 0000000..ce85342
 +
 +if __name__ == "__main__":
 +    unittest.main()
+diff --git a/docs/projection-set-entry-observer-plan.md b/docs/projection-set-entry-observer-plan.md
+new file mode 100644
+index 0000000..f6b4800
+--- /dev/null
++++ b/docs/projection-set-entry-observer-plan.md
+@@ -0,0 +1,27 @@
++# Odyssey projection-set entry: observer-only next step
++
++## Pinned binary and hook site
++
++The inspected Odyssey 1.4.1 `main` is build ID `b424be150a8e7d78701cbe7a439d9ebf`, SHA-256 `47ac74a66234bc1eb717b18e01fe7c880d2dd50cf1115fd046f5e5878be5f85f`. The generic projection setter begins at `main+0x73de60`; its original first word is `0x6dbc2beb` (bytes `eb2bbc6d`), `stp d11, d10, [sp, #-0x40]!`.
++
++The setter has two direct callers, at `main+0x5ae098` and `main+0x77cce8`. Both supply FOV in `s2` from fresh global/caller inputs, so the proposed transform does not feed the previous cached FOV back into itself. The second caller supplies aspect `1.0`; the first loads aspect from caller state. Neither caller has been proven to own the active gameplay camera. A 16:9 aspect predicate is therefore a traffic filter, not a camera identity check.
++
++## Next isolated runtime observation
++
++Keep the first observer read-only and default-off. Register it only for the exact `main` build above, at `0x73de60`, with the original instruction word guarded by the rewriter. The rewriter’s `OBS` table is keyed by build ID and asserts the original word and a valid observation-gate location before emitting the gate (`dm/tools/patch_nso.py`). The current source tree has no Odyssey `patches.py` entry for this build, so no such gate is active today.
++
++The next host observation ID is `26`: `OBS_MAX` is currently the exclusive value `26`, which permits IDs `1..25`. A future observer would add an enum value such as `OBS_PROJECTION_TRACE = 26` and raise `OBS_MAX` to `27` in `dm/host/dm.h`, register a callback through the existing `gate_obs_set` path, and add the paired build-ID-specific `OBS` record to the selected private game profile/overlay. Keep the profile record and host callback paired so no other build can trigger this fixed address.
++
++At the entry callback, read `x0` as the projection receiver and use `dm_obs_frame_read_s` on `s0..s3` for near, far, FOV, and aspect. Aggregate a bounded count and representative/min/max values by receiver pointer; avoid a log line on every render call. Do not modify the saved frame in this phase. The helper API supports writes for later experiments, but the observer callback should call only read helpers.
++
++The generic OBS callback cannot identify its original caller through `regs[30]`: the rewriter stub saves the caller LR on its own stack, while `regs[30]` at the callback is the trampoline return address. If separating callsite origins becomes necessary, add separately reviewed callsite tags at relocatable instruction sites or extend the gate metadata; do not infer caller identity from the current register frame. The existing aspect value can separate the known square-aspect call in a sample, but it cannot distinguish gameplay from other 16:9 projections.
++
++## Evidence required before a transform
++
++The observer can establish which projection objects and aspect/FOV tuples are active, but it cannot alone label the main gameplay camera or prove which object feeds the scene color/depth passes. Correlate receiver identities with a captured stage-scene render pass and its color/depth viewport before enabling the FOV helper. Keep menu, cutscene, shadow, prepass, and offscreen paths unchanged unless their ownership is independently established.
++
++Only after that correlation should a later prototype consider changing incoming `s2` and `s3` together. The candidate helper is stateless, transforms only finite 16:9-to-4:3 inputs, preserves horizontal extent, and skips other aspects such as the known 1:1 path. The original setter would then recompute its projection caches and frustum bounds. This report describes a next-step plan; it does not enable a runtime transform or claim gameplay testing.
++
++## Fixture status
++
++The native fixture compiles the actual `_dm_gate` body extracted from `dm/host/entry.S`, and separately exercises the verified projection-entry `STP` stack save. Its generated assembly now copies `sp` into a general register before register-form subtraction/comparison. Local Windows Zig cross-assembly to an ARM64 Mach-O object passed; the fixture was not executed on an Apple ARM64 machine.

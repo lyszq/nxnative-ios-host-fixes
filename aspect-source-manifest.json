@@ -1,7 +1,7 @@
 {
-  "source_local_commit": "ccb241d002840d59285e958c50dd024b8bb0fb86",
+  "source_local_commit": "77cdf13ddd045a068fcb47e9418941ef1a2af3bf",
   "base_local_commit": "4717b8fc3a0bba933f185d090ca1b4f25069169b",
-  "patch_sha256": "0f6880830569e95430351bb92ae0dbeaf854c41b26c08c59aebfe8b3f9d8803b",
+  "patch_sha256": "c99ad17bdc883a6dc95b02711be33cc99a4bec122ead0d47f242cefdfd1abc90",
   "files": [
     {
       "path": "dm/host/dm_obs_frame.h",
@@ -25,11 +25,15 @@
     },
     {
       "path": "dm/tools/tests/run_obs_frame_native.py",
-      "normalized_sha256": "a10fab5a3965d742000e8cb19f0224a579d24f0bb229ca459bbdce9dfb1e1f70"
+      "normalized_sha256": "a69a1b386860dc7c8d68b19742a2a057fb429001f71eb2543593e0449a3c5c6b"
     },
     {
       "path": "dm/tools/tests/test_projection_prereqs.py",
-      "normalized_sha256": "183ab519c627027796f9f9d3774b08e3ffcd2ac9ebb9979dbfc133854489d504"
+      "normalized_sha256": "065d929d702031615b0da1055c10bbf3a417ace8ea84c058f4c8de1dd9037101"
+    },
+    {
+      "path": "docs/projection-set-entry-observer-plan.md",
+      "normalized_sha256": "87d1e7acfc56a8beda5d6465ce4c283986ebf7daecc1bec4115366ccf1304255"
     }
   ],
   "entry_source_sha256": "ac753892dcc7d1bfdd940a6935f73d627060b1790106569cffc4fab2a1b0a102",
