@@ -1,8 +1,18 @@
 diff --git a/dm/games/0100000000010000/README.md b/dm/games/0100000000010000/README.md
-index 1b11b42..4d5d838 100644
+index 1b11b42..bf60f53 100644
 --- a/dm/games/0100000000010000/README.md
 +++ b/dm/games/0100000000010000/README.md
-@@ -88,3 +88,10 @@ General host and tool changes first needed here; each applies to every game:
+@@ -58,6 +58,9 @@ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in
+ 
+ General host and tool changes first needed here; each applies to every game:
+ 
++- **Storage-write tracking follow-up:** [A size-zero storage write needlessly invalidates every partial uniform shadow](../../../docs/reference/rendering.md#a-size-zero-storage-write-needlessly-invalidates-every-partial-uniform-shadow). The upstream host correction is ported and tested with synthetic native bookkeeping; Odyssey GPU behavior and performance remain unmeasured.
++- **Shader build sidecars:** [AppleDouble files are not shader build outputs](../../../docs/reference/packing.md#appledouble-files-are-not-shader-build-outputs). Exact output-name filtering preserves the existing shader/cache identity.
++
+ - **Raw capture byte widths:** [Raw snapshots guessed four bytes for wider pixel formats](../../../docs/reference/rendering.md#raw-snapshots-guessed-four-bytes-for-wider-pixel-formats). Uses the existing format mapping; no rendering change.
+ 
+ - **Array-layer HDR diagnostics:** [Raw snapshots read the wrong array layer](../../../docs/reference/rendering.md#raw-render-target-snapshots-read-the-wrong-array-layer). Capture correctness only; this does not fix or explain gameplay bloom.
+@@ -88,3 +91,14 @@ General host and tool changes first needed here; each applies to every game:
  - The silent first minute of sound.
  - development.md calls SDK 7.3.2 "the oldest so far"; Mario Kart 8 Deluxe (SDK 4.4.0) is older now.
  - `game.tsv` says values marked "Mario's" are not measured yet, but none is marked.
@@ -10,9 +20,13 @@ index 1b11b42..4d5d838 100644
 +
 +## Experimental launcher display profile
 +
-+The opt-in `DM_ODYSSEY_DISPLAY_PROFILE=launcher` rewrite pairs four original-word-checked observation gates with the host's `ODYSSEY_DISPLAY_V1` controls. It supports stock, 720p, 900p and 1080p targets plus optional vertical FOV extension to 4:3. The host reads the choice after the launcher and preloader join, verifies the exact main build and paired gates, checks the selected private graphics-quality overlay hash, then changes only the saved dimension arguments and projection S2/S3 values. The original projection setter recalculates its caches and frustum. Square and already-4:3 inputs are skipped. The iOS view and touch normalization use the accepted picture aspect.
++The `DM_ODYSSEY_DISPLAY_PROFILE=launcher` rewrite pairs original-word-checked observation gates with the host's `ODYSSEY_DISPLAY_V1` controls. It supports stock, 720p, 900p and 1080p targets plus optional vertical FOV extension to 4:3. The coordinated high-resolution rewrite also offers 1440p and native output when their packaged capabilities are present. The host reads the choice after the launcher and preloader join, verifies the exact main build and paired gates, checks the selected private graphics-quality overlay hash, then changes only the saved dimension arguments and projection S2/S3 values. The original projection setter recalculates its caches and frustum. Square and already-4:3 inputs are skipped. The iOS view and touch normalization use the accepted picture aspect.
 +
-+Stock/off leaves the register frame and existing overlays unchanged. Handheld mode ignores stale display choices. The quality overlays preserve all non-dimension fields; no shader source, compiler options, cache epoch or PSO key schema changes. The full dynamic quality ladder still applies, so a target is not a per-frame resolution guarantee. Native CPU/frame fixtures exist; iPad scene attachments, HUD/cutscene correctness, frame pacing and performance remain unvalidated. Keep the original Guest and RomFS for rollback. Higher modes require separately coordinated memory pools and are not implied by this capability.
++An explicit stock/off selection leaves the register frame and existing overlays unchanged. Handheld mode ignores stale display choices. The quality overlays preserve all non-dimension fields; no shader source, compiler options, cache epoch or PSO key schema changes. The full dynamic quality ladder still applies, so a target is not a per-frame resolution guarantee. Keep the original Guest and RomFS for rollback. Higher modes require the coordinated RT and global-heap gates; the global-heap callback registers before early returns and restores the original allocation when a choice is rejected.
++
++**F3 device observation, 2026-10-29:** the user reports working resolution switching and smooth native 2732x2048 gameplay on an 8 GB iPad Air M2, with high RAM use and little perceived improvement over 1080p. The 4:3 world view is reported correct; text and main-menu proportions remain distorted. Bloom/lighting flashes and short first-encounter hitches remain. These are user observations, not controlled frame-time, memory, or visual A/B measurements.
++
++**F4 default:** 1080p is recommended for memory efficiency and is the default for an unset supported display selection. Saved native, 1440p and stock values and explicit environment overrides retain precedence. When the launcher is skipped, the host adopts 1080p only for the exact docked build with complete display gates and validated assets; the standalone policy parser still treats an absent choice as stock. The 4:3 option stays off by default. A 4:3 1080p target is 1440x1080; wide 1080p is 1920x1080. No F4 device result is claimed.
 diff --git a/dm/games/settings.py b/dm/games/settings.py
 index d16b9cb..12ca4f8 100644
 --- a/dm/games/settings.py
@@ -111,7 +125,7 @@ index d16b9cb..12ca4f8 100644
              s['options'] = opts
          elif kind == 'range':
 diff --git a/dm/games/settings.tsv b/dm/games/settings.tsv
-index 688d5d0..03e632e 100644
+index 688d5d0..3e5647d 100644
 --- a/dm/games/settings.tsv
 +++ b/dm/games/settings.tsv
 @@ -7,18 +7,22 @@
@@ -134,11 +148,837 @@ index 688d5d0..03e632e 100644
  DM_RENDER_SCALE	range	0.5:1.0:0.05	1.0	fixups:RENDER_SCALE	Game	Render scale		level=basic
  DM_OPMODE	choice	1=Docked,0=Handheld	DM_GAME_OPMODE	always	Game	Console mode		level=basic
  DM_PRESENT_UPSCALE	choice	off=Standard,metalfx=MetalFX	off	always	Game	Upscaling	Uses more GPU time and can increase heat.
-+DM_ODYSSEY_RESOLUTION	choice	stock=Original (dynamic),720p=720p,900p=900p,1080p=1080p,1440p=1440p[cap:ODYSSEY_DISPLAY_HIGHRES],native=Native iPad[cap:ODYSSEY_DISPLAY_NATIVE_IPAD]	stock	capability:ODYSSEY_DISPLAY_V1	Game	Resolution target	High targets use more render target and game heap memory. Stability and frame rate are unvalidated. Native output requires a 2732x2048 iPad panel.	level=basic; control=slider; needs=DM_OPMODE=1
++DM_ODYSSEY_RESOLUTION	choice	stock=Original (dynamic),720p=720p,900p=900p,1080p=1080p (recommended),1440p=1440p[cap:ODYSSEY_DISPLAY_HIGHRES],native=Native iPad[cap:ODYSSEY_DISPLAY_NATIVE_IPAD]	1080p	capability:ODYSSEY_DISPLAY_V1	Game	Resolution target	1080p is recommended for memory efficiency. Higher targets use more render target and game heap memory. Native output requires a 2732x2048 iPad panel.	level=basic; control=slider; needs=DM_OPMODE=1
 +DM_ODYSSEY_4_3	toggle	-	0	capability:ODYSSEY_DISPLAY_V1	Game	4:3 view	Experimental: extends vertical view. Restart required.	level=basic; needs=DM_OPMODE=1
  DM_LANG	choice	languages	build:DM_LANG	languages>1	Game	Game language		level=basic
  DM_FULLSCREEN	choice	0=Window,1=Fullscreen	0	platform:mac	Game	Display mode		level=basic
  DM_SHOW_FPS	toggle	-	build:DM_SHOW_FPS	platform:ios	Game	Frame-rate counter
+diff --git a/dm/gfx/nvn/hle_nvn.c b/dm/gfx/nvn/hle_nvn.c
+index 85e1336..20c433a 100644
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -1871,7 +1871,7 @@ NVN(nvnQueuePresentTexture, void, NVNqueue *q, NVNwindow *w, int idx) {
+         static uint64_t plib, ppso; uint64_t lib_, pso_; mtl_create_stats(&lib_, &pso_);
+         trow(f, "@lib_new", (double)(lib_ - plib)); trow(f, "@pso_new", (double)(pso_ - ppso));
+         {   // long-frame log: this frame's items are first recorded into the ring; whether to print is decided 8 frames later, once the GPU time has arrived (see below)
+-            static nvn_timing_totals previous; static uint64_t pup, prup, pub, phy;
++            static nvn_timing_totals previous; static nvn_lookahead_totals previous_lookahead; static uint64_t pup, prup, pub, phy;
+             uint64_t lns, pns, predict_lib_ns, up, rup, ub, hy, hm_, hn_;
+             int counters_valid = mtl_create_ns(&lns, &pns, &predict_lib_ns);
+             nvn_timing_totals current = {lns, pns, predict_lib_ns}; nvn_timing_frame compile_time;
+@@ -1886,6 +1886,17 @@ NVN(nvnQueuePresentTexture, void, NVNqueue *q, NVNwindow *w, int idx) {
+             trow(f, "@pso_inclusive_ms", compile_time.deltas_valid ? (double)compile_time.pso_ns / 1e6 : -1.0);
+             trow(f, "@predict_lib_ms", compile_time.deltas_valid ? (double)compile_time.predict_lib_ns / 1e6 : -1.0);
+             trow(f, "@make_ms", compile_time.make_valid ? (double)compile_time.make_ns / 1e6 : -1.0);
++            nvn_lookahead_totals lookahead_current; nvn_lookahead_frame lookahead_frame;
++            mtl_lookahead_stats(&lookahead_current);
++            int lookahead_valid = nvn_timing_lookahead_frame_delta(&previous_lookahead, &lookahead_current, &lookahead_frame);
++            trow(f, "@predict_calls", lookahead_valid ? (double)lookahead_frame.predict_calls : -1.0);
++            trow(f, "@predict_ms", lookahead_valid ? (double)lookahead_frame.predict_ns / 1e6 : -1.0);
++            trow(f, "@prefetch_batches", lookahead_valid ? (double)lookahead_frame.prefetch_batches : -1.0);
++            trow(f, "@prefetch_keys", lookahead_valid ? (double)lookahead_frame.prefetch_keys : -1.0);
++            trow(f, "@prefetch_libs", lookahead_valid ? (double)lookahead_frame.prefetch_libs : -1.0);
++            trow(f, "@prefetch_wall_ms", lookahead_valid ? (double)lookahead_frame.prefetch_wall_ns / 1e6 : -1.0);
++            trow(f, "@prefetch_item_ms", lookahead_valid ? (double)lookahead_frame.prefetch_item_ns / 1e6 : -1.0);
++            previous_lookahead = lookahead_current;
+             lf_rec *r = &g_lf[f % LFN]; r->f = f; r->fr = fr; r->nv = nv; r->t_s = (now_ns() - g_t0_ns) / 1e9; r->pso = (unsigned)(pso_ - ppso); r->lib = (unsigned)(lib_ - plib);
+             r->make_ms = compile_time.make_valid ? (double)compile_time.make_ns / 1e6 : -1.0;
+             r->up = (unsigned)(up - pup); r->rup = (unsigned)(rup - prup); r->up_mb = (ub - pub) / 1048576.0; r->up_ms = up_ms;
+diff --git a/dm/gfx/nvn/nvn_mtl.h b/dm/gfx/nvn/nvn_mtl.h
+index b035659..2d67b59 100644
+--- a/dm/gfx/nvn/nvn_mtl.h
++++ b/dm/gfx/nvn/nvn_mtl.h
+@@ -4,9 +4,11 @@
+ #pragma once
+ #include <stdint.h>
+ #include <stddef.h>
++#include "nvn_timing.h"
+ 
+ void mtl_init(void);
+ void mtl_vbuf_stats(uint64_t *resolve, uint64_t *reuse, uint64_t *set, uint64_t *skip, uint64_t *copies, uint64_t *copy_bytes);
++void mtl_lookahead_stats(nvn_lookahead_totals *out);  // Per-frame prediction and synchronous future-shader prefetch counters (submit thread)
+ void mtl_set_depth_zero(int on);          // NVN depth mode: 1 = near is 0 (D3D / Metal), 0 = near is -w (GL, NVN's default); picks the vertex shaders' entry point (see shader_load in nvn_mtl.m)
+ void mtl_set_origin_lower_left(int on);   // NVN window origin: 1 = lower left (GL, NVN's default), 0 = upper left (D3D / Metal); see nvn_mtl.m
+ void mtl_set_queue_origin_lower_left(int on); // Raster flip captured at NVN queue creation; selected under the submit lock.
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+index 9156a3e..8e032ea 100644
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -691,8 +691,10 @@ static upd_ent g_upd[PEND_MAX]; static int g_nupd;
+ // Kept by 4 KB page (Breath of the Wild's particle dispatches bind about ten storage buffers each, hundreds a frame): a set of pages tagged with the submission (g_pend_gen) and with what
+ // wrote them. A counter report does not count against this submission's shadows: the host writes reports on the CPU when the whole submission has completed, so no draw of it reads one
+ // (Fire Emblem Engage writes its query reports into the page of a uniform block); it counts for later submissions while this one runs (gw_commit)
+-enum { SBW_N = 16384, SBW_PAGES = 4096 };
+-static struct { uint64_t page; uint32_t gen; uint8_t src; } g_sbwp[SBW_N]; static int g_nsbw, g_sbw_over;   // src: SBW_* bits; pages in the set this submission; over: a write could not be kept (too large, set full, size not known)
++enum { SBW_N = 16384, SBW_WPAGES = 64, SBW_WN = 64 };
++static struct { uint64_t page; uint32_t gen; uint8_t src; } g_sbwp[SBW_N];
++static int g_nsbw, g_sbw_over;   // src: SBW_* bits; pages in the set this submission; over: a write could not be kept (set full, size not known)
++static uint64_t g_sbw_wlo[SBW_WN], g_sbw_whi[SBW_WN]; static int g_nsbw_w;   // wide GPU writes, merged when they overlap
+ static int sbw_slot(uint64_t pg, int add) {   // open addressing; −1 = not there (or no room to add)
+     unsigned h = (unsigned)((pg * 0x9E3779B97F4A7C15ull) >> 50) & (SBW_N - 1);
+     for (int i = 0; i < 64; i++, h = (h + 1) & (SBW_N - 1)) {
+@@ -702,14 +704,46 @@ static int sbw_slot(uint64_t pg, int add) {   // open addressing; −1 = not the
+ }
+ enum { SBW_GPU = 1, SBW_REPORT = 2 };
+ static uint32_t g_sbw_gen;   // bumped by every write noted that this submission's shadows must respect (a cached shadow made before it is checked again)
++// A size-zero NVN storage binding means the remainder of its Metal buffer. Keep this arithmetic separate so the range logic can be tested without Metal.
++static uint64_t sbw_bound_len(uint64_t size, uint64_t buffer_len, uint64_t offset) {
++    return size ? size : buffer_len > offset ? buffer_len - offset : 0;
++}
+ static void sbw_note(uint64_t lo, uint64_t n, int src) {
+     if (src == SBW_GPU) g_sbw_gen++;
+-    if (!n || n > (uint64_t)SBW_PAGES << 12) { if (src == SBW_GPU) g_sbw_over = 1; return; }   // a report too large to keep cannot happen (16 bytes)
+-    for (uint64_t pg = lo >> 12; pg <= (lo + n - 1) >> 12; pg++) { int k = sbw_slot(pg, 1); if (k < 0) { g_sbw_over = 1; return; } g_sbwp[k].src |= (uint8_t)src; }
++    if (!n) { if (src == SBW_GPU) g_sbw_over = 1; return; }   // an unknown GPU write size remains conservative
++    if (n > UINT64_MAX - lo) { g_sbw_over = 1; return; }    // do not let a wrapped interval look disjoint
++    uint64_t hi = lo + n;
++    if (src == SBW_GPU && ((hi - 1) >> 12) - (lo >> 12) >= SBW_WPAGES) {   // large writes are kept as merged byte intervals
++        int merged;
++        do {
++            merged = 0;
++            for (int i = 0; i < g_nsbw_w; i++) if (lo <= g_sbw_whi[i] && g_sbw_wlo[i] <= hi) {
++                lo = MIN(lo, g_sbw_wlo[i]); hi = MAX(hi, g_sbw_whi[i]);
++                int last = --g_nsbw_w;
++                if (i != last) { g_sbw_wlo[i] = g_sbw_wlo[last]; g_sbw_whi[i] = g_sbw_whi[last]; }
++                merged = 1; break;   // the wider union may now touch another interval
++            }
++        } while (merged);
++        if (g_nsbw_w == SBW_WN) { g_sbw_over = 1; return; }
++        g_sbw_wlo[g_nsbw_w] = lo; g_sbw_whi[g_nsbw_w++] = hi;
++        return;
++    }
++    for (uint64_t pg = lo >> 12; pg <= (hi - 1) >> 12; pg++) { int k = sbw_slot(pg, 1); if (k < 0) { g_sbw_over = 1; return; } g_sbwp[k].src |= (uint8_t)src; }
++}
++static int sbw_hits(uint64_t lo, uint64_t hi) {
++    if (hi <= lo) return 0;
++    for (int i = 0; i < g_nsbw_w; i++) if (lo < g_sbw_whi[i] && g_sbw_wlo[i] < hi) return 1;
++    if (!g_nsbw) return 0;
++    for (uint64_t pg = lo >> 12; pg <= (hi - 1) >> 12; pg++) { int k = sbw_slot(pg, 0); if (k >= 0 && (g_sbwp[k].src & SBW_GPU)) return 1; }
++    return 0;
++}
++static uint64_t sbw_len(uint64_t size, void *mb, uint64_t mo) {
++    if (size) return size;
++    uint64_t len = ((__bridge id<MTLBuffer>)mb).length;
++    return sbw_bound_len(0, len, mo);
+ }
+-static int sbw_hits(uint64_t lo, uint64_t hi) { if (!g_nsbw) return 0; for (uint64_t pg = lo >> 12; pg <= (hi - 1) >> 12; pg++) { int k = sbw_slot(pg, 0); if (k >= 0 && (g_sbwp[k].src & SBW_GPU)) return 1; } return 0; }
+ static inline unsigned pend_bucket(uint64_t page) { return (unsigned)((page * 0x9E3779B97F4A7C15ull) >> 53) & (PEND_HB - 1); }
+-static void pend_reset(void) { g_npend = g_pend_over = g_nupd = g_npnode = g_nwide = g_nsbw = g_sbw_over = 0; if (!++g_pend_gen) { memset(g_pend_hgen, 0, sizeof g_pend_hgen); memset(g_sbwp, 0, sizeof g_sbwp); g_pend_gen = 1; } }
++static void pend_reset(void) { g_npend = g_pend_over = g_nupd = g_npnode = g_nwide = g_nsbw = g_nsbw_w = g_sbw_over = 0; if (!++g_pend_gen) { memset(g_pend_hgen, 0, sizeof g_pend_hgen); memset(g_sbwp, 0, sizeof g_sbwp); g_pend_gen = 1; } }
+ static void vc_gpu_write(uint64_t dst, uint64_t n);   // kept index ranges under the written range are not trusted again (ix_range)
+ static int pend_add(uint64_t dst, uint64_t n, int kind) {
+     vc_gpu_write(dst, n);
+@@ -1146,12 +1180,17 @@ static int gw_live(uint64_t lo, uint64_t hi) {
+     for (uint64_t pg = lo >> 12; pg <= (hi - 1) >> 12; pg++) { unsigned s = gw_slot(pg); if ((g_gw[s].page == pg || g_gw[s].page == ~0ull) && g_gw[s].fence > done) return 1; }
+     return 0;
+ }
++// Forward the byte intervals of large storage writes to the next submissions' in-flight write tracker.
++static void sbw_forward_wide(uint64_t fence, uint64_t done) {
++    for (int i = 0; i < g_nsbw_w; i++) gw_put(g_sbw_wlo[i], g_sbw_whi[i], fence, done);
++}
+ // The submission's GPU writes go into the page table with its fence (mtl_sub_commit)
+ static void gw_commit(uint64_t fence) {
+     uint64_t done = g_done;
+     if ((g_pend_over || g_sbw_over) && fence > g_gw_all) g_gw_all = fence;
+     for (int e = 0; e < g_npend; e++) gw_put(g_pend_lo[e], g_pend_hi[e], fence, done);
+     if (g_nsbw) for (int i = 0; i < SBW_N; i++) if (g_sbwp[i].gen == g_pend_gen) gw_put(g_sbwp[i].page << 12, (g_sbwp[i].page + 1) << 12, fence, done);
++    sbw_forward_wide(fence, done);
+ }
+ // The writes queued in this submission from index since on that overlap [a, b), newest first, into out (room for every entry a lookup can meet); -1 when they cannot all be told
+ static int pend_since(uint64_t a, uint64_t b, int since, int *out) {
+@@ -5297,6 +5336,7 @@ static dispatch_group_t g_arch_pending;   // periods handed over and not written
+ static _Atomic uint64_t g_pb_built, g_pb_archived, g_pb_reused, g_pb_spec, g_pb_legacy, g_pb_base_ns;
+ // Time by kind, all threads (the 'pipelines up to frame' line): archive lookups that found the base / found none, specializations, base compiles; predictions (submit thread)
+ static _Atomic uint64_t g_pt_hit_n, g_pt_hit_ns, g_pt_miss_n, g_pt_miss_ns, g_pt_spec_ns, g_pt_comp_ns, g_pt_pred_n, g_pt_pred_ns, g_pp_done_n;   // bases compiled / taken from the archive / reused, specializations, MTLDevice builds
++static uint64_t g_pf_batches, g_pf_keys, g_pf_libs, g_pf_wall_ns, g_pf_item_ns;   // synchronous future-shader prefetch batches on the submit thread
+ typedef struct { const void *vf, *ff; uint32_t samples, a2c, rast, topo, amp; uint32_t va[31][3], vl[31][3]; } pbase_key;   // what a base depends on: pso_desc's descriptor less the colour attachments
+ static nvn_hmap g_pbase = {.klen = sizeof(pbase_key)};
+ // Only callers for the same base wait on this group; unrelated bases compile in parallel.
+@@ -5875,6 +5915,22 @@ void mtl_pso_line(char *o, size_t n) {
+              d[0] / 1e6, d[1] / 1e6, (unsigned long long)d[10], d[11] / 1e6, (unsigned long long)d[2], d[3] / 1e6, (unsigned long long)d[4], d[5] / 1e6, (unsigned long long)d[6], d[7] / 1e6,
+              (unsigned long long)d[8], d[9] / 1e6, (unsigned long long)d[12], (unsigned long long)d[13], (unsigned long long)d[17], (unsigned long long)d[14], (unsigned long long)d[15], (unsigned long long)d[16], (unsigned long long)(v[14] - v[15] - v[16]));
+     memcpy(p, v, sizeof p);
++    static nvn_lookahead_totals lookahead_previous;
++    nvn_lookahead_totals lookahead_current = {
++        .predict_calls = atomic_load(&g_pt_pred_n), .predict_ns = atomic_load(&g_pt_pred_ns),
++        .prefetch_batches = g_pf_batches, .prefetch_keys = g_pf_keys, .prefetch_libs = g_pf_libs,
++        .prefetch_wall_ns = g_pf_wall_ns, .prefetch_item_ns = g_pf_item_ns
++    };
++    nvn_lookahead_frame lookahead_delta;
++    size_t used = strlen(o);
++    if (used < n && nvn_timing_lookahead_frame_delta(&lookahead_previous, &lookahead_current, &lookahead_delta))
++        snprintf(o + used, n - used, "; prefetch %llu batches, %llu/%llu libraries, %.1f ms batch wall / %.1f ms item sum",
++                 (unsigned long long)lookahead_delta.prefetch_batches,
++                 (unsigned long long)lookahead_delta.prefetch_libs,
++                 (unsigned long long)lookahead_delta.prefetch_keys,
++                 lookahead_delta.prefetch_wall_ns / 1e6, lookahead_delta.prefetch_item_ns / 1e6);
++    else if (used < n) snprintf(o + used, n - used, "; prefetch timing unknown");
++    lookahead_previous = lookahead_current;
+     if (pair_load_on() && g_pair_batches) {
+         static uint64_t pb, pl, pf, pair_ns_prev; size_t op = strlen(o);
+         if (op < n) snprintf(o + op, n - op, "; demanded VS+FS batches %llu, libraries loaded %llu, failed %llu / %.1f ms",
+@@ -5887,6 +5943,14 @@ void mtl_pso_line(char *o, size_t n) {
+     for (int i = 0; i < 5; i++) if (g_pw_n[i] > pn[i]) o2 += snprintf(o + o2, n > o2 ? n - o2 : 0, " %s %llu / %.1f ms,", g_pw_why[i], (unsigned long long)(g_pw_n[i] - pn[i]), (g_pw_ns[i] - pns[i]) / 1e6);
+     memcpy(pn, g_pw_n, sizeof pn); memcpy(pns, g_pw_ns, sizeof pns);
+ }
++void mtl_lookahead_stats(nvn_lookahead_totals *out) {
++    if (!out) return;
++    *out = (nvn_lookahead_totals){
++        .predict_calls = atomic_load(&g_pt_pred_n), .predict_ns = atomic_load(&g_pt_pred_ns),
++        .prefetch_batches = g_pf_batches, .prefetch_keys = g_pf_keys, .prefetch_libs = g_pf_libs,
++        .prefetch_wall_ns = g_pf_wall_ns, .prefetch_item_ns = g_pf_item_ns
++    };
++}
+ 
+ // ---- Prebuild: the base of every shader pair of the game, into the pipeline archive ----
+ // For each pair in the profile's shader_pairs.tsv, the base a hybrid draw needs: the pulling vertex entry (<key>_bp; a vertex shader without stage inputs: its own entry), the pixel
+@@ -6813,13 +6877,13 @@ static int encode_args_(id<MTLCommandEncoder> en, NvShader *sh, int nvn_stage, i
+         } else if (b->kind == NVN_RB_SBUFP || b->kind == NVN_RB_UBOP) {   // B: storage buffers / compute-stage uniforms are device pointers; the address is taken by NVN slot
+             const p_bind_buf *u = reg < 16 ? (b->kind == NVN_RB_UBOP ? &S.ubo[nvn_stage][reg] : &S.ssbo[nvn_stage][reg]) : NULL;
+             void *mb; uint64_t mo, gpu;
+-            if (u && u->addr && mtl_gpu_addr(u->addr, u->size ? u->size : 1, &mb, &mo, &gpu)) { slots[aid] = gpu; USE((__bridge id<MTLBuffer>)mb, b->rw ? MTLResourceUsageRead | MTLResourceUsageWrite : MTLResourceUsageRead); if (b->rw && b->kind == NVN_RB_SBUFP && !(reg < 32 && (sh->sb_ro >> reg & 1))) sbw_note(u->addr, u->size, SBW_GPU); }   // cb_extent.tsv: slots the shader never writes
++            if (u && u->addr && mtl_gpu_addr(u->addr, u->size ? u->size : 1, &mb, &mo, &gpu)) { slots[aid] = gpu; USE((__bridge id<MTLBuffer>)mb, b->rw ? MTLResourceUsageRead | MTLResourceUsageWrite : MTLResourceUsageRead); if (b->rw && b->kind == NVN_RB_SBUFP && !(reg < 32 && (sh->sb_ro >> reg & 1))) sbw_note(u->addr, sbw_len(u->size, mb, mo), SBW_GPU); }   // cb_extent.tsv: slots the shader never writes
+             else { slots[aid] = dummy_buf_gpu(); USE(dummy_buf(), MTLResourceUsageRead); }
+             if (bl) PD("B %llu st%d sbufp reg%d %s addr=%#llx size=%llu %s", g_stat_pass, nvn_stage, reg, u && u->addr ? "real" : "dummy", u ? (unsigned long long)u->addr : 0ull, u ? (unsigned long long)u->size : 0ull, b->rw ? "rw" : "ro");
+         } else if (b->kind == NVN_RB_SBUFU) {   // B: a storage buffer whose GPU address the game keeps in its own uniform buffer (Monster Hunter Rise's compute shaders: c3 + 0x38); read like a bindless handle
+             uint64_t addr; ubo_read(nvn_stage, reg, b->off, 8, &addr);
+             void *mb; uint64_t mo, gpu;
+-            if (addr && mtl_gpu_addr(addr, 1, &mb, &mo, &gpu)) { slots[aid] = gpu; USE((__bridge id<MTLBuffer>)mb, b->rw ? MTLResourceUsageRead | MTLResourceUsageWrite : MTLResourceUsageRead); if (b->rw) sbw_note(addr, 0, SBW_GPU); }   // size not known
++            if (addr && mtl_gpu_addr(addr, 1, &mb, &mo, &gpu)) { slots[aid] = gpu; USE((__bridge id<MTLBuffer>)mb, b->rw ? MTLResourceUsageRead | MTLResourceUsageWrite : MTLResourceUsageRead); if (b->rw) sbw_note(addr, sbw_len(0, mb, mo), SBW_GPU); }   // the bound pointer covers the rest of its Metal buffer
+             else { slots[aid] = dummy_buf_gpu(); USE(dummy_buf(), MTLResourceUsageRead); }
+             if (bl) PD("B %llu st%d sbufu reg%d+%#x addr=%#llx %s", g_stat_pass, nvn_stage, reg, b->off, (unsigned long long)addr, b->rw ? "rw" : "ro");
+         } else if (b->kind == NVN_RB_C1) {      // B: the shader's own constant segment, built when the shader is fetched
+@@ -7172,7 +7236,6 @@ static void rt_sub(const p_set_rt *r, int k, uint64_t *ser, int *lv, int *sl);
+ // enter the cache here, on the submit thread, as shader_get enters them. With hybrid pipelines a vertex shader's pulling entry is loaded with it. Called by the first pipeline miss of
+ // a submission (pso_predict_rest), so a run whose shaders are all loaded never walks the commands for it
+ static os_unfair_lock g_pf_lock = OS_UNFAIR_LOCK_INIT;
+-static uint64_t g_pf_n, g_pf_ns;
+ static void shader_prefetch_rest(void) {
+     if (!g_exec_next || !g_shmap) return;   // no shader map loaded yet: no game shader resolved so far (the graphics tests register their programs themselves)
+     if (!g_shcache) g_shcache = [NSMutableDictionary dictionary];
+@@ -7195,19 +7258,28 @@ static void shader_prefetch_rest(void) {
+         }
+     }
+     NSUInteger n = keys.count; if (n < 2) return;   // one alone loads as fast where its draw needs it
++    // Keep the existing whole-batch library-accounting boundary; batch_wall_ns below isolates only dispatch_apply.
+     uint64_t t0 = bp_now(); int hy = hybrid_on();
+     NSMutableArray *res = [NSMutableArray arrayWithCapacity:n]; for (NSUInteger i = 0; i < n; i++) [res addObject:NSNull.null];
++    __block uint64_t item_ns = 0;
++    uint64_t batch_t0 = bp_now();
+     dispatch_apply(n, DISPATCH_APPLY_AUTO, ^(size_t i) { @autoreleasepool {
++        uint64_t item_t0 = bp_now();
+         NvShader *o = shader_load(keys[i], stages[i].intValue, 0);
+         if (o && hy && o->stage == 0 && o->has_pull && !o->layer_out) pull_load(o);
+-        os_unfair_lock_lock(&g_pf_lock); if (o) res[i] = o; os_unfair_lock_unlock(&g_pf_lock);
++        uint64_t item_elapsed = bp_now() - item_t0;
++        os_unfair_lock_lock(&g_pf_lock); item_ns += item_elapsed; if (o) res[i] = o; os_unfair_lock_unlock(&g_pf_lock);
+     } });
++    uint64_t batch_wall_ns = bp_now() - batch_t0;
++    uint64_t batch_item_ns = item_ns;
+     unsigned got = 0;
+     for (NSUInteger i = 0; i < n; i++) { NvShader *o = res[i]; if ((id)o == NSNull.null) continue;
+         g_shcache[keys[i]] = o; got++;
+         pso_record("S\t%s\t%d\n", keys[i].UTF8String, stages[i].intValue); pso_user_record("S\t%s\t%d\n", keys[i].UTF8String, stages[i].intValue); }
+-    uint64_t dt = bp_now() - t0; g_bp_lib_n += got; g_bp_lib_ns += dt; g_pf_n += got; g_pf_ns += dt;
+-    static int logged; if (logged++ < 8) MLOG("shader prefetch: %u of %lu shader libraries the rest of the submission binds loaded in parallel in %.1f ms", got, (unsigned long)n, dt / 1e6);
++    uint64_t dt = bp_now() - t0; g_bp_lib_n += got; g_bp_lib_ns += dt;
++    g_pf_batches++; g_pf_keys += n; g_pf_libs += got; g_pf_wall_ns += batch_wall_ns; g_pf_item_ns += batch_item_ns;
++    static int logged; if (logged++ < 8) MLOG("shader prefetch: frame %llu, %u of %lu look-ahead shader libraries loaded; %.1f ms synchronous batch wall / %.1f ms summed per-library elapsed",
++                                               (unsigned long long)atomic_load(&g_cur_frame), got, (unsigned long)n, batch_wall_ns / 1e6, batch_item_ns / 1e6);
+ }
+ static void pso_predict_rest_(void);
+ static void pso_predict_rest(void) { uint64_t t0 = bp_now(); shader_prefetch_rest(); pso_predict_rest_(); g_pt_pred_n++; g_pt_pred_ns += bp_now() - t0; }
+diff --git a/dm/gfx/nvn/nvn_timing.h b/dm/gfx/nvn/nvn_timing.h
+index 2ae0ff3..3c56d14 100644
+--- a/dm/gfx/nvn/nvn_timing.h
++++ b/dm/gfx/nvn/nvn_timing.h
+@@ -12,6 +12,46 @@ typedef struct {
+     uint64_t predict_lib_ns;
+ } nvn_timing_totals;
+ 
++// Look-ahead timing is cumulative on the submit thread. `prefetch_item_ns` is
++// a sum of per-key elapsed intervals and can exceed `prefetch_wall_ns` because
++// those intervals overlap; it is not a CPU-time counter.
++typedef struct {
++    uint64_t predict_calls;
++    uint64_t predict_ns;
++    uint64_t prefetch_batches;
++    uint64_t prefetch_keys;
++    uint64_t prefetch_libs;
++    uint64_t prefetch_wall_ns;
++    uint64_t prefetch_item_ns;
++} nvn_lookahead_totals;
++
++typedef nvn_lookahead_totals nvn_lookahead_frame;
++
++// Preserve unknown values when a cumulative counter is invalid or reset.
++static inline int nvn_timing_lookahead_frame_delta(const nvn_lookahead_totals *previous,
++                                                    const nvn_lookahead_totals *current,
++                                                    nvn_lookahead_frame *out) {
++    if (!out) return 0;
++    *out = (nvn_lookahead_frame){0};
++    if (!previous || !current ||
++        current->predict_calls < previous->predict_calls ||
++        current->predict_ns < previous->predict_ns ||
++        current->prefetch_batches < previous->prefetch_batches ||
++        current->prefetch_keys < previous->prefetch_keys ||
++        current->prefetch_libs < previous->prefetch_libs ||
++        current->prefetch_wall_ns < previous->prefetch_wall_ns ||
++        current->prefetch_item_ns < previous->prefetch_item_ns) return 0;
++
++    out->predict_calls = current->predict_calls - previous->predict_calls;
++    out->predict_ns = current->predict_ns - previous->predict_ns;
++    out->prefetch_batches = current->prefetch_batches - previous->prefetch_batches;
++    out->prefetch_keys = current->prefetch_keys - previous->prefetch_keys;
++    out->prefetch_libs = current->prefetch_libs - previous->prefetch_libs;
++    out->prefetch_wall_ns = current->prefetch_wall_ns - previous->prefetch_wall_ns;
++    out->prefetch_item_ns = current->prefetch_item_ns - previous->prefetch_item_ns;
++    return 1;
++}
++
+ typedef struct {
+     uint64_t lib_ns;
+     uint64_t pso_ns;
+diff --git a/dm/gfx/tests/nvn_timing_native.c b/dm/gfx/tests/nvn_timing_native.c
+index c35524f..c06fa17 100644
+--- a/dm/gfx/tests/nvn_timing_native.c
++++ b/dm/gfx/tests/nvn_timing_native.c
+@@ -91,9 +91,27 @@ static void test_accounted_prediction_wrapper(void) {
+     assert(!valid && pso_ns == 8 && predict_lib_ns == UINT64_MAX - 2);
+ }
+ 
++static void test_lookahead_frame_delta(void) {
++    nvn_lookahead_totals previous = {2, 100000000, 3, 12, 10, 80000000, 200000000};
++    nvn_lookahead_totals current = {4, 175000000, 5, 20, 17, 125000000, 390000000};
++    nvn_lookahead_frame frame;
++
++    assert(nvn_timing_lookahead_frame_delta(&previous, &current, &frame));
++    assert(frame.predict_calls == 2 && frame.predict_ns == 75000000);
++    assert(frame.prefetch_batches == 2 && frame.prefetch_keys == 8 && frame.prefetch_libs == 7);
++    assert(frame.prefetch_wall_ns == 45000000 && frame.prefetch_item_ns == 190000000);
++    assert(frame.prefetch_item_ns > frame.prefetch_wall_ns);  // Parallel per-key elapsed intervals overlap.
++
++    current.prefetch_item_ns = previous.prefetch_item_ns - 1;
++    assert(!nvn_timing_lookahead_frame_delta(&previous, &current, &frame));
++    assert(frame.prefetch_batches == 0 && frame.prefetch_wall_ns == 0);  // Invalid snapshots remain unknown.
++    assert(!nvn_timing_lookahead_frame_delta(&previous, NULL, &frame));
++}
++
+ int main(void) {
+     test_frame_aggregation();
+     test_accounted_prediction_wrapper();
+-    puts("PASS: NVN inclusive PSO, nested library and frame aggregate timing");
++    test_lookahead_frame_delta();
++    puts("PASS: NVN inclusive PSO, nested library, frame aggregate and look-ahead timing");
+     return 0;
+ }
+diff --git a/dm/gfx/tests/run_nvn_sbw_native.py b/dm/gfx/tests/run_nvn_sbw_native.py
+new file mode 100644
+index 0000000..70660d0
+--- /dev/null
++++ b/dm/gfx/tests/run_nvn_sbw_native.py
+@@ -0,0 +1,359 @@
++#!/usr/bin/env python3
++"""Compile the exact NVN storage-write bookkeeping helpers as a small native C fixture.
++
++The fixture reads only the checked-out source and fails if the required production
++helpers are missing. It never patches or edits the checkout.
++"""
++from __future__ import annotations
++
++import os
++import re
++import shlex
++import shutil
++import subprocess
++import sys
++import tempfile
++from pathlib import Path
++
++
++ROOT = Path(__file__).resolve().parents[3]
++SOURCE_REL = Path("dm/gfx/nvn/nvn_mtl.m")
++
++
++def _extract_function(source: str, name: str) -> str:
++    """Return one static C function, balancing braces while skipping comments/strings."""
++    pattern = re.compile(
++        rf"(?m)^static\s+[^;\n]*\b{re.escape(name)}\s*\([^;\n]*\)\s*\{{"
++    )
++    match = pattern.search(source)
++    if not match:
++        raise RuntimeError(f"could not find static function {name} in nvn_mtl.m")
++    start = match.start()
++    pos = source.find("{", match.start(), match.end())
++    depth = 0
++    state = "code"
++    escaped = False
++    while pos < len(source):
++        ch = source[pos]
++        nxt = source[pos + 1] if pos + 1 < len(source) else ""
++        if state == "line-comment":
++            if ch == "\n":
++                state = "code"
++        elif state == "block-comment":
++            if ch == "*" and nxt == "/":
++                state = "code"
++                pos += 1
++        elif state in ("string", "char"):
++            if escaped:
++                escaped = False
++            elif ch == "\\":
++                escaped = True
++            elif (state == "string" and ch == '"') or (state == "char" and ch == "'"):
++                state = "code"
++        elif ch == "/" and nxt == "/":
++            state = "line-comment"
++            pos += 1
++        elif ch == "/" and nxt == "*":
++            state = "block-comment"
++            pos += 1
++        elif ch == '"':
++            state = "string"
++        elif ch == "'":
++            state = "char"
++        elif ch == "{":
++            depth += 1
++        elif ch == "}":
++            depth -= 1
++            if depth == 0:
++                return source[start : pos + 1]
++        pos += 1
++    raise RuntimeError(f"unterminated function {name}")
++
++
++def _production_source() -> str:
++    source = (ROOT / SOURCE_REL).read_text(encoding="utf-8")
++    for marker in ("SBW_WPAGES", "sbw_bound_len", "sbw_forward_wide"):
++        if marker not in source:
++            raise RuntimeError(f"production storage-write helper is missing: {marker}")
++    return source
++
++
++def _compiler() -> list[str]:
++    configured = os.environ.get("CC")
++    if configured:
++        return shlex.split(configured)
++    for name in ("clang", "gcc", "cc"):
++        found = shutil.which(name)
++        if found:
++            return [found]
++    zig = shutil.which("zig")
++    if zig:
++        return [zig, "cc"]
++    raise RuntimeError("no native C compiler found; set CC or install clang/gcc/zig")
++
++
++def _global_declarations(source: str) -> str:
++    patterns = (
++        r"(?m)^enum \{ SBW_N = \d+, SBW_WPAGES = \d+, SBW_WN = \d+ \};$",
++        r"(?m)^static struct \{ uint64_t page; uint32_t gen; uint8_t src; \} g_sbwp\[SBW_N\];$",
++        r"(?m)^static int g_nsbw, g_sbw_over;[^\n]*$",
++        r"(?m)^static uint64_t g_sbw_wlo\[SBW_WN\], g_sbw_whi\[SBW_WN\]; static int g_nsbw_w;[^\n]*$",
++        r"(?m)^enum \{ SBW_GPU = 1, SBW_REPORT = 2 \};$",
++        r"(?m)^static uint32_t g_sbw_gen;[^\n]*$",
++    )
++    declarations: list[str] = []
++    for pattern in patterns:
++        match = re.search(pattern, source)
++        if not match:
++            raise RuntimeError(f"could not extract production declaration: {pattern}")
++        declarations.append(match.group(0))
++    return "\n".join(declarations)
++
++
++def _fixture(source: str) -> str:
++    names = (
++        "sbw_slot",
++        "sbw_bound_len",
++        "sbw_note",
++        "sbw_hits",
++        "pend_reset",
++        "sbw_forward_wide",
++        "gw_commit",
++    )
++    functions = "\n\n".join(_extract_function(source, name) for name in names)
++    declarations = _global_declarations(source)
++    return r"""
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#include <limits.h>
++
++#define MIN(a,b) ((a) < (b) ? (a) : (b))
++#define MAX(a,b) ((a) > (b) ? (a) : (b))
++#define PEND_MAX 8192
++#define PEND_HB 2048
++
++static uint32_t g_pend_gen = 1;
++static uint32_t g_pend_hgen[PEND_HB];
++static int g_npend, g_pend_over, g_nupd, g_npnode, g_nwide;
++static uint64_t g_pend_lo[PEND_MAX], g_pend_hi[PEND_MAX];
++static uint64_t g_done, g_gw_all;
++
++typedef struct { uint64_t lo, hi, fence, done; } forwarded_range;
++static forwarded_range g_forwarded[80];
++static int g_forwarded_n;
++static int g_failed, g_cases;
++
++static void expect(int condition, const char *label) {
++    g_cases++;
++    if (!condition) {
++        fprintf(stderr, "FAIL: %s\n", label);
++        g_failed++;
++    }
++}
++
++static void gw_put(uint64_t lo, uint64_t hi, uint64_t fence, uint64_t done) {
++    if (g_forwarded_n < (int)(sizeof g_forwarded / sizeof g_forwarded[0]))
++        g_forwarded[g_forwarded_n++] = (forwarded_range){lo, hi, fence, done};
++    else
++        g_failed++;
++}
++
++""" + declarations + "\n\n" + functions + r"""
++
++static void clear_forwarded(void) { g_forwarded_n = 0; }
++
++static void test_bound_length(void) {
++    expect(sbw_bound_len(24, 100, 20) == 24, "nonzero binding size is preserved");
++    expect(sbw_bound_len(0, 100, 20) == 80, "size zero is the remaining buffer length");
++    expect(sbw_bound_len(0, 100, 100) == 0, "offset at buffer end has no remaining bytes");
++    expect(sbw_bound_len(0, 100, 101) == 0, "offset beyond buffer end is empty");
++}
++
++static void test_small_pages_and_report_semantics(void) {
++    pend_reset();
++    g_gw_all = 0;
++    clear_forwarded();
++    uint64_t base = 0x100000000ull;
++    sbw_note(base + 0x100, 16, SBW_REPORT);
++    expect(g_sbw_gen == 0, "counter report does not invalidate current uniform shadows");
++    expect(!sbw_hits(base + 0x100, base + 0x110), "counter report is not a current GPU write");
++    gw_commit(41);
++    expect(g_forwarded_n == 1, "report page still forwards to later submissions");
++    expect(g_forwarded_n == 1 && g_forwarded[0].lo == base &&
++           g_forwarded[0].hi == base + 0x1000 && g_forwarded[0].fence == 41,
++           "report page keeps the prior page-granular fence semantics");
++
++    pend_reset();
++    sbw_note(base + 0x100, 16, SBW_GPU);
++    expect(g_sbw_gen == 1, "GPU write advances the shadow generation");
++    expect(sbw_hits(base + 0x800, base + 0x801), "small GPU writes remain page-granular");
++    expect(!sbw_hits(base + 0x1000, base + 0x1001), "a different pool page does not alias");
++}
++
++static void test_known_zero_size_range_and_pool_isolation(void) {
++    pend_reset();
++    uint64_t base = 0x200000000ull;
++    uint64_t len = sbw_bound_len(0, 0x100000, 0x2000);
++    sbw_note(base + 0x2000, len, SBW_GPU);
++    expect(len == 0xfe000, "known buffer offset yields the exact remaining byte count");
++    expect(g_nsbw_w == 1 && !g_sbw_over, "large known remainder is tracked as one interval");
++    expect(sbw_hits(base + 0x2000, base + 0x2001), "the beginning of the known remainder is covered");
++    expect(sbw_hits(base + 0xfffff, base + 0x100000), "the last byte of the known remainder is covered");
++    expect(!sbw_hits(base + 0x1fff, base + 0x2000), "the byte before the remainder is not covered");
++    expect(!sbw_hits(base + 0x100000, base + 0x100001), "the byte after the remainder is not covered");
++    expect(!sbw_hits(0x300000000ull, 0x300000001ull), "a separate pool does not overlap the interval");
++    expect(!g_sbw_over, "known bounded writes avoid the global fallback");
++}
++
++static int range_present(uint64_t lo, uint64_t hi) {
++    for (int i = 0; i < g_forwarded_n; i++)
++        if (g_forwarded[i].lo == lo && g_forwarded[i].hi == hi) return 1;
++    return 0;
++}
++
++static void test_transitive_merge_and_forwarding(void) {
++    pend_reset();
++    clear_forwarded();
++    uint64_t base = 0x400000000ull;
++    uint64_t wide = (uint64_t)SBW_WPAGES * 4096 + 1;
++    uint64_t a_hi = base + wide;
++    uint64_t b_lo = a_hi + 80 * 4096;
++    uint64_t b_hi = b_lo + wide;
++    sbw_note(base, wide, SBW_GPU);
++    sbw_note(b_lo, wide, SBW_GPU);
++    expect(g_nsbw_w == 2, "separate wide writes keep separate intervals");
++    expect(!sbw_hits(a_hi + 1, b_lo - 1), "the gap between wide intervals remains uncovered");
++
++    uint64_t bridge_lo = a_hi - 1;
++    uint64_t bridge_hi = b_lo + 1;
++    sbw_note(bridge_lo, bridge_hi - bridge_lo, SBW_GPU);
++    expect(g_nsbw_w == 1, "a bridge merges every overlapping interval, not only the first");
++    expect(sbw_hits(base, b_hi), "the merged range covers its full union");
++    expect(!sbw_hits(b_hi, b_hi + 1), "the merged range ends at its exact exclusive bound");
++
++    uint64_t separate = base + 0x20000000ull;
++    sbw_note(separate, wide, SBW_GPU);
++    expect(g_nsbw_w == 2, "a non-overlapping pool remains a separate interval");
++    expect(!sbw_hits(b_hi + 1, separate - 1), "unwritten memory between pools is not covered");
++
++    gw_commit(77);
++    expect(g_forwarded_n == 2, "gw_commit forwards both stored wide intervals");
++    expect(range_present(base, b_hi), "gw_commit forwards the merged interval bounds");
++    expect(range_present(separate, separate + wide), "gw_commit forwards the isolated pool bounds");
++    expect(g_forwarded[0].fence == 77 && g_forwarded[1].fence == 77,
++           "wide intervals carry the submitting fence");
++}
++
++static void test_unknown_overflow_and_capacity_fallback(void) {
++    pend_reset();
++    g_gw_all = 0;
++    uint32_t gen_before_unknown = g_sbw_gen;
++    sbw_note(0x500000000ull, 0, SBW_GPU);
++    expect(g_sbw_over, "unknown GPU write size stays globally conservative");
++    expect(g_sbw_gen == gen_before_unknown + 1, "unknown GPU writes still invalidate cached shadows");
++    gw_commit(88);
++    expect(g_gw_all == 88, "an unknown write holds all later memory until its fence");
++
++    pend_reset();
++    g_gw_all = 0;
++    sbw_note(UINT64_MAX - 7, 16, SBW_GPU);
++    expect(g_sbw_over, "wrapped address ranges fall back conservatively");
++    gw_commit(89);
++    expect(g_gw_all == 89, "overflow fallback is forwarded as a global fence");
++
++    pend_reset();
++    g_gw_all = 0;
++    uint64_t wide = (uint64_t)SBW_WPAGES * 4096 + 1;
++    uint64_t step = wide + 32 * 4096;
++    for (int i = 0; i < SBW_WN; i++)
++        sbw_note(0x600000000ull + (uint64_t)i * step, wide, SBW_GPU);
++    expect(g_nsbw_w == SBW_WN && !g_sbw_over, "wide interval table accepts its full capacity");
++    sbw_note(0x600000000ull + (uint64_t)SBW_WN * step, wide, SBW_GPU);
++    expect(g_sbw_over, "more than 64 distinct wide intervals uses the global fallback");
++    gw_commit(90);
++    expect(g_gw_all == 90, "interval-capacity overflow holds all later memory until its fence");
++}
++
++static void test_reset_and_generation_wrap(void) {
++    pend_reset();
++    uint64_t base = 0x700000000ull;
++    uint64_t wide = (uint64_t)SBW_WPAGES * 4096 + 1;
++    sbw_note(base, wide, SBW_GPU);
++    sbw_note(base + 0x40000000ull, 16, SBW_GPU);
++    expect(g_nsbw_w == 1 && g_nsbw > 0, "setup has both interval and page state");
++    uint32_t previous = g_pend_gen;
++    pend_reset();
++    expect(g_nsbw_w == 0 && g_nsbw == 0 && !g_sbw_over, "submission reset clears interval and fallback state");
++    expect(g_pend_gen == previous + 1, "submission reset advances the generation");
++    expect(!sbw_hits(base, base + wide), "old intervals are invisible after reset");
++    expect(!sbw_hits(base + 0x40000000ull, base + 0x40000010ull), "old page writes are invisible after reset");
++
++    g_pend_gen = UINT32_MAX;
++    g_pend_hgen[0] = UINT32_MAX;
++    g_sbwp[0].gen = 1;
++    pend_reset();
++    expect(g_pend_gen == 1, "generation wrap resets to one");
++    expect(g_pend_hgen[0] == 0 && g_sbwp[0].gen == 0, "generation wrap clears stale page-table tags");
++}
++
++int main(void) {
++    test_bound_length();
++    test_small_pages_and_report_semantics();
++    test_known_zero_size_range_and_pool_isolation();
++    test_transitive_merge_and_forwarding();
++    test_unknown_overflow_and_capacity_fallback();
++    test_reset_and_generation_wrap();
++    printf("SBW_NATIVE cases=%d failed=%d\n", g_cases, g_failed);
++    return g_failed != 0;
++}
++"""
++
++
++def run() -> subprocess.CompletedProcess[str]:
++    with tempfile.TemporaryDirectory(prefix="nvn-sbw-native-") as td:
++        temp_root = Path(td)
++        source = _production_source()
++        # These are pure bookkeeping functions. sbw_len remains Objective-C but
++        # is separately checked to call the extracted, tested sbw_bound_len.
++        for text in (
++            "sbw_note(u->addr, sbw_len(u->size, mb, mo), SBW_GPU)",
++            "sbw_note(addr, sbw_len(0, mb, mo), SBW_GPU)",
++            "return sbw_bound_len(0, len, mo);",
++            "sbw_forward_wide(fence, done);",
++        ):
++            if text not in source:
++                raise RuntimeError(f"production integration is missing: {text}")
++
++        c_path = temp_root / "nvn_sbw_fixture.c"
++        binary = temp_root / ("nvn_sbw_fixture.exe" if os.name == "nt" else "nvn_sbw_fixture")
++        c_path.write_text(_fixture(source), encoding="utf-8", newline="\n")
++        command = _compiler() + [
++            "-std=c11",
++            "-O2",
++            "-Wno-unused-function",
++            str(c_path),
++            "-o",
++            str(binary),
++        ]
++        compiled = subprocess.run(command, capture_output=True, text=True, encoding="utf-8")
++        if compiled.returncode:
++            return compiled
++        return subprocess.run([str(binary)], capture_output=True, text=True, encoding="utf-8")
++
++
++def main() -> int:
++    try:
++        result = run()
++    except Exception as exc:  # print a concise diagnostic for CI and direct use
++        print(f"SBW_NATIVE setup failed: {exc}", file=sys.stderr)
++        return 2
++    if result.stdout:
++        print(result.stdout, end="")
++    if result.stderr:
++        print(result.stderr, end="", file=sys.stderr)
++    return result.returncode
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/dm/gfx/tests/test_nvn_sbw.py b/dm/gfx/tests/test_nvn_sbw.py
+new file mode 100644
+index 0000000..2460477
+--- /dev/null
++++ b/dm/gfx/tests/test_nvn_sbw.py
+@@ -0,0 +1,28 @@
++"""Native extraction coverage for NVN GPU storage-write tracking."""
++from __future__ import annotations
++
++import subprocess
++import sys
++import unittest
++from pathlib import Path
++
++
++RUNNER = Path(__file__).with_name("run_nvn_sbw_native.py")
++
++
++class NativeStorageWriteTracking(unittest.TestCase):
++    def test_extracted_production_helpers(self) -> None:
++        result = subprocess.run(
++            [sys.executable, str(RUNNER)],
++            capture_output=True,
++            text=True,
++            encoding="utf-8",
++            timeout=120,
++        )
++        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++        self.assertIn("SBW_NATIVE cases=", result.stdout)
++        self.assertIn("failed=0", result.stdout)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/dm/gfx/tests/test_nvn_timing.py b/dm/gfx/tests/test_nvn_timing.py
+index dc47508..aff2b18 100644
+--- a/dm/gfx/tests/test_nvn_timing.py
++++ b/dm/gfx/tests/test_nvn_timing.py
+@@ -82,6 +82,27 @@ class NVNTimingTests(unittest.TestCase):
+         self.assertIn("aggregate compile time is unknown", self.hle)
+         self.assertNotIn("((lns - plns) + (pns - ppns))", self.hle)
+ 
++    def test_lookahead_tsv_separates_prediction_and_prefetch_wall_from_item_elapsed(self):
++        prefetch = function_body(self.mtl, "static void shader_prefetch_rest(void) {")
++        self.assertIn("uint64_t batch_t0 = bp_now()", prefetch)
++        self.assertIn("dispatch_apply(n, DISPATCH_APPLY_AUTO", prefetch)
++        self.assertIn("uint64_t batch_wall_ns = bp_now() - batch_t0", prefetch)
++        self.assertIn("uint64_t item_elapsed = bp_now() - item_t0", prefetch)
++        self.assertIn("item_ns += item_elapsed", prefetch)
++        self.assertIn("g_pf_wall_ns += batch_wall_ns", prefetch)
++        self.assertIn("g_pf_item_ns += batch_item_ns", prefetch)
++        self.assertIn("uint64_t dt = bp_now() - t0", prefetch)
++        self.assertIn("g_bp_lib_ns += dt", prefetch)
++
++        snapshot = function_body(self.mtl, "void mtl_lookahead_stats(nvn_lookahead_totals *out)")
++        for field in ("predict_calls", "predict_ns", "prefetch_batches", "prefetch_keys", "prefetch_libs", "prefetch_wall_ns", "prefetch_item_ns"):
++            self.assertIn(f".{field} =", snapshot)
++
++        self.assertIn("nvn_timing_lookahead_frame_delta(&previous_lookahead, &lookahead_current, &lookahead_frame)", self.hle)
++        for metric in ("@predict_calls", "@predict_ms", "@prefetch_batches", "@prefetch_keys", "@prefetch_libs", "@prefetch_wall_ms", "@prefetch_item_ms"):
++            self.assertIn(f'trow(f, "{metric}"', self.hle)
++        self.assertIn("frame %llu, %u of %lu look-ahead shader libraries loaded", prefetch)
++
+     def test_native_pure_c_fixture(self):
+         subprocess.run([sys.executable, str(NATIVE)], cwd=ROOT, check=True)
+ 
+diff --git a/dm/gfx/tools/c1_guard.py b/dm/gfx/tools/c1_guard.py
+index 2c97b14..e8e7571 100755
+--- a/dm/gfx/tools/c1_guard.py
++++ b/dm/gfx/tools/c1_guard.py
+@@ -24,6 +24,7 @@ ASSIGNMENT = re.compile(r"(?<![\w.])(_\d+)\s*(?:<<|>>|[-+*/%&|^])?=(?!=)|(?<![\w
+ TOKEN = re.compile(r"\s*(0[xX][0-9a-fA-F]+[uU]?|\d+\.\d*(?:[eE][-+]?\d+)?f?|\d+[uU]?|[A-Za-z_]\w*(?:\.\w+)*|\.\w+|<<|>>|<=|>=|==|!=|&&|\|\||[-+*/%&|^~!?:(),<>\[\]])")
+ UNBOUNDED = (None, None)
+ CASTS = {"int", "uint", "short", "ushort", "long", "ulong"}
++OUTPUT = re.compile(r"[0-9a-f]{16}_b\w*\.(metal|json)")   # what dmsh_build.py writes: <key>_b.metal, <key>_bg0.json ... (as its OUT_KEY); nothing else in the folder is a shader
+ BINARY = {"||": 1, "&&": 2, "|": 3, "^": 4, "&": 5, "==": 6, "!=": 6, "<": 7, ">": 7, "<=": 7, ">=": 7, "<<": 8, ">>": 8, "+": 9, "-": 9, "*": 10, "/": 10, "%": 10}
+ 
+ 
+@@ -201,6 +202,11 @@ def proven(index, definitions, span):
+     return span is not None and known(low, high) and low >= 0 and 16 * (high + 1) <= span
+ 
+ 
++def outputs(version_dir, ext):
++    """The names of the shader build's .<ext> outputs in version_dir, sorted. Other files are left out: on an exFAT or FAT drive macOS writes a binary AppleDouble `._<name>` beside each file"""
++    return [n for n in sorted(os.listdir(version_dir)) if (m := OUTPUT.fullmatch(n)) and m.group(1) == ext]
++
++
+ def unproven(job):
+     """(version dir, a .metal file name) → the shader's key when one of its c1 reads is not proven bounded, else None. Each shader is checked on its own, so main()
+     spreads them over every core, as cb_extent.py does (Breath of the Wild's 19,592 libraries, FINAL FANTASY RESONANCE's 73,496: minutes on one core)"""
+@@ -220,7 +226,7 @@ def main():
+     if len(sys.argv) != 3:
+         raise SystemExit(f"usage: {sys.argv[0]} <dmsh_b version dir> <output tsv>")
+     version_dir, output = map(os.path.abspath, sys.argv[1:])
+-    jobs = [(version_dir, name) for name in sorted(os.listdir(version_dir)) if name.endswith(".metal")]
++    jobs = [(version_dir, name) for name in outputs(version_dir, "metal")]
+     with multiprocessing.Pool() as pool:   # map keeps the sorted order, so the list is the same as one core's
+         keys = [key for key in pool.map(unproven, jobs, chunksize=64) if key]
+     os.makedirs(os.path.dirname(output), exist_ok=True)
+diff --git a/dm/gfx/tools/cb_extent.py b/dm/gfx/tools/cb_extent.py
+index 8ac5274..8f323f8 100644
+--- a/dm/gfx/tools/cb_extent.py
++++ b/dm/gfx/tools/cb_extent.py
+@@ -14,7 +14,7 @@ import re
+ import sys
+ 
+ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+-from c1_guard import Interval, definitions_of, known   # noqa: E402
++from c1_guard import Interval, definitions_of, known, outputs   # noqa: E402
+ import dmsh_chain   # noqa: E402
+ 
+ MAX = 65536
+@@ -84,7 +84,7 @@ def main():
+     if len(sys.argv) != 3:
+         raise SystemExit(f"usage: {sys.argv[0]} <dmsh_b version dir> <output tsv>")
+     version_dir, output = map(os.path.abspath, sys.argv[1:])
+-    paths = [os.path.join(version_dir, n) for n in sorted(os.listdir(version_dir)) if n.endswith("_b.json")]
++    paths = [os.path.join(version_dir, n) for n in outputs(version_dir, "json") if n.endswith("_b.json")]
+     with multiprocessing.Pool() as pool: rows = [r for r in pool.map(row, paths, chunksize=64) if r]
+     slots, ro = sum(r.count(":") for r in rows), sum(len(re.findall(r"\bs\d+", r.split("\t", 1)[1])) for r in rows)
+     os.makedirs(os.path.dirname(output), exist_ok=True)
+diff --git a/dm/gfx/tools/dmsh_mtlcache.py b/dm/gfx/tools/dmsh_mtlcache.py
+index d4cb02f..1d8dd14 100644
+--- a/dm/gfx/tools/dmsh_mtlcache.py
++++ b/dm/gfx/tools/dmsh_mtlcache.py
+@@ -10,6 +10,7 @@
+ import os, re, json, shutil, ctypes, hashlib, threading, subprocess, collections, time
+ 
+ FORMAT = b'dmsh_mtlcache 2'   # earlier prefill could misclassify an unsampled library from another compiler
++OUTPUT = re.compile(r'[0-9a-f]{16}_b\.metal')   # shader outputs only, excluding exFAT / FAT AppleDouble files
+ try:   # CDLL(None) means "the running process" on POSIX only; on Windows it raises TypeError, so the copy is a plain one
+     _clonefile = getattr(ctypes.CDLL(None, use_errno=True), 'clonefile', None)   # APFS copy-on-write copy (no data written); elsewhere a plain copy
+ except (OSError, TypeError):
+@@ -97,7 +98,7 @@ class Cache:
+         stamp_file = os.path.join(self.root, 'filled.json')
+         try: stamps = json.load(open(stamp_file))
+         except (OSError, ValueError): stamps = {}
+-        names = set(os.listdir(mac_dir)); stems = sorted(n[:-6] for n in names if n.endswith('_b.metal'))
++        names = set(os.listdir(mac_dir)); stems = sorted(n[:-6] for n in names if OUTPUT.fullmatch(n))
+         todo, notes = {}, []
+         for target, d in (('mac', mac_dir), ('ios', ios_dir)):
+             if targets is not None and target not in targets: continue   # checking an earlier build compiles samples too
 diff --git a/dm/host/Makefile b/dm/host/Makefile
 index 410b6ce..e752e85 100644
 --- a/dm/host/Makefile
@@ -605,10 +1445,10 @@ index 7ad34df..4cd4ace 100644
      dm_input_set(g_btn, lx, ly, 0, 0);
 diff --git a/dm/host/hle_odyssey_display.c b/dm/host/hle_odyssey_display.c
 new file mode 100644
-index 0000000..b4e0e85
+index 0000000..bb27cfc
 --- /dev/null
 +++ b/dm/host/hle_odyssey_display.c
-@@ -0,0 +1,466 @@
+@@ -0,0 +1,635 @@
 +#include "dm.h"
 +#include "front.h"
 +#include "dm_obs_frame.h"
@@ -629,6 +1469,7 @@ index 0000000..b4e0e85
 +#include <unistd.h>
 +
 +#define DM_ODYSSEY_MAIN_BUILD "b424be150a8e7d78701cbe7a439d9ebf"
++#define DM_ODYSSEY_DEFAULT_RESOLUTION "1080p"
 +#define DM_ODYSSEY_PROFILE_HEADER "#odyssey-display-v1"
 +#define DM_ODYSSEY_MANIFEST_MAX 8192u
 +#define DM_ODYSSEY_ASSET_MAX 65536u
@@ -636,13 +1477,41 @@ index 0000000..b4e0e85
 +#define DM_ODYSSEY_MIB (1024u * 1024u)
 +#define DM_ODYSSEY_BASE_RT_POOL_MIB 100u
 +#define DM_ODYSSEY_BASE_GLOBAL_HEAP UINT32_C(0xc3000000)
++#define DM_ODYSSEY_PROJECTION_TRACE_OBJECT_CAP 32u
++#define DM_ODYSSEY_PROJECTION_TRACE_PERIOD UINT64_C(4096)
++#define DM_ODYSSEY_PROJECTION_TRACE_MAX_LOGS 8u
 +
 +typedef struct {
 +    dm_odyssey_display_config config;
 +    int active;
++    int trace_projections;
 +} odyssey_display_state;
 +
 +static odyssey_display_state g_display;
++
++typedef struct {
++    uint64_t receiver;
++    uint64_t calls;
++    float minimum[4];
++    float maximum[4];
++} odyssey_projection_trace_object;
++
++typedef struct {
++    atomic_flag lock;
++    odyssey_projection_trace_object objects[DM_ODYSSEY_PROJECTION_TRACE_OBJECT_CAP];
++    uint32_t object_count;
++    uint32_t periodic_logs;
++    uint64_t valid_observations;
++    uint64_t invalid_observations;
++    uint64_t overflow_observations;
++    uint64_t next_periodic;
++} odyssey_projection_trace_state;
++
++static odyssey_projection_trace_state g_projection_trace = {
++    .lock = ATOMIC_FLAG_INIT,
++    .next_periodic = DM_ODYSSEY_PROJECTION_TRACE_PERIOD,
++};
++
 +// Width and height publish together, so native iPad's slightly non-4:3 panel
 +// ratio is visible consistently to the front end and the projection hook.
 +static _Atomic uint64_t g_published_viewport = UINT64_C(1600) | (UINT64_C(900) << 32);
@@ -925,6 +1794,102 @@ index 0000000..b4e0e85
 +    (void)param;
 +    if (!g_display.active) return;
 +
++    if (g_display.trace_projections) {
++        uint64_t receiver = regs[0];
++        float value[4] = {0};
++        const int decoded = dm_obs_frame_read_s(regs, DM_OBS_FRAME_BYTES, 0, &value[0]) &&
++                            dm_obs_frame_read_s(regs, DM_OBS_FRAME_BYTES, 1, &value[1]) &&
++                            dm_obs_frame_read_s(regs, DM_OBS_FRAME_BYTES, 2, &value[2]) &&
++                            dm_obs_frame_read_s(regs, DM_OBS_FRAME_BYTES, 3, &value[3]);
++        const int sane = decoded && receiver &&
++                         isfinite((double)value[0]) && isfinite((double)value[1]) &&
++                         isfinite((double)value[2]) && isfinite((double)value[3]) &&
++                         value[0] > 0.0f && value[1] > value[0] &&
++                         value[2] > 0.001f && value[2] < 3.1415925f &&
++                         value[3] >= 0.25f && value[3] <= 4.0f;
++
++        int first_sample = 0, periodic_summary = 0;
++        uint32_t ordinal = 0, tracked = 0, periodic_logs = 0;
++        uint64_t calls = 0, valid = 0, invalid = 0, overflow = 0;
++        float first_value[4] = {0};
++        odyssey_projection_trace_object summary_objects[DM_ODYSSEY_PROJECTION_TRACE_OBJECT_CAP] = {{0}};
++        while (atomic_flag_test_and_set_explicit(&g_projection_trace.lock, memory_order_acquire)) { }
++        if (!sane) {
++            g_projection_trace.invalid_observations++;
++        } else {
++            g_projection_trace.valid_observations++;
++            uint32_t slot = g_projection_trace.object_count;
++            for (uint32_t i = 0; i < g_projection_trace.object_count; i++) {
++                if (g_projection_trace.objects[i].receiver == receiver) {
++                    slot = i;
++                    break;
++                }
++            }
++            if (slot == g_projection_trace.object_count) {
++                if (g_projection_trace.object_count == DM_ODYSSEY_PROJECTION_TRACE_OBJECT_CAP) {
++                    g_projection_trace.overflow_observations++;
++                } else {
++                    odyssey_projection_trace_object *object = &g_projection_trace.objects[slot];
++                    object->receiver = receiver;
++                    object->calls = 0;
++                    for (unsigned i = 0; i < 4; i++)
++                        object->minimum[i] = object->maximum[i] = value[i];
++                    g_projection_trace.object_count++;
++                    first_sample = 1;
++                    ordinal = slot + 1;
++                    memcpy(first_value, value, sizeof first_value);
++                }
++            }
++            if (slot < g_projection_trace.object_count) {
++                odyssey_projection_trace_object *object = &g_projection_trace.objects[slot];
++                object->calls++;
++                calls = object->calls;
++                for (unsigned i = 0; i < 4; i++) {
++                    if (value[i] < object->minimum[i]) object->minimum[i] = value[i];
++                    if (value[i] > object->maximum[i]) object->maximum[i] = value[i];
++                }
++            }
++            if (g_projection_trace.valid_observations >= g_projection_trace.next_periodic) {
++                g_projection_trace.next_periodic += DM_ODYSSEY_PROJECTION_TRACE_PERIOD;
++                if (g_projection_trace.periodic_logs < DM_ODYSSEY_PROJECTION_TRACE_MAX_LOGS &&
++                    !first_sample) {
++                    g_projection_trace.periodic_logs++;
++                    periodic_summary = 1;
++                }
++            }
++        }
++        if (periodic_summary) {
++            tracked = g_projection_trace.object_count;
++            periodic_logs = g_projection_trace.periodic_logs;
++            valid = g_projection_trace.valid_observations;
++            invalid = g_projection_trace.invalid_observations;
++            overflow = g_projection_trace.overflow_observations;
++            memcpy(summary_objects, g_projection_trace.objects, sizeof summary_objects);
++        }
++        atomic_flag_clear_explicit(&g_projection_trace.lock, memory_order_release);
++
++        if (first_sample) {
++            LOG("Odyssey projection trace object #%u first input (calls=%llu): near=%.6g far=%.6g verticalFov=%.6g aspect=%.6g",
++                ordinal, (unsigned long long)calls,
++                first_value[0], first_value[1], first_value[2], first_value[3]);
++        }
++        if (periodic_summary) {
++            LOG("Odyssey projection trace counts: tracked=%u valid=%llu invalid=%llu overflow=%llu (summary %u/%u)",
++                tracked, (unsigned long long)valid, (unsigned long long)invalid,
++                (unsigned long long)overflow, periodic_logs,
++                DM_ODYSSEY_PROJECTION_TRACE_MAX_LOGS);
++            for (uint32_t i = 0; i < tracked; i++) {
++                const odyssey_projection_trace_object *object = &summary_objects[i];
++                LOG("Odyssey projection trace object #%u lifetime calls=%llu: near=[%.6g,%.6g] far=[%.6g,%.6g] verticalFov=[%.6g,%.6g] aspect=[%.6g,%.6g]",
++                    i + 1, (unsigned long long)object->calls,
++                    object->minimum[0], object->maximum[0],
++                    object->minimum[1], object->maximum[1],
++                    object->minimum[2], object->maximum[2],
++                    object->minimum[3], object->maximum[3]);
++            }
++        }
++    }
++
 +    float fovy = 0.0f, source_aspect = 0.0f;
 +    if (!dm_obs_frame_read_s(regs, DM_OBS_FRAME_BYTES, 2, &fovy) ||
 +        !dm_obs_frame_read_s(regs, DM_OBS_FRAME_BYTES, 3, &source_aspect)) return;
@@ -986,6 +1951,13 @@ index 0000000..b4e0e85
 +    return fabsf(aspect - 16.0f / 9.0f) > 0.0001f;
 +}
 +
++static int display_profile_gates_present(void) {
++    return gate_obs_present(OBS_ODYSSEY_PROJECTION) &&
++           gate_obs_present(OBS_ODYSSEY_PACKED_SIZE) &&
++           gate_obs_present(OBS_ODYSSEY_CANVAS_SIZE) &&
++           gate_obs_present(OBS_ODYSSEY_CROP_SIZE);
++}
++
 +void dm_odyssey_display_init(void) {
 +    const int exact_build = !strcmp(dm_main_build(), DM_ODYSSEY_MAIN_BUILD);
 +    const int have_rt_heap_gate = gate_obs_present(OBS_ODYSSEY_RT_HEAP);
@@ -1004,15 +1976,47 @@ index 0000000..b4e0e85
 +        gate_obs_set(OBS_ODYSSEY_GLOBAL_HEAP, global_heap_adjust);
 +    }
 +
++    const char *resolution = getenv("DM_ODYSSEY_RESOLUTION");
++    const char *four_three = getenv("DM_ODYSSEY_4_3");
 +    dm_odyssey_display_config config;
-+    if (!dm_odyssey_display_policy_parse(getenv("DM_ODYSSEY_RESOLUTION"),
-+                                         getenv("DM_ODYSSEY_4_3"), &config)) {
++    if (!dm_odyssey_display_policy_parse(resolution, four_three, &config)) {
 +        LOG("[RED] Odyssey display choice is invalid; keeping stock resolution and aspect");
 +        return;
 +    }
-+    if (!config.active) return;
 +
 +    const int opmode = dm_opmode();
++    if (!resolution) {
++        // The launcher omits settings that equal their declared default. Use
++        // 1080p only for the exact docked build with its complete display
++        // rewrite; keep the shared policy parser's NULL-means-stock contract.
++        if (opmode == 0) {
++            if (config.active)
++                LOG("Odyssey display choices ignored in handheld mode (DM_OPMODE=0); using the stock picture and resolution");
++            return;
++        }
++        if (opmode != 1) {
++            if (config.active)
++                LOG("[RED] Odyssey display choices require docked mode (DM_OPMODE=1); mode %d keeps stock", opmode);
++            return;
++        }
++        if (!exact_build) {
++            if (config.active)
++                LOG("[RED] Odyssey display choice is unavailable for this main build; keeping stock");
++            return;
++        }
++        if (!display_profile_gates_present()) {
++            if (config.active)
++                LOG("[RED] Odyssey display choice is missing one or more paired main gates; keeping stock");
++            return;
++        }
++        resolution = DM_ODYSSEY_DEFAULT_RESOLUTION;
++        if (!dm_odyssey_display_policy_parse(resolution, four_three, &config)) {
++            LOG("[RED] Odyssey default display choice is invalid; keeping stock resolution and aspect");
++            return;
++        }
++    }
++    if (!config.active) return;
++
 +    if (opmode == 0) {
 +        LOG("Odyssey display choices ignored in handheld mode (DM_OPMODE=0); using the stock picture and resolution");
 +        return;
@@ -1034,10 +2038,7 @@ index 0000000..b4e0e85
 +        LOG("[RED] Odyssey native resolution requires a 2732x2048 iPad panel; keeping stock");
 +        return;
 +    }
-+    if (!gate_obs_present(OBS_ODYSSEY_PROJECTION) ||
-+        !gate_obs_present(OBS_ODYSSEY_PACKED_SIZE) ||
-+        !gate_obs_present(OBS_ODYSSEY_CANVAS_SIZE) ||
-+        !gate_obs_present(OBS_ODYSSEY_CROP_SIZE)) {
++    if (!display_profile_gates_present()) {
 +        LOG("[RED] Odyssey display choice is missing one or more paired main gates; keeping stock");
 +        return;
 +    }
@@ -1056,6 +2057,14 @@ index 0000000..b4e0e85
 +
 +    g_display.config = config;
 +    g_display.active = 1;
++    const char *trace_request = getenv("DM_ODYSSEY_PROJECTION_TRACE");
++    if (trace_request && !strcmp(trace_request, "1")) {
++        g_display.trace_projections = 1;
++        LOG("Odyssey projection trace enabled; first samples are address-free and bounded to %u receivers",
++            DM_ODYSSEY_PROJECTION_TRACE_OBJECT_CAP);
++    } else if (trace_request && strcmp(trace_request, "0") && strcmp(trace_request, "stock")) {
++        LOG("Odyssey projection trace remains off: DM_ODYSSEY_PROJECTION_TRACE accepts only 1, 0, or stock");
++    }
 +    atomic_store_explicit(&g_published_viewport,
 +                          (uint64_t)config.width | ((uint64_t)config.height << 32),
 +                          memory_order_release);
@@ -1174,10 +2183,10 @@ index 0000000..c40e232
 +}
 diff --git a/dm/host/tests/t_odyssey_display_asset.c b/dm/host/tests/t_odyssey_display_asset.c
 new file mode 100644
-index 0000000..d2040b2
+index 0000000..ba46ced
 --- /dev/null
 +++ b/dm/host/tests/t_odyssey_display_asset.c
-@@ -0,0 +1,400 @@
+@@ -0,0 +1,466 @@
 +#include "dm.h"
 +#include "dm_obs_frame.h"
 +#include "dm_odyssey_display.h"
@@ -1203,6 +2212,7 @@ index 0000000..d2040b2
 +
 +static const char *g_case;
 +static int g_missing_gate;
++static int g_no_display_gates;
 +static int g_opmode = 1;
 +static int g_highres_profile;
 +static const char *g_selected_aspect = "4x3";
@@ -1214,6 +2224,7 @@ index 0000000..d2040b2
 +int dm_opmode(void) { return g_opmode; }
 +int gate_obs_present(int id) {
 +    if (id <= 0 || id >= OBS_MAX) return 0;
++    if (g_no_display_gates && id >= OBS_ODYSSEY_PROJECTION && id <= OBS_ODYSSEY_CROP_SIZE) return 0;
 +    if (id == g_missing_gate) return 0;
 +    return id < OBS_ODYSSEY_RT_HEAP || g_highres_profile;
 +}
@@ -1327,6 +2338,8 @@ index 0000000..d2040b2
 +    _Alignas(16) uint64_t frame[DM_OBS_FRAME_BYTES / sizeof(uint64_t)];
 +    uint8_t before[DM_OBS_FRAME_BYTES];
 +    memset(frame, 0x6b, sizeof frame);
++    assert(dm_obs_frame_write_s(frame, sizeof frame, 0, 0.1f));
++    assert(dm_obs_frame_write_s(frame, sizeof frame, 1, 1000.0f));
 +    assert(dm_obs_frame_write_s(frame, sizeof frame, 2, 1.125f));
 +    assert(dm_obs_frame_write_s(frame, sizeof frame, 3, 16.0f / 9.0f));
 +    memcpy(before, frame, sizeof before);
@@ -1345,6 +2358,8 @@ index 0000000..d2040b2
 +
 +    // An already-target projection is outside this callback's 16:9 source contract.
 +    memset(frame, 0x37, sizeof frame);
++    assert(dm_obs_frame_write_s(frame, sizeof frame, 0, 0.1f));
++    assert(dm_obs_frame_write_s(frame, sizeof frame, 1, 1000.0f));
 +    assert(dm_obs_frame_write_s(frame, sizeof frame, 2, 0.75f));
 +    assert(dm_obs_frame_write_s(frame, sizeof frame, 3, target_aspect));
 +    memcpy(before, frame, sizeof before);
@@ -1354,11 +2369,43 @@ index 0000000..d2040b2
 +    // Other valid source aspects, such as a square offscreen projection, are
 +    // also left alone by the 16:9-only transform.
 +    memset(frame, 0x4c, sizeof frame);
++    assert(dm_obs_frame_write_s(frame, sizeof frame, 0, 0.1f));
++    assert(dm_obs_frame_write_s(frame, sizeof frame, 1, 1000.0f));
 +    assert(dm_obs_frame_write_s(frame, sizeof frame, 2, 0.75f));
 +    assert(dm_obs_frame_write_s(frame, sizeof frame, 3, 1.0f));
 +    memcpy(before, frame, sizeof before);
 +    g_callbacks[OBS_ODYSSEY_PROJECTION](frame, 0);
 +    assert(memcmp(before, frame, sizeof before) == 0);
++}
++
++static void projection_trace_sample(uint64_t receiver) {
++    _Alignas(16) uint64_t frame[DM_OBS_FRAME_BYTES / sizeof(uint64_t)];
++    uint8_t before[DM_OBS_FRAME_BYTES];
++    memset(frame, 0xa5, sizeof frame);
++    frame[0] = receiver;
++    assert(dm_obs_frame_write_s(frame, sizeof frame, 0, 0.1f));
++    assert(dm_obs_frame_write_s(frame, sizeof frame, 1, 1000.0f));
++    assert(dm_obs_frame_write_s(frame, sizeof frame, 2, 1.125f));
++    assert(dm_obs_frame_write_s(frame, sizeof frame, 3, 16.0f / 9.0f));
++    memcpy(before, frame, sizeof before);
++    g_callbacks[OBS_ODYSSEY_PROJECTION](frame, 0);
++    assert(frame_equal_except(before, (const uint8_t *)frame, sizeof before,
++                              DM_OBS_FRAME_Q_OFFSET + 2 * DM_OBS_FRAME_Q_STRIDE, sizeof(float),
++                              DM_OBS_FRAME_Q_OFFSET + 3 * DM_OBS_FRAME_Q_STRIDE, sizeof(float)));
++}
++
++static void test_projection_trace_bounds(void) {
++    // Invalid receiver is counted but does not consume one of the receiver slots.
++    projection_trace_sample(0);
++    // The callback's three existing samples occupy slots 1..3. Fill the table
++    // with 29 more receivers, then exercise a repeated receiver and one overflow.
++    for (uint64_t i = 0; i < 29; i++) projection_trace_sample(UINT64_C(0x1000) + i);
++    for (unsigned i = 0; i < 128; i++) projection_trace_sample(UINT64_C(0x1000));
++    projection_trace_sample(UINT64_C(0x2000));
++
++    // Cross nine periodic boundaries: only the configured first eight may log.
++    for (unsigned i = 0; i < 9u * 4096u; i++)
++        projection_trace_sample(UINT64_C(0x1000));
 +}
 +
 +static void test_memory_callback(int id, unsigned reg, uint32_t expected) {
@@ -1417,6 +2464,25 @@ index 0000000..d2040b2
 +    if (!strcmp(g_case, "stock") || !strcmp(g_case, "stock-high")) {
 +        g_highres_profile = !strcmp(g_case, "stock-high");
 +        resolution = "stock"; four_three = "0";
++    } else if (!strcmp(g_case, "default-1080p")) {
++        resolution = NULL; four_three = "0";
++        g_selected_aspect = "16x9"; g_selected_preset = "1080p";
++    } else if (!strcmp(g_case, "default-1080p-4x3")) {
++        resolution = NULL; four_three = "1";
++        g_selected_aspect = "4x3"; g_selected_preset = "1080p";
++    } else if (!strcmp(g_case, "default-missing-gates")) {
++        resolution = NULL; four_three = "0";
++        g_missing_gate = OBS_ODYSSEY_CROP_SIZE;
++    } else if (!strcmp(g_case, "default-wrong-build")) {
++        resolution = NULL; four_three = "0";
++        strcpy(fake_main.build_id, "ffffffffffffffffffffffffffffffff");
++    } else if (!strcmp(g_case, "default-no-gates")) {
++        resolution = NULL; four_three = "0";
++        g_no_display_gates = 1;
++        g_selected_aspect = "16x9"; g_selected_preset = "1080p";
++    } else if (!strcmp(g_case, "projection-trace")) {
++        resolution = "1080p"; four_three = "1";
++        g_selected_aspect = "4x3"; g_selected_preset = "1080p";
 +    } else if (!strcmp(g_case, "invalid") || !strcmp(g_case, "invalid-high")) {
 +        g_highres_profile = !strcmp(g_case, "invalid-high");
 +        resolution = "2160p";
@@ -1464,12 +2530,19 @@ index 0000000..d2040b2
 +    assert(setenv("DM_ODYSSEY_NATIVE_PANEL", native_supported ? "1" : "0", 1) == 0);
 +    assert(setenv("DM_ODYSSEY_DISPLAY_ROOT", root, 1) == 0);
 +    assert(setenv("DM_ROMFS_OVERLAY", "/before/overlay", 1) == 0);
-+    assert(setenv("DM_ODYSSEY_RESOLUTION", resolution, 1) == 0);
++    if (!strcmp(g_case, "projection-trace"))
++        assert(setenv("DM_ODYSSEY_PROJECTION_TRACE", "1", 1) == 0);
++    else
++        assert(unsetenv("DM_ODYSSEY_PROJECTION_TRACE") == 0);
++    if (resolution) assert(setenv("DM_ODYSSEY_RESOLUTION", resolution, 1) == 0);
++    else assert(unsetenv("DM_ODYSSEY_RESOLUTION") == 0);
 +    assert(setenv("DM_ODYSSEY_4_3", four_three, 1) == 0);
 +
 +    const int has_invalid_config = !strcmp(g_case, "invalid") || !strcmp(g_case, "invalid-high") ||
 +                                   !strcmp(g_case, "bad-aspect") || !strcmp(g_case, "wrong-build") ||
 +                                   !strcmp(g_case, "missing-gates") || !strcmp(g_case, "handheld") ||
++                                   !strcmp(g_case, "default-missing-gates") ||
++                                   !strcmp(g_case, "default-wrong-build") ||
 +                                   !strcmp(g_case, "stock") || !strcmp(g_case, "stock-high") ||
 +                                   !strcmp(g_case, "native-unsupported") || !strcmp(g_case, "high-missing-pair");
 +    const int fd0_case = !strcmp(g_case, "fd0-manifest") || !strcmp(g_case, "fd0-asset");
@@ -1496,7 +2569,7 @@ index 0000000..d2040b2
 +
 +    dm_odyssey_display_init();
 +
-+    const int expected_active = !has_invalid_config && !fd0_case && !bad_hash &&
++    const int expected_active = !has_invalid_config && !g_no_display_gates && !fd0_case && !bad_hash &&
 +                                strcmp(g_case, "high-missing-asset") != 0;
 +    if (expected_active) {
 +        const int high = g_highres_profile;
@@ -1516,7 +2589,8 @@ index 0000000..d2040b2
 +        assert(strcmp(getenv("DM_ROMFS_OVERLAY"), expected_overlay) == 0);
 +
 +        dm_odyssey_display_config config;
-+        assert(dm_odyssey_display_policy_parse(resolution, four_three, &config));
++        assert(dm_odyssey_display_policy_parse(resolution ? resolution : "1080p",
++                                                four_three, &config));
 +        const float expected_aspect = (float)config.width / (float)config.height;
 +        assert(fabsf(dm_odyssey_display_aspect() - expected_aspect) < 1e-6f);
 +        assert(g_aspect_notifications == (fabsf(expected_aspect - 16.0f / 9.0f) > 0.0001f));
@@ -1538,6 +2612,7 @@ index 0000000..d2040b2
 +            g_callbacks[OBS_ODYSSEY_PROJECTION](frame, 0);
 +            assert(memcmp(before, frame, sizeof before) == 0);
 +        }
++        if (!strcmp(g_case, "projection-trace")) test_projection_trace_bounds();
 +        test_pool_extra(config.app_pool_extra_mib);
 +        if (high) {
 +            test_memory_callback(OBS_ODYSSEY_RT_HEAP, 0,
@@ -1978,10 +3053,10 @@ index 288bdf8..5a76083 100644
      setenv("DM_MSL_DIR", [res stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 0);
      setenv("DM_FONT_DIR", [dm stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
 diff --git a/dm/ios/tests/launcher_storage_check.swift b/dm/ios/tests/launcher_storage_check.swift
-index 6ee211b..f0d2ed3 100644
+index 6ee211b..b09ec73 100644
 --- a/dm/ios/tests/launcher_storage_check.swift
 +++ b/dm/ios/tests/launcher_storage_check.swift
-@@ -87,6 +87,19 @@ import Foundation
+@@ -87,6 +87,39 @@ import Foundation
          expect(launched.values["DM_OPMODE"] == "0" && d.string(forKey: "launcher.DM_OPMODE") == "1", "Reset then Play keeps the saved choice of a setting fixed at launch")
          unsetenv("DM_OPMODE"); setenv("DM_ENV_LAUNCH_KEYS", "", 1); d.removeObject(forKey: "launcher.DM_OPMODE")
          failed += checkLauncherLayout(LauncherModel(mac.settings, defaults: d), defaults: d)
@@ -1998,9 +3073,63 @@ index 6ee211b..f0d2ed3 100644
 +        resolution.values["DM_ODYSSEY_RESOLUTION"] = "stock"; resolution.apply()
 +        expect(d.string(forKey: "launcher.DM_ODYSSEY_RESOLUTION") == nil && String(cString: getenv("DM_ODYSSEY_RESOLUTION")) == "stock", "selecting the discrete slider default clears its saved value")
 +        unsetenv("DM_ODYSSEY_RESOLUTION")
++        let odyssey = try! JSONDecoder().decode(SettingsFile.self, from: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[3])))
++        let offered = odyssey.settings.filter { $0.env == "DM_ODYSSEY_RESOLUTION" }
++        expect(offered.count == 1 && offered[0].def == "1080p", "the packaged Odyssey default is 1080p")
++        let fresh = LauncherModel(offered, defaults: d)
++        expect(fresh.values["DM_ODYSSEY_RESOLUTION"] == "1080p", "an unset display selection follows the recommended default")
++        fresh.apply()
++        expect(d.object(forKey: "launcher.DM_ODYSSEY_RESOLUTION") == nil && String(cString: getenv("DM_ODYSSEY_RESOLUTION")) == "1080p", "the new default applies without creating a saved override")
++        for choice in ["native", "stock", "1440p"] {
++            d.set(choice, forKey: "launcher.DM_ODYSSEY_RESOLUTION")
++            let saved = LauncherModel(offered, defaults: d)
++            expect(saved.values["DM_ODYSSEY_RESOLUTION"] == choice, "the new default preserves the saved \(choice) selection")
++            saved.applySaved()
++            expect(String(cString: getenv("DM_ODYSSEY_RESOLUTION")) == choice && d.string(forKey: "launcher.DM_ODYSSEY_RESOLUTION") == choice, "skipping the launcher preserves and applies saved \(choice)")
++        }
++        setenv("DM_ENV_FILE_KEYS", "DM_ODYSSEY_RESOLUTION", 1); setenv("DM_ODYSSEY_RESOLUTION", "stock", 1)
++        let fixedDisplay = LauncherModel(offered, defaults: d)
++        fixedDisplay.applySaved()
++        expect(fixedDisplay.values["DM_ODYSSEY_RESOLUTION"] == "stock" && d.string(forKey: "launcher.DM_ODYSSEY_RESOLUTION") == "1440p", "an explicit env-file selection takes precedence without replacing the saved choice")
++        unsetenv("DM_ODYSSEY_RESOLUTION"); unsetenv("DM_ENV_FILE_KEYS")
++        d.removeObject(forKey: "launcher.DM_ODYSSEY_RESOLUTION")
          print("launcher storage: \(failed) failed")
          exit(failed == 0 ? 0 : 1)
      }
+diff --git a/dm/ios/tests/test_launcher_storage.py b/dm/ios/tests/test_launcher_storage.py
+index cf6a94e..4730a27 100644
+--- a/dm/ios/tests/test_launcher_storage.py
++++ b/dm/ios/tests/test_launcher_storage.py
+@@ -23,6 +23,8 @@ class LauncherStorageTests(unittest.TestCase):
+             (tmp / 'patched/main.fixups.tsv').write_text('# RENDER_SCALE\t1\n')   # the render-scale row, a range
+             with patch.dict(os.environ, {'GFXAPI': 'nvn'}), patch.object(settings.nacp, 'languages', return_value=['en-US', 'ja']):
+                 (tmp / 'launcher.json').write_text(json.dumps(settings.build('01007EF00011E000', tmp / 'patched', tmp / 'control.nacp')))
++                (tmp / 'launcher_odyssey.json').write_text(json.dumps(settings.build('0100000000010000', tmp / 'patched', tmp / 'control.nacp',
++                    capabilities={'ODYSSEY_DISPLAY_V1', 'ODYSSEY_DISPLAY_HIGHRES', 'ODYSSEY_DISPLAY_NATIVE_IPAD'})))
+                 with patch.dict(os.environ, {'SETTINGS_PLATFORM': 'mac'}):   # the Mac window's list: Display mode, the render scale's base size
+                     (tmp / 'launcher_mac.json').write_text(json.dumps(settings.build('01007EF00011E000', tmp / 'patched', tmp / 'control.nacp')))
+             exe = tmp / 'launcher_storage_check'
+@@ -30,7 +32,7 @@ class LauncherStorageTests(unittest.TestCase):
+                             '-o', str(exe), str(REPO / 'dm/ios/Sources/LauncherSettings.swift'), str(REPO / 'dm/ios/Sources/LauncherRow.swift'), str(REPO / 'dm/mac/Launcher.swift'),
+                             str(Path(__file__).with_name('launcher_layout_check.swift')), str(Path(__file__).with_name('launcher_storage_check.swift'))], capture_output=True, text=True, timeout=300)
+             self.assertEqual(compile_result.returncode, 0, compile_result.stdout + compile_result.stderr)
+-            r = subprocess.run([str(exe), str(tmp / 'launcher.json'), str(tmp / 'launcher_mac.json')], capture_output=True, text=True, timeout=60)
++            r = subprocess.run([str(exe), str(tmp / 'launcher.json'), str(tmp / 'launcher_mac.json'), str(tmp / 'launcher_odyssey.json')], capture_output=True, text=True, timeout=60)
+             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+             self.assertIn('launcher storage: 0 failed', r.stdout)
+ 
+diff --git a/dm/tools/impact_map.tsv b/dm/tools/impact_map.tsv
+index e0146e9..326e125 100644
+--- a/dm/tools/impact_map.tsv
++++ b/dm/tools/impact_map.tsv
+@@ -96,6 +96,7 @@ dm/gfx/tools/cpk.py	shader:stage:*	CRI archive input to shader scanning
+ dm/gfx/tools/vbf.py	shader:stage:*	Virtuos archive input to shader scanning
+ dm/gfx/tools/dmsh_mesh.py	shader:stage:gs	passthrough geometry composed into a mesh shader
+ dm/host/hle_fpslock.c	present:*	build-gated engine frame limits and dynamic resolution
++dm/host/hle_odyssey_display.c	api:nvn	Odyssey display callbacks require the exact main build and paired gates; conservatively review NVN consumers
+ dm/gfx/tools/mvgl.py	api:gl	MVGL archive input to OpenGL shader scanning
+ dm/gfx/tools/smash_arc.py	*:*	Smash archive input to shader and NRO scanning
+ dm/gfx/tools/uepak.py	shader:stage:*	Unreal archive input to shader scanning
 diff --git a/dm/tools/tests/run_obs_frame_native.py b/dm/tools/tests/run_obs_frame_native.py
 new file mode 100644
 index 0000000..d079600
@@ -2299,7 +3428,7 @@ index 0000000..d079600
 +if __name__ == "__main__":
 +    raise SystemExit(main())
 diff --git a/dm/tools/tests/test_launcher_settings.py b/dm/tools/tests/test_launcher_settings.py
-index cd43d2d..847a23a 100644
+index cd43d2d..6d4069f 100644
 --- a/dm/tools/tests/test_launcher_settings.py
 +++ b/dm/tools/tests/test_launcher_settings.py
 @@ -14,15 +14,15 @@ spec = importlib.util.spec_from_file_location('launcher_settings', ROOT / 'dm/ga
@@ -2330,10 +3459,10 @@ index cd43d2d..847a23a 100644
 +        rows = build(ODYSSEY, 'nvn', capabilities={'ODYSSEY_DISPLAY_V1'})
 +        resolution = rows['DM_ODYSSEY_RESOLUTION']
 +        self.assertEqual((resolution['kind'], resolution['control'], resolution['default'], resolution['section'], resolution['label']),
-+                         ('choice', 'slider', 'stock', 'Game', 'Resolution target'))
-+        self.assertEqual(resolution['options'], [['stock', 'Original (dynamic)'], ['720p', '720p'], ['900p', '900p'], ['1080p', '1080p']])
++                         ('choice', 'slider', '1080p', 'Game', 'Resolution target'))
++        self.assertEqual(resolution['options'], [['stock', 'Original (dynamic)'], ['720p', '720p'], ['900p', '900p'], ['1080p', '1080p (recommended)']])
 +        self.assertEqual(resolution['needs'], 'DM_OPMODE=1')
-+        self.assertEqual(resolution['note'], 'High targets use more render target and game heap memory. Stability and frame rate are unvalidated. Native output requires a 2732x2048 iPad panel.')
++        self.assertEqual(resolution['note'], '1080p is recommended for memory efficiency. Higher targets use more render target and game heap memory. Native output requires a 2732x2048 iPad panel.')
 +        aspect = rows['DM_ODYSSEY_4_3']
 +        self.assertEqual((aspect['kind'], aspect['default'], aspect['on'], aspect['off']), ('toggle', '0', '1', '0'))
 +        self.assertIn('Restart required', aspect['note'])
@@ -2344,7 +3473,7 @@ index cd43d2d..847a23a 100644
 +        self.assertEqual(conforms(listed, schema, schema), [])
 +
 +    def test_odyssey_resolution_options_follow_exact_packaged_capabilities(self):
-+        original = [['stock', 'Original (dynamic)'], ['720p', '720p'], ['900p', '900p'], ['1080p', '1080p']]
++        original = [['stock', 'Original (dynamic)'], ['720p', '720p'], ['900p', '900p'], ['1080p', '1080p (recommended)']]
 +        cases = [
 +            (set(), None),
 +            ({'ODYSSEY_DISPLAY_HIGHRES'}, None),
@@ -2364,7 +3493,7 @@ index cd43d2d..847a23a 100644
 +                    continue
 +                resolution = rows['DM_ODYSSEY_RESOLUTION']
 +                self.assertEqual(resolution['options'], options)
-+                self.assertEqual(resolution['default'], 'stock')
++                self.assertEqual(resolution['default'], '1080p')
 +                self.assertNotIn('[cap:', json.dumps(resolution))
 +                self.assertEqual(conforms({'schema': 1, 'game': ODYSSEY, 'settings': [resolution]}, schema, schema), [])
 +                self.assertEqual(rows['DM_ODYSSEY_4_3']['default'], '0')
@@ -2430,6 +3559,121 @@ index cd43d2d..847a23a 100644
  def conforms(value, node, root, at='$'):
      """The JSON Schema keywords launcher.schema.json uses (type, required, properties, items, enum, const, pattern, $ref, allOf with
      if / then), as a list of problems: enough to hold the written lists to the contract without a jsonschema package"""
+diff --git a/dm/tools/tests/test_nsp_chain.py b/dm/tools/tests/test_nsp_chain.py
+index e90778f..a54a0e6 100644
+--- a/dm/tools/tests/test_nsp_chain.py
++++ b/dm/tools/tests/test_nsp_chain.py
+@@ -1,8 +1,10 @@
+ """NSP script chain files (scripts/build_ipa_from_nsp.py chain_header, chain_tables): the one chain version header (dm/gfx/nvn/dmsh_chain.h) is written again when stale and left
+ alone when current, and the committed one is current; only the c1 / uniform extent tables that are missing (they are not committed) or do not name the library's stamp (its chain version
+-and profile inputs) are made (GitHub issue #78), none without a stamped library, and no step's reuse key counts them; no game files, keys or Xcode needed (temporary files only in a
++and profile inputs) are made (GitHub issue #78), none without a stamped library, and no step's reuse key counts them; the tools that make them read only the shader build's outputs
++(an exFAT drive's AppleDouble `._<name>` beside each, PR #555); no game files, keys or Xcode needed (temporary files only in a
+ temporary folder)."""
+ import importlib.util
++import json
+ import os
+ from pathlib import Path
+ import shutil
+@@ -118,5 +120,19 @@ class Tables(Base):
+         self.assertEqual([p.name for p in nsp.profile_files(types.SimpleNamespace(dir=self.tmp))], ['game.tsv', 'shader_map.tsv'])
+ 
+ 
++class TableTools(unittest.TestCase):
++    def test_appledouble_files_are_not_shaders(self):   # macOS writes a binary ._<name> beside each file on an exFAT / FAT drive; c1_guard.py read ._<key>_b.metal as UTF-8 and stopped
++        lib = Path(tempfile.mkdtemp()) / 'b-0123456789ab'; lib.mkdir(); self.addCleanup(shutil.rmtree, lib.parent)
++        key = '00112233aabbccdd'
++        (lib / f'{key}_b.metal').write_text('fragment float4 main0(constant cb& fp_c1) { int _5 = in.v; return (fp_c1)._m0[_5]; }\n')
++        (lib / f'{key}_b.json').write_text(json.dumps({'bindings': [{'kind': 'cbuf', 'reg': 0, 'msl_name': 'fp_c1'}]}))
++        for n in (f'{key}_b.metal', f'{key}_b.json', 'inputs.tsv'): (lib / ('._' + n)).write_bytes(b'\0\x05\x16\x07\0\x02\0\0' + b'\xa0' * 4088)   # not UTF-8, not JSON
++        for tool, table in (('c1_guard.py', 'c1_full.tsv'), ('cb_extent.py', 'cb_extent.tsv')):
++            with self.subTest(tool=tool):
++                r = subprocess.run([sys.executable, REPO / 'dm/gfx/tools' / tool, lib, lib.parent / table], capture_output=True, text=True)
++                self.assertEqual(r.returncode, 0, r.stderr)
++        self.assertEqual((lib.parent / 'c1_full.tsv').read_text().splitlines()[1:], [key])   # the shader itself is still checked
++
++
+ if __name__ == '__main__':
+     unittest.main()
+diff --git a/dm/tools/tests/test_shader_toolchain_cache.py b/dm/tools/tests/test_shader_toolchain_cache.py
+index 669079f..c5fb8fb 100644
+--- a/dm/tools/tests/test_shader_toolchain_cache.py
++++ b/dm/tools/tests/test_shader_toolchain_cache.py
+@@ -34,7 +34,7 @@ class ShaderCache(unittest.TestCase):
+     def setUp(self):
+         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+         root = Path(self.tmp.name)
+-        self.ns: dict[str, Any] = dict(hashlib=hashlib, os=os, json=json, re=re, threading=threading,
++        self.ns: dict[str, Any] = dict(hashlib=hashlib, os=os, json=json, re=re, threading=threading, dmsh_mtlcache=dmsh_mtlcache,
+                        subprocess=subprocess, dmsh_chain=dmsh_chain, SPIRV_CROSS='converter',
+                        XC=['--msl'], MAC_RECORD='mac flags', IOSOUT=None, TARGETS={'mac'},
+                        ios_metal=types.SimpleNamespace(RECORD='ios flags'), METAL_FP='tested Metal and SDK',
+@@ -205,8 +205,9 @@ class MetalPrefill(unittest.TestCase):
+ 
+     def earlier_libraries(self, third_identity):
+         for i in range(3):
+-            stem = f'key{i}_b'; src = f'MSL {i}'.encode()
++            stem = f'{i:016x}_b'; src = f'MSL {i}'.encode()
+             (self.old / (stem + '.metal')).write_bytes(src)
++            (self.old / ('._' + stem + '.metal')).write_bytes(b'\0\x05\x16\x07' + b'\xa0' * 4092)   # an exFAT drive's AppleDouble: no shader of its own
+             (self.old / (stem + '.metallib')).write_bytes(b'TESTED ' + src if i < 2 else b'WRONG OVERRIDE LIBRARY')
+             meta = {'chain_metal': 'flags', 'stage': 'ps', 'chain_compiler': self.cache.ident['mac'].hex()}
+             if i == 2:
+@@ -221,12 +222,12 @@ class MetalPrefill(unittest.TestCase):
+                 self.earlier_libraries(identity)
+                 self.cache.fill(str(self.old))
+                 result = self.root / 'result.metallib'
+-                self.cache.compile('mac', str(self.old / 'key2_b.metal'), str(result))
++                self.cache.compile('mac', str(self.old / f'{2:016x}_b.metal'), str(result))
+                 self.assertEqual(result.read_bytes(), b'TESTED MSL 2')
+ 
+     def test_matching_compiler_libraries_still_prefill(self):
+         self.earlier_libraries(self.cache.ident['mac'].hex())
+-        (self.old / 'key2_b.metallib').write_bytes(b'TESTED MSL 2')
++        (self.old / f'{2:016x}_b.metallib').write_bytes(b'TESTED MSL 2')
+         self.cache.fill(str(self.old))
+         self.assertEqual(self.cache.stats['mac', 'filled'], 3)
+ 
+diff --git a/docs/agents/symptoms.md b/docs/agents/symptoms.md
+index bb67a76..b643b5f 100644
+--- a/docs/agents/symptoms.md
++++ b/docs/agents/symptoms.md
+@@ -13,6 +13,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+ - starting a Mac app through a front end with unchanged settings enables the encode thread, and can disable Metal 4 pipelines and the pipeline archive; starting the same app from Finder keeps the host's defaults. → [A Mac front end's default settings change Metal execution paths](../reference/packing.md#a-mac-front-ends-default-settings-change-metal-execution-paths)
+ - `decompress NSZ` stops immediately with `nsz: error: unrecognized arguments: --keys …`. → [NSZ decompression rejects `--keys`](../reference/packing.md#nsz-decompression-rejects---keys)
+ - the extraction of a game whose base is an XCI that also carries its update (a "1G+1U" dump) stops with `[RED] nx_extract exit code -6`. `extract_v<version>.log` lists the update's build IDs even for the base game alone, then ends in an unhandled exception from the RomFS (`ResultFsNonRealDataVerificationFailed (2002-4604): Hash error!` from `RomFsFileSystem..ctor`, or `ArgumentException` / `InvalidOperationException` from the patch layers). → [A cartridge dump with its update on it extracts the update as the base game](../reference/packing.md#a-cartridge-dump-with-its-update-on-it-extracts-the-update-as-the-base-game)
++- a build on exFAT or FAT finishes its Metal libraries, then `c1_guard.py` stops with a UTF-8 decoding error; Metal cache prefill may reject an otherwise valid folder. → [AppleDouble files are not shader build outputs](../reference/packing.md#appledouble-files-are-not-shader-build-outputs)
+ 
+ ## Rewriter
+ 
+@@ -451,6 +452,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+ - read-only depth/stencil attachments are written back after every pass, and the periodic unwritten-store savings counter remains zero with the default configuration. → [Unwritten attachment stores without lookahead](../reference/rendering.md#unwritten-attachment-stores-without-lookahead)
+ - array-layer PNGs differ, but their `DM_NVN_SNAPRAW` files contain layer zero or overwrite one another. → [Raw render-target snapshots read the wrong array layer](../reference/rendering.md#raw-render-target-snapshots-read-the-wrong-array-layer)
+ - raw HDR capture has an undersized row or buffer for formats such as RG32Float and RGBA16Unorm; narrow formats also carry unnecessary padding. → [Raw snapshots guessed four bytes for wider pixel formats](../reference/rendering.md#raw-snapshots-guessed-four-bytes-for-wider-pixel-formats)
++- writable storage bindings of size zero set the submission-wide unknown-write flag, refusing partial uniform shadows even in a different pool and ending their render passes. → [A size-zero storage write needlessly invalidates every partial uniform shadow](../reference/rendering.md#a-size-zero-storage-write-needlessly-invalidates-every-partial-uniform-shadow)
+ 
+ ## Shaders
+ 
+@@ -556,6 +558,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+ - geometry vertex-capture passes consume substantial GPU time before geometry compute or depth rasterization. → [Geometry capture initializes only missing words](../reference/shaders.md#geometry-capture-initializes-only-missing-words)
+ - the first resolution of a normal two-stage program loads its missing vertex and pixel libraries serially on the submit thread. → [Opt-in joined loading for a demanded cold vertex and pixel pair](../reference/shaders.md#opt-in-joined-loading-for-a-demanded-cold-vertex-and-pixel-pair)
+ - Clang's AST gives `vs` an `__unsafe_unretained` type but makes `fs` `__strong` in a comma-separated `NvShader *vs, *fs` declaration. At `-O2`, a minimal class-owner fixture emits one retain/release pair for the fragment local; the equivalent split, explicitly borrowed declarations emit none. → [ARC-qualified shader locals in the pipeline helpers](../reference/shaders.md#arc-qualified-shader-locals-in-the-pipeline-helpers)
++- a cold first-use frame can overlap library loading with pipeline prediction, while the earlier prefetch log had no frame number and was capped at eight batches per process. Window totals could not assign a reported batch to the hitch that caused it. → [Frame-attributed timing for future shader prefetch](../reference/shaders.md#frame-attributed-timing-for-future-shader-prefetch)
+ 
+ ## Game state
+ 
+diff --git a/docs/env_switches.tsv b/docs/env_switches.tsv
+index 8ed3fdd..125a1ac 100644
+--- a/docs/env_switches.tsv
++++ b/docs/env_switches.tsv
+@@ -174,6 +174,7 @@ DM_NVN_WAITS	diagnostic	`=1` turns on the wait ledger: every place a host or gam
+ DM_NVN_XV	switch	`0` turns off the cross-submission attachment validity ledger, which skips write-backs of colour attachments cleared before their next use (on by default, only with `DM_NVN_TBDR` on)
+ DM_NVN_ZBLOCK	diagnostic	`=1` logs (`[zb]`) the all-zero blocks per level of each ASTC texture uploaded on the CPU (magenta when drawn); `=<folder>` also writes the raw storage of the first one per format and size
+ DM_NVN_ZSKIP	switch	`0` turns off the zero-source skip, which drops a draw whose fragment shader is proven to write 0 over targets already 0 (on by default, only with `DM_NVN_TBDR` on)
++DM_ODYSSEY_PROJECTION_TRACE	diagnostic	`1` logs address-free, bounded incoming projection samples after the exact Odyssey display profile validates; default off. Diagnostic only; does not identify UI ownership or change the FOV policy.
+ DM_OE_SCRIPT	diagnostic	Scripted applet state changes at given seconds, `key=value@seconds,…` with keys `focus`, `opmode` and `bg` (`bg=1` / `bg=0` run the whole background round trip), e.g. `bg=1@20,bg=0@25`
+ DM_OODLE_HOST	path	The Mac host binary that `shader_split.py` runs in its Oodle tool mode to decode Trinity packs (`ONEPACK` files); set by the NSP script
+ DM_OODLE_JOB	path	`=<job file>`: the host runs the game's own Oodle decoder on every record of the job file right before `nnMain`, writes `<job file>.out` and exits (Unreal shader archives)
 diff --git a/docs/frontends.md b/docs/frontends.md
 index a22b941..9ce7b24 100644
 --- a/docs/frontends.md
@@ -2498,3 +3742,66 @@ index 0000000..f6b4800
 +## Fixture status
 +
 +The native fixture compiles the actual `_dm_gate` body extracted from `dm/host/entry.S`, and separately exercises the verified projection-entry `STP` stack save. Its generated assembly now copies `sp` into a general register before register-form subtraction/comparison. Local Windows Zig cross-assembly to an ARM64 Mach-O object passed; the fixture was not executed on an Apple ARM64 machine.
+diff --git a/docs/reference/frame-rate.md b/docs/reference/frame-rate.md
+index 8ba819b..d31434b 100644
+--- a/docs/reference/frame-rate.md
++++ b/docs/reference/frame-rate.md
+@@ -270,6 +270,6 @@ Frame pacing: the host's frame step, engine frame limiters, present intervals an
+ 
+ - **Symptom:** a long-frame diagnostic's combined creation time exceeds the distinct pipeline and shader-library work it is meant to describe.
+ - **Cause:** the inclusive pipeline timer includes prediction. Prediction's parallel prefetch and direct shader loads also increment the library timer, so adding both counters repeats their nested interval. The separate window summaries intentionally retain inclusive timings and must not be summed.
+-- **Fix:** both predictor call sites use one accounting wrapper. It retains inclusive counters and records the nested library subset. Long-frame `in all` and TSV `@make_ms` use library plus pipeline minus nested library time. `@lib_ms`, `@pso_inclusive_ms` and `@predict_lib_ms` expose the components. Invalid deltas or overlap produce an explicit unknown value, never unsigned underflow or a fabricated zero. Rendering, prediction order and caches are unchanged.
+-- **Check:** `test_nvn_timing.py` exercises the actual pure-C accounting with a fake clock/predictor, nested and outside loads, repeated snapshots, overflow and invalid counters. It also checks both runtime call sites and the TSV wiring. This corrects measurement, not frame rate.
+-- **Found on:** the [Odyssey iPad audit](../../dm/games/0100000000010000/README.md#found-on-this-game). Old per-frame totals cannot be corrected from nearby untagged prefetch messages; only window-level overlap bounds are available.
++- **Fix:** both predictor call sites use one accounting wrapper. It retains inclusive counters and records the nested library subset. Long-frame `in all` and TSV `@make_ms` use library plus pipeline minus nested library time. `@lib_ms`, `@pso_inclusive_ms` and `@predict_lib_ms` expose those components. Per-frame `@predict_ms` records inclusive look-ahead time; `@prefetch_batches`, `@prefetch_keys`, `@prefetch_libs`, `@prefetch_wall_ms` and `@prefetch_item_ms` separate its synchronous future-library batch. The existing `@predict_lib_ms` boundary is unchanged; the new batch wall covers only `dispatch_apply` until all jobs return. Item time sums per-key `shader_load` and optional pulling-entry elapsed intervals, which overlap and are not CPU time. Invalid deltas remain unknown, never unsigned underflow or a fabricated zero. Rendering, prediction order, worker limits and caches are unchanged.
++- **Check:** `test_nvn_timing.py` exercises the pure-C accounting with synthetic timing, including overlapping per-key intervals, invalid counters, the runtime snapshot wiring and all TSV rows. This adds attribution, not a frame-rate fix.
++- **Found on:** the [Odyssey iPad audit](../../dm/games/0100000000010000/README.md#found-on-this-game). Earlier captures cannot be retroactively tagged; new `shader prefetch` lines include their frame, and new TSV captures can match batch wall time to individual frames.
+diff --git a/docs/reference/packing.md b/docs/reference/packing.md
+index 36bc7cb..03669d3 100644
+--- a/docs/reference/packing.md
++++ b/docs/reference/packing.md
+@@ -74,3 +74,13 @@
+ - **Cause:** the XCI's secure partition holds the update's NCAs beside the base game's, and the update's Program NCA has the program's title ID too. `nx_extract` took the first Program NCA of the lowest title ID as the base, which is the update's when the dump lists it first. Its data section is a patch (BKTR) over the base RomFS, so it cannot be read alone or under another patch. The ExeFS still opens, with the update's build IDs, because an update's code section is complete. The Control NCA (display version, icon) was also whichever of the two came last.
+ - **Fix:** `dm/tools/nx_extract/Program.cs` `OpenNsp` reads the base package's content metas (`*.cnmt` in its Meta NCAs) and keeps only the NCAs that its Application content meta lists, and prints how many it left out. When none of them is a Program NCA (NCA files renamed, so their names are not content IDs), it prints a `[RED]` line and reads every NCA as before. An NSP or a base-only XCI keeps every NCA but its meta NCA, so it extracts as before (Balatro's NSPs and Monster Hunter Rise's XCI give identical manifests). The update is still taken from the update NSP in the folder; the one on the cartridge is not used, so an XCI alone packs the base game's version.
+ - **Found on:** [The Legend of Zelda: Tears of the Kingdom](../../dm/games/0100F2C0115B6000/README.md), a 1G+1U XCI (base v0 with update 1.4.3, whose 524 MB Program NCA is listed before the base's 17.1 GB one) beside the 1.4.3 update NSP ([PR #311](https://github.com/seedds/nxnative/pull/311)). Reproduced with a package of Balatro's update NSP followed by its base NSP: the base alone and the base with the update now give the same manifests and control data as the separate NSPs. Applies to any game's XCI that carries its update.
++
++## Shader build outputs
++
++### AppleDouble files are not shader build outputs
++
++- **Symptom:** a build on exFAT or FAT finishes its Metal libraries, then `c1_guard.py` stops with a UTF-8 decoding error; Metal cache prefill may reject an otherwise valid folder.
++- **Cause:** macOS writes binary `._<name>` sidecars. Suffix-only enumeration treated those files as shaders or reflection records.
++- **Fix:** table generation and Metal prefill accept only the shader builder's hexadecimal-key output names. This ports [upstream 9791d74](https://github.com/seedds/nxnative/commit/9791d74c67f4811f839331b2dbcfa906a3a9291c), retaining this fork's Windows copy handling. The tools are outside the translation-chain identity; no runtime shader semantics, library identity or existing cache files change.
++- **Check:** synthetic invalid UTF-8 sidecars are ignored while the real shader still enters its table, and compatible libraries still prefill. No game rebuild is needed to test the enumeration.
++- **Found on:** upstream PR #555; audited during the [Odyssey iPad follow-up](../../dm/games/0100000000010000/README.md#found-on-this-game). This is build-tool robustness, not a bloom or gameplay-stutter fix.
+diff --git a/docs/reference/rendering.md b/docs/reference/rendering.md
+index 488eb0d..77b2067 100644
+--- a/docs/reference/rendering.md
++++ b/docs/reference/rendering.md
+@@ -950,3 +950,10 @@ Digimon Story Cyber Sleuth: Complete Edition (Media.Vision's MVGL engine, SDK 6.
+ - **Fix:** SNAPRAW uses `mtl_pf_bytes`. Unsupported formats and failed readback allocation skip only the raw capture and leave the following PNG path available. The game renderer, texture allocation policy and shader formats do not change.
+ - **Check:** the native fake-copy fixture injects both actual source helpers and independently expects 8 bytes for RG32Float/RGBA16Unorm/RGBA16Float, 1 for R8Unorm, and 16 for RGBA32Float. It checks header and payload lengths; unsupported formats must allocate nothing and create no raw file.
+ - **Found on:** the [Odyssey iPad lighting audit](../../dm/games/0100000000010000/README.md#found-on-this-game). Source-confirmed diagnostic error; it does not establish that the game renders those formats incorrectly.
++### A size-zero storage write needlessly invalidates every partial uniform shadow
++
++- **Symptom:** writable storage bindings of size zero set the submission-wide unknown-write flag, refusing partial uniform shadows even in a different pool and ending their render passes.
++- **Cause:** the write tracker treated a known Metal buffer with unspecified binding size as a write anywhere, and kept large writes only through a bounded page set.
++- **Fix:** port [upstream f293a70](https://github.com/seedds/nxnative/commit/f293a70fd6c2fc820473a7e30767fdf49b8e6e7c): track the remaining bytes of the resolved buffer, retain large writes as bounded intervals, and forward those intervals with the submission fence. Merge all overlapping intervals; overflow, unknown sizes and exhausted capacity keep the conservative global fallback. Shader libraries, PSO keys and cache identities are unchanged.
++- **Check:** the production helpers extracted into a native C fixture pass 45 assertions for pool separation, boundary hits, transitive merging, overflow/capacity, reports, reset and fence forwarding. The full host must also compile; this fixture is not a GPU or game test.
++- **Found on:** upstream Breath of the Wild; the same faulty paths are present in the [Odyssey iPad host audit](../../dm/games/0100000000010000/README.md#found-on-this-game). No Odyssey frame-time gain or bloom correction is established. Compare the same route and partial-shadow refusal counters; keep expensive `DM_NVN_UBP_CHECK` validation separate from performance runs.
+diff --git a/docs/reference/shaders.md b/docs/reference/shaders.md
+index 37cd629..d5a49be 100644
+--- a/docs/reference/shaders.md
++++ b/docs/reference/shaders.md
+@@ -989,3 +989,11 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
+ - **Fix:** `pso_get_` and `pso_predict_rest_` declare the two shader pointers separately and explicitly borrow both. The cache and program owners remain unchanged.
+ - **Check:** `test_nvn_arc_ownership.py` extracts the actual declarations, checks the joined control and production AST types, and compares optimized IR for the local ARC pair. It needs no Metal device. This proves only the minimal fixture's compiler traffic; the complete host translation unit and device frame times were not measured.
+ - **Found on:** the [Odyssey iPad first-use source audit](../../dm/games/0100000000010000/README.md#found-on-this-game). No first-use hitch cause or device performance gain is established.
++
++### Frame-attributed timing for future shader prefetch
++
++- **Symptom:** a cold first-use frame can overlap library loading with pipeline prediction, while the earlier prefetch log had no frame number and was capped at eight batches per process. Window totals could not assign a reported batch to the hitch that caused it.
++- **Cause:** `shader_prefetch_rest` synchronously waits for `dispatch_apply` to load distinct future libraries, then `pso_predict_rest` scans the rest of the submission and schedules a bounded number of pipeline builds. The per-frame pipeline counters retained only aggregate library/PSO time.
++- **Fix:** `@predict_ms` and `@predict_calls` record look-ahead per frame. `@prefetch_batches`, `@prefetch_keys`, `@prefetch_libs` and `@prefetch_wall_ms` identify dispatched batches (two or more missing keys) and the `dispatch_apply` wall interval; one-key cases keep the ordinary demand path. `@prefetch_item_ms` sums per-key elapsed shader-load and optional pulling-entry intervals, which can overlap and are not CPU time. The existing `@predict_lib_ms` accounting boundary is unchanged; the new wall counter isolates only the parallel dispatch interval. The existing bounded prefetch log includes the current frame. No cache key, persisted list, prediction order or worker policy changes.
++- **Check:** `test_nvn_timing.py` exercises synthetic frame deltas, including item elapsed time greater than batch wall, and checks the production snapshot/TSV wiring. This is instrumentation; a matched device capture is still needed to establish which phase causes a particular hitch.
++- **Found on:** the [Odyssey iPad first-use audit](../../dm/games/0100000000010000/README.md#found-on-this-game); see [nested prediction timing](frame-rate.md#nested-prediction-libraries-counted-twice-in-long-frame-totals).

@@ -1,11 +1,11 @@
 {
-  "source_local_commit": "c8edbcf7038bae421bd391fcf27f0e28e29f1e67",
+  "source_local_commit": "8e404c5291f211fdbb76ff73ab96494111986f99",
   "base_local_commit": "ff01d62f72a70f51657b70bcd7c5bd3809163dc0",
-  "patch_sha256": "5a74e8fc5a5a003498cd2be733db6d5ee163bf7e06da2d8781b85d1e7bec25db",
+  "patch_sha256": "4943978c1b6c40b0636e665ae80658bef2ff63975dd7af6ea073078a50ff84d7",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
-      "normalized_sha256": "856292e987ae774b56ee64dd867f509e028809cc90dcfc9835442fe6094a778b"
+      "normalized_sha256": "7b01d6dd78ed06405239295fde19253f60142da9e2afef5175b3008769edffb5"
     },
     {
       "path": "dm/games/settings.py",
@@ -13,7 +13,51 @@
     },
     {
       "path": "dm/games/settings.tsv",
-      "normalized_sha256": "294692b66c2237faa577cf5a0ae8ebaa2818a4f82acb6932ac0940b856d65fda"
+      "normalized_sha256": "1aa08bae94cd1593f45741fd3a6fccec3befd7d5bfc9415b4c738da656e26b1f"
+    },
+    {
+      "path": "dm/gfx/nvn/hle_nvn.c",
+      "normalized_sha256": "a9f776660aefb348861ab4de9a54389668088b2be126d9cc4f381509ce8e3aea"
+    },
+    {
+      "path": "dm/gfx/nvn/nvn_mtl.h",
+      "normalized_sha256": "17475d1ac8f1f0f92c668f2530ab7e5b52637130eb9d7e908c1b749d19afa460"
+    },
+    {
+      "path": "dm/gfx/nvn/nvn_mtl.m",
+      "normalized_sha256": "9221ffd99e8652165422e8737edf5caee7583642774d84510362d1bc68774178"
+    },
+    {
+      "path": "dm/gfx/nvn/nvn_timing.h",
+      "normalized_sha256": "1928c00a0d6c62f2fffee881eee717c1f11cd1026e81973d487daa3582ca7091"
+    },
+    {
+      "path": "dm/gfx/tests/nvn_timing_native.c",
+      "normalized_sha256": "ca1942e36ebae5683d3068ee0232750ff0ab3d8149b98931bada991b4daef593"
+    },
+    {
+      "path": "dm/gfx/tests/run_nvn_sbw_native.py",
+      "normalized_sha256": "328f7f6c445490c46eff0d405868898fb6511ee3bda6ca09e15666c2f5a4684d"
+    },
+    {
+      "path": "dm/gfx/tests/test_nvn_sbw.py",
+      "normalized_sha256": "c2408e7e8e880bf9a7b78eb27bab8ebd7a1f266225866e71345c4e9a729f67dd"
+    },
+    {
+      "path": "dm/gfx/tests/test_nvn_timing.py",
+      "normalized_sha256": "23889240c32c5be92efc7761a7e52300367d3304a77befadd3f26b6f709e7ec8"
+    },
+    {
+      "path": "dm/gfx/tools/c1_guard.py",
+      "normalized_sha256": "60fee6f681232b615f268d138c234f0d8b8eeee2a4f70da2a38c03f492a35d61"
+    },
+    {
+      "path": "dm/gfx/tools/cb_extent.py",
+      "normalized_sha256": "d4417ac4fb1228976b68a6a11a1666779ac0e6b2420aa87d42c94e67731e3b29"
+    },
+    {
+      "path": "dm/gfx/tools/dmsh_mtlcache.py",
+      "normalized_sha256": "099fa7056664a61f4b98eb8cd3a668f4a83ccc74f5c38b609249c2659df008dc"
     },
     {
       "path": "dm/host/Makefile",
@@ -53,7 +97,7 @@
     },
     {
       "path": "dm/host/hle_odyssey_display.c",
-      "normalized_sha256": "250f9fe0fa0e56e0374ebe69c7760ed09a2af095b0a4909582c85430cd9e6de0"
+      "normalized_sha256": "c334b3534f6638833024cfcbfd34980d0a3adc61c2069ca96bee162356382937"
     },
     {
       "path": "dm/host/hle_svc.c",
@@ -69,7 +113,7 @@
     },
     {
       "path": "dm/host/tests/t_odyssey_display_asset.c",
-      "normalized_sha256": "1acf722e137bffb40fba7c8e481922693bd67406bca3dbbd94fec2423a2d575b"
+      "normalized_sha256": "12627eb1536be3375e7a49bde1e601cb6cef474cdef55d62a2bf335ab2c1610a"
     },
     {
       "path": "dm/host/tests/t_odyssey_display_policy.c",
@@ -101,7 +145,15 @@
     },
     {
       "path": "dm/ios/tests/launcher_storage_check.swift",
-      "normalized_sha256": "c8ee4d4ed1b79275fb173b2a6c07bb06b4ef6c5110719ccb6b88fe59988a464b"
+      "normalized_sha256": "16531f0d2e0f17808e912ee885cc2e49772175dccc96427293399ce7b893a142"
+    },
+    {
+      "path": "dm/ios/tests/test_launcher_storage.py",
+      "normalized_sha256": "43f823b3ac5f8af618c2235dd6c1c445100445de641ef859d3bde3d6d3939fbb"
+    },
+    {
+      "path": "dm/tools/impact_map.tsv",
+      "normalized_sha256": "2e2a78a298ef902944d61119bec72a9bd351a44ccfd71e8cc94d18aa60e3e857"
     },
     {
       "path": "dm/tools/tests/run_obs_frame_native.py",
@@ -109,7 +161,23 @@
     },
     {
       "path": "dm/tools/tests/test_launcher_settings.py",
-      "normalized_sha256": "e8f749f6c6517553b3f2e4c3e2e86f62315fa23c5f4ce700e0df74452251d650"
+      "normalized_sha256": "b917914d19642de5f4601900a9426e996edfc376c559563099828374545b07d2"
+    },
+    {
+      "path": "dm/tools/tests/test_nsp_chain.py",
+      "normalized_sha256": "af6092213c52729515c989513e3a74e32090be00939c196da5e3c6cc86b402b1"
+    },
+    {
+      "path": "dm/tools/tests/test_shader_toolchain_cache.py",
+      "normalized_sha256": "156f9ef314625df5b95b4d44237e60793059ce454c21e64f8e106ff07e07968d"
+    },
+    {
+      "path": "docs/agents/symptoms.md",
+      "normalized_sha256": "a5a38e754086474af677254e73d19653bb90065a74b51dad1412ef3693e42805"
+    },
+    {
+      "path": "docs/env_switches.tsv",
+      "normalized_sha256": "64422b991a04dbb1ae3e7d9c3cf535535c0c833a8847cdd6ff6f13db9cb1596e"
     },
     {
       "path": "docs/frontends.md",
@@ -122,6 +190,22 @@
     {
       "path": "docs/projection-set-entry-observer-plan.md",
       "normalized_sha256": "87d1e7acfc56a8beda5d6465ce4c283986ebf7daecc1bec4115366ccf1304255"
+    },
+    {
+      "path": "docs/reference/frame-rate.md",
+      "normalized_sha256": "ace69eaface772c82c71ef54239e00d09a5f2d930cf4c4f12f9af51869692418"
+    },
+    {
+      "path": "docs/reference/packing.md",
+      "normalized_sha256": "d84223b76206734d4bb46c94125fa0c7cc28a9383482025cd9a8364c4da94f78"
+    },
+    {
+      "path": "docs/reference/rendering.md",
+      "normalized_sha256": "be2b71cdfe2bb41d4d81934361a33281289c74c5748a23f190eeb64b80cd9b11"
+    },
+    {
+      "path": "docs/reference/shaders.md",
+      "normalized_sha256": "2149c453f2c338a18747591cce0e255722822f50649f1f64cd6ba8a0dcf81226"
     }
   ],
   "excluded_local_rewrite_sources": [

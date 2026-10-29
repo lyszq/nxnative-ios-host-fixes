@@ -89,7 +89,8 @@ jobs:
           print('PASS: reviewed stable and display source identities; no game inputs present')
           PY
           cd shell
-          python3 -m unittest dm.tools.tests.test_shell_msl_policy dm.tools.tests.test_shell_identity_policy dm.gfx.tests.test_nvn_text_lines dm.gfx.tests.test_rt_survey dm.gfx.tests.test_nvn_timing dm.gfx.tests.test_nvn_pair_batch dm.gfx.tests.test_nvn_snapraw dm.gfx.tests.test_nvn_arc_ownership dm.tools.tests.test_regress -v
+          python3 -m unittest dm.tools.tests.test_shell_msl_policy dm.tools.tests.test_shell_identity_policy dm.gfx.tests.test_nvn_text_lines dm.gfx.tests.test_rt_survey dm.gfx.tests.test_nvn_timing dm.gfx.tests.test_nvn_sbw dm.gfx.tests.test_nvn_pair_batch dm.gfx.tests.test_nvn_snapraw dm.gfx.tests.test_nvn_arc_ownership dm.tools.tests.test_regress -v
+          python3 -W ignore::ResourceWarning -m unittest dm.tools.tests.test_nsp_chain.TableTools dm.tools.tests.test_shader_toolchain_cache -v
           python3 dm/tools/tests/run_shell_msl_native.py
           python3 dm/tools/tests/run_shell_identity_native.py
           python3 -m unittest dm.tools.tests.test_launcher_settings dm.ios.tests.test_launcher_storage -v
@@ -110,8 +111,14 @@ jobs:
               subprocess.run([str(policy)],check=True)
               asset = td/'asset'
               subprocess.run(common+[str(host/'tests/t_odyssey_display_asset.c'),str(host/'hle_odyssey_display.c'),str(host/'dm_odyssey_display_policy.c'),str(host/'dm_vertical_fov.c'),'-lm','-o',str(asset)],check=True)
-              cases = ('stock','stock-high','active','wide-active','invalid','invalid-high','bad-aspect','wrong-build','missing-gates','bad-hash','handheld','fd0-manifest','fd0-asset','high-missing-pair','high-bad-hash','high-missing-asset','native-unsupported','1440-wide','1440-4x3','native-wide','native-4x3')
-              for case in cases: subprocess.run([str(asset),case],check=True)
+              cases = ('stock', 'stock-high', 'default-1080p', 'default-1080p-4x3', 'default-missing-gates', 'default-wrong-build', 'default-no-gates', 'projection-trace', 'active', 'wide-active', 'invalid', 'invalid-high', 'bad-aspect', 'wrong-build', 'missing-gates', 'bad-hash', 'handheld', 'fd0-manifest', 'fd0-asset', 'high-missing-pair', 'high-bad-hash', 'high-missing-asset', 'native-unsupported', '1440-wide', '1440-4x3', 'native-wide', 'native-4x3')
+              for case in cases:
+                  result = subprocess.run([str(asset),case],capture_output=True,text=True,check=True)
+                  assert f'PASS: Odyssey display fixture scenario {case}' in result.stdout, case
+                  if case == 'projection-trace':
+                      assert result.stdout.count(' first input ') == 32, result.stdout
+                      assert result.stdout.count(' lifetime calls=') == 8 * 32, result.stdout
+                  else: assert 'Odyssey projection trace' not in result.stdout, case
               for case in ('high-wrong-build','high-missing-gate'):
                   result = subprocess.run([str(asset),case],capture_output=True)
                   assert result.returncode != 0, case
