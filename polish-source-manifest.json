@@ -1,10 +1,10 @@
 {
   "baseline_local_commit": "247b957d7525033f4d602a0c3242eaad96d977ab",
-  "source_local_commit": "72402a1d17c70674f5e4614c7eb1c6363fb9c3f8",
+  "source_local_commit": "ff01d62f72a70f51657b70bcd7c5bd3809163dc0",
   "base_upstream": "337186cf3ce778dd1b89092e8958652cb4d7ceb3",
   "base_fork": "59492c868416d82cdd5b57fbbf78753d044412d9",
   "applies_after": "host-fixes.patch",
-  "patch_sha256": "7022e757acd6031d684c282774d0f3b4c4b22e6cea55c6f336011ff616f02407",
+  "patch_sha256": "c5f610508ab7280abf3033a0af50802876e33e05f084d5cea25501ff52919276",
   "unchanged_cache_interfaces": [
     "dm/gfx/nvn/dm_shell_msl.h",
     "dm/gfx/nvn/dmsh_chain.h",
@@ -13,7 +13,7 @@
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
-      "normalized_sha256": "73b32a3787b816df5f8c8e62bb657b45e05864b33d4e2a9f49cb091f9158d275"
+      "normalized_sha256": "313342536239ea2b2cc9a06245d4df2223e8801b344fedb3745c9da8a82b704e"
     },
     {
       "path": "dm/gfx/nvn/hle_nvn.c",
@@ -21,7 +21,7 @@
     },
     {
       "path": "dm/gfx/nvn/nvn_mtl.m",
-      "normalized_sha256": "c866feed6bdfbf7e35c479cb36810e0a0f4b4fd9be95d808ee954312afe6cea3"
+      "normalized_sha256": "8bcdfb93958cf806c99a71ddd8526245b1f8c67b1521dbcc773e6ec77ad1d577"
     },
     {
       "path": "dm/gfx/nvn/nvn_pair_batch.h",
@@ -40,6 +40,10 @@
       "normalized_sha256": "961bdb334416eb6c6d2f319858ebf940a9c3d39f112f4c36725235a24db9e8e0"
     },
     {
+      "path": "dm/gfx/tests/run_nvn_arc_ownership_native.py",
+      "normalized_sha256": "c2a226f9068c16fa0b1930da3f84813816d278071128d158db4f754184010d8f"
+    },
+    {
       "path": "dm/gfx/tests/run_nvn_pair_batch_native.py",
       "normalized_sha256": "7ab639c6635f1d859c23126e775168967fae6213f401677216d2d73bb0f9cbe3"
     },
@@ -56,6 +60,10 @@
       "normalized_sha256": "2a5780a38f958459b6a5cffdd97264f4e78603a6572e18d66dadaac4ed5d983c"
     },
     {
+      "path": "dm/gfx/tests/t_nvn_arc_ownership_native.m",
+      "normalized_sha256": "1eb300a3424c5d2001e108f12f2283ebb88ae5b6c975a1dc5c1518ce86498358"
+    },
+    {
       "path": "dm/gfx/tests/t_nvn_pair_batch.m",
       "normalized_sha256": "36c0c2cf2b1beebb1fbfb70f352abb2d54377f79a40ce2cefdc433d5399ed9cd"
     },
@@ -66,6 +74,10 @@
     {
       "path": "dm/gfx/tests/t_rt_survey.c",
       "normalized_sha256": "b3869b19ff67f1ed15a173242f6701bda64ab9310972d69823294c2228418349"
+    },
+    {
+      "path": "dm/gfx/tests/test_nvn_arc_ownership.py",
+      "normalized_sha256": "d4a1dfb7f229c56a14dcbfcee709ffa0241ca4a70eaec218aeb4b84ab04302bc"
     },
     {
       "path": "dm/gfx/tests/test_nvn_pair_batch.py",
@@ -121,7 +133,7 @@
     },
     {
       "path": "docs/agents/symptoms.md",
-      "normalized_sha256": "863f7476b0d9e2b5d4be849e44152f324d6bf92c9792e0692c33a1cebb5bdf4d"
+      "normalized_sha256": "8a4f38fff653f1950378c195edbfdfac348dbb157ef86da66f8f31446b9015a7"
     },
     {
       "path": "docs/reference/frame-rate.md",
@@ -133,7 +145,7 @@
     },
     {
       "path": "docs/reference/shaders.md",
-      "normalized_sha256": "4918194308bcc5f07ba69da5e6d9e269b2ccb362b8db8dcc5f1a39fa5e9c5536"
+      "normalized_sha256": "02df44640b7eb48ae3727daf6db29b23abb16ad9a82ddd7cd439d1f7741a4bd3"
     },
     {
       "path": "scripts/regress.py",

@@ -1,8 +1,8 @@
 diff --git a/dm/games/0100000000010000/README.md b/dm/games/0100000000010000/README.md
-index fe83bf3..b3e5c4c 100644
+index fe83bf3..1b11b42 100644
 --- a/dm/games/0100000000010000/README.md
 +++ b/dm/games/0100000000010000/README.md
-@@ -58,6 +58,16 @@ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in
+@@ -58,6 +58,18 @@ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in
  
  General host and tool changes first needed here; each applies to every game:
  
@@ -13,6 +13,8 @@ index fe83bf3..b3e5c4c 100644
 +- **Opt-in cold vertex/pixel loading:** [Joined loading for a demanded cold pair](../../../docs/reference/shaders.md#opt-in-joined-loading-for-a-demanded-cold-vertex-and-pixel-pair). Default off; native fixture checks do not establish a device performance gain.
 +
 +- **Disjoint long-frame creation timing:** [Nested prediction libraries counted twice in long-frame totals](../../../docs/reference/frame-rate.md#nested-prediction-libraries-counted-twice-in-long-frame-totals). Measurement correction only; device performance is not implied.
++
++- **ARC ownership of pipeline shader locals:** [ARC-qualified shader locals in the pipeline helpers](../../../docs/reference/shaders.md#arc-qualified-shader-locals-in-the-pipeline-helpers). The extracted-declaration fixture shows a retain/release difference in minimal optimized codegen; the full host and device performance were not measured.
 +
 +- **CRLF prewarm parsing (source audit; device validation pending):** [CRLF prewarm rows retain a carriage return](../../../docs/reference/shaders.md#crlf-prewarm-rows-retain-a-carriage-return). The observed iPad list was LF; this hardening preserves its cache format and does not explain the recorded first-use hitches.
 +
@@ -70,7 +72,7 @@ index 38bddf5..85e1336 100644
          plib = lib_; ppso = pso_;
          trow(f, "@t_s", (now_ns() - g_t0_ns) / 1e9);
 diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
-index c5d269c..283f34f 100644
+index c5d269c..9156a3e 100644
 --- a/dm/gfx/nvn/nvn_mtl.m
 +++ b/dm/gfx/nvn/nvn_mtl.m
 @@ -29,6 +29,9 @@
@@ -291,7 +293,7 @@ index c5d269c..283f34f 100644
      return pairs;
  }
  // Whether the archive bundled with the app (pso_bundle_open) holds this run's prebuild: its prebuilt.tsv is the stamp the device would write for these pairs and this depth mode,
-@@ -5980,6 +6111,7 @@ static __unsafe_unretained id<MTLRenderPipelineState> sm_amp_get(const pso_key *
+@@ -5980,10 +6111,12 @@ static __unsafe_unretained id<MTLRenderPipelineState> sm_amp_get(const pso_key *
          os_unfair_lock_lock(&g_sm_amp_lock); g_sm_amp[i].ps = ps; g_sm_amp[i].done = 1; os_unfair_lock_unlock(&g_sm_amp_lock); });
      return nil;
  }
@@ -299,7 +301,13 @@ index c5d269c..283f34f 100644
  static __unsafe_unretained id<MTLRenderPipelineState> pso_get_(NvProg *pr, MTLRenderPassDescriptor *unused) {
      (void)unused;
      g_pso_pull = 0;   // set again only where a pulling pipeline is returned: a stale 1 made the next draw, whose pipeline came from the cache, bind the layout block instead of its streams
-@@ -6021,7 +6153,7 @@ static __unsafe_unretained id<MTLRenderPipelineState> pso_get_(NvProg *pr, MTLRe
+-    __unsafe_unretained NvShader *vs = pr->sh[0], *fs = pr->sh[1];
++    __unsafe_unretained NvShader *vs = pr->sh[0];
++    __unsafe_unretained NvShader *fs = pr->sh[1];
+     if (!vs) { RED_ONCE(13, "program has no vertex shader (or it is not mapped)"); return nil; }
+     pso_key k; pso_key_fill(&k, vs, fs, g_pass.cfmt, g_pass.dfmt, g_pass.sfmt, g_pass.samples, g_pso_lmap != NULL);
+     if (S.rast_discard) {
+@@ -6021,7 +6154,7 @@ static __unsafe_unretained id<MTLRenderPipelineState> pso_get_(NvProg *pr, MTLRe
                  if (h) {
                      if (st == 0) pso_pend_demand(&k, vs, fs);
                      g_pso_pull = 1; g_hy_ns += bp_now() - bt;
@@ -308,7 +316,7 @@ index c5d269c..283f34f 100644
                      return h;
                  }
              }
-@@ -6060,8 +6192,7 @@ static __unsafe_unretained id<MTLRenderPipelineState> pso_get_(NvProg *pr, MTLRe
+@@ -6060,8 +6193,7 @@ static __unsafe_unretained id<MTLRenderPipelineState> pso_get_(NvProg *pr, MTLRe
      // Metal may serialize requests internally. Submit the pipeline needed now before speculative work, and preserve record-on-use above.
      static int predict = -1; if (predict < 0) { const char *e = getenv("DM_NVN_PREDICT"); predict = !(e && !strcmp(e, "0")); if (!predict) MLOG("DM_NVN_PREDICT=0: no parallel precompile prediction"); }
      if (predict && g_pp_submit_mark != g_sub_serial) {
@@ -318,7 +326,7 @@ index c5d269c..283f34f 100644
      }
      return ps;
  }
-@@ -6108,9 +6239,10 @@ static NSArray<WarmTask *> *warm_parse(NSArray<NSString *> *paths, long *lines)
+@@ -6108,9 +6240,10 @@ static NSArray<WarmTask *> *warm_parse(NSArray<NSString *> *paths, long *lines)
      for (NSString *path in paths) {
          NSString *txt = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
          if (!txt) { MLOG("[RED] cannot read prewarm list: %s", path.UTF8String); continue; }
@@ -331,7 +339,7 @@ index c5d269c..283f34f 100644
              if (!line.length || [line hasPrefix:@"#"] || [seen containsObject:line]) continue;
              [seen addObject:line];
              NSArray<NSString *> *c = [line componentsSeparatedByString:@"\t"];
-@@ -7078,6 +7210,13 @@ static void shader_prefetch_rest(void) {
+@@ -7078,6 +7211,13 @@ static void shader_prefetch_rest(void) {
  }
  static void pso_predict_rest_(void);
  static void pso_predict_rest(void) { uint64_t t0 = bp_now(); shader_prefetch_rest(); pso_predict_rest_(); g_pt_pred_n++; g_pt_pred_ns += bp_now() - t0; }
@@ -345,7 +353,17 @@ index c5d269c..283f34f 100644
  // state_op also sets the scissor, which lives in R, not S: it is restored with S. Without that the replay went on with the last scissor of the rest of the submission until its next
  // OP_SCISSOR. OCTOPATH TRAVELER II (Unreal Engine 4.27) with pipelines built on demand: from Castti's opening flashback and the battlefield of Hikari's opening on, the picture was bright
  // green and white, in every run with the prediction and in none without it (DM_NVN_PREDICT=0); a short prewarm list hid it, as fewer pipelines missed
-@@ -10338,15 +10477,22 @@ static void td_dump(void) {
+@@ -7106,7 +7246,8 @@ static void pso_predict_rest_(void) {
+             if (S.rast_discard) continue;   // vertex work uses its own non-rasterizing pipeline, built on demand
+             draws++;
+             __unsafe_unretained NvProg *pr = S.prog ? prog_get(S.prog) : nil; if (!pr || !pr->sh[0]) continue;
+-            __unsafe_unretained NvShader *vs = pr->sh[0], *fs = pr->sh[1];
++            __unsafe_unretained NvShader *vs = pr->sh[0];
++            __unsafe_unretained NvShader *fs = pr->sh[1];
+             const uint32_t dv[4] = {dfull, 0, 0, dfull}, sv[4] = {sfull, 0, sfull, 0};
+             for (int v = 0; v < 4; v++) {
+                 if (v && dv[v] == dv[0] && sv[v] == sv[0]) continue;
+@@ -10338,15 +10479,22 @@ static void td_dump(void) {
          if (t.textureType != MTLTextureType2D && t.textureType != MTLTextureType2DArray) { MLOG("[texdump] ser=%llu type %lu skipped", ser, (unsigned long)t.textureType); continue; }
          if (getenv("DM_NVN_SNAPRAW")) {   // Also save the raw bytes (converting an HDR target to an 8-bit image truncates; first-line text header: width height format bytes-per-row)
              NSUInteger rw = MAX(t.width >> lv, 1u), rh = MAX(t.height >> lv, 1u);
@@ -668,6 +686,185 @@ index 0000000..c35524f
 +    puts("PASS: NVN inclusive PSO, nested library and frame aggregate timing");
 +    return 0;
 +}
+diff --git a/dm/gfx/tests/run_nvn_arc_ownership_native.py b/dm/gfx/tests/run_nvn_arc_ownership_native.py
+new file mode 100644
+index 0000000..294a83f
+--- /dev/null
++++ b/dm/gfx/tests/run_nvn_arc_ownership_native.py
+@@ -0,0 +1,173 @@
++#!/usr/bin/env python3
++"""Compile extracted NVN shader-local declarations as a no-SDK Objective-C ARC fixture."""
++from pathlib import Path
++import re
++import shutil
++import subprocess
++import sys
++import tempfile
++
++
++ROOT = Path(__file__).resolve().parents[3]
++SOURCE = ROOT / "dm/gfx/nvn/nvn_mtl.m"
++TEMPLATE = Path(__file__).with_name("t_nvn_arc_ownership_native.m")
++JOINED_PLACEHOLDER = "JOINED_SHADER_LOCALS"
++SPLIT_PLACEHOLDER = "SPLIT_SHADER_LOCALS"
++JOINED_DECLARATION = "__unsafe_unretained NvShader *vs = pr->sh[0], *fs = pr->sh[1];"
++SPLIT_DECLARATIONS = (
++    "__unsafe_unretained NvShader *vs = pr->sh[0];\n"
++    "    __unsafe_unretained NvShader *fs = pr->sh[1];"
++)
++LOCAL_SIGNATURES = (
++    "pso_get_(NvProg *pr, MTLRenderPassDescriptor *unused) {",
++    "static void pso_predict_rest_(void) {",
++)
++
++
++def function_body(source: str, signature: str) -> str:
++    start = source.index(signature)
++    brace = source.index("{", start)
++    depth = 0
++    state = None
++    escaped = False
++    i = brace
++    while i < len(source):
++        ch = source[i]
++        nxt = source[i + 1] if i + 1 < len(source) else ""
++        if state == "line":
++            if ch == "\n":
++                state = None
++        elif state == "block":
++            if ch == "*" and nxt == "/":
++                state = None
++                i += 1
++        elif state:
++            if escaped:
++                escaped = False
++            elif ch == "\\":
++                escaped = True
++            elif ch == state:
++                state = None
++        elif ch == "/" and nxt == "/":
++            state = "line"
++            i += 1
++        elif ch == "/" and nxt == "*":
++            state = "block"
++            i += 1
++        elif ch in ('"', "'"):
++            state = ch
++        elif ch == "{":
++            depth += 1
++        elif ch == "}":
++            depth -= 1
++            if depth == 0:
++                return source[start:i + 1]
++        i += 1
++    raise AssertionError(f"unclosed function body: {signature}")
++
++
++def extract_split_declarations(source: str) -> str:
++    expected = [line.strip() for line in SPLIT_DECLARATIONS.splitlines()]
++    found = []
++    for signature in LOCAL_SIGNATURES:
++        body = function_body(source, signature)
++        lines = [line.strip() for line in body.splitlines()]
++        pairs = [i for i in range(len(lines) - 1) if lines[i:i + 2] == expected]
++        if len(pairs) != 1:
++            raise AssertionError(f"expected one pair of explicitly borrowed shader locals in {signature}")
++        found.append("\n".join(lines[pairs[0]:pairs[0] + 2]))
++    if found[0] != found[1]:
++        raise AssertionError("pso_get_ and pso_predict_rest_ must use the same split declarations")
++    return found[0]
++
++
++def compiler_prefix():
++    if sys.platform == "win32":
++        compiler = shutil.which("zig")
++        if not compiler:
++            return None
++        return [compiler, "clang", "-cc1"]
++    if sys.platform == "darwin":
++        compiler = shutil.which("xcrun")
++        if not compiler:
++            return None
++        return [compiler, "clang", "-cc1"]
++    compiler = shutil.which("clang")
++    return [compiler, "-cc1"] if compiler else None
++
++
++def ast_function(command, common, source_path: Path, name: str) -> str:
++    result = subprocess.run(
++        command + common + ["-ast-dump", f"-ast-dump-filter={name}", str(source_path)],
++        check=True, capture_output=True, text=True,
++    )
++    return result.stdout
++
++
++def function_body_from_ir(ir: str, name: str) -> str:
++    start = ir.index(f"define void @{name}(")
++    end = ir.index("\n}", start)
++    return ir[start:end]
++
++
++def ownership_type(ast: str, variable: str) -> str:
++    for line in ast.splitlines():
++        if f" used {variable} '" in line:
++            return line.rsplit("'", 2)[1]
++    raise AssertionError(f"AST did not contain local {variable}")
++
++
++def arc_calls(body: str, operation: str) -> int:
++    return len(re.findall(rf"@llvm\.objc\.{operation}\(", body))
++
++
++def main() -> int:
++    command = compiler_prefix()
++    if not command:
++        print("SKIP: Zig on Windows or Xcode Clang on macOS is required for the ARC AST/IR fixture")
++        return 77
++
++    source = SOURCE.read_text(encoding="utf-8")
++    split_declarations = extract_split_declarations(source)
++    template = TEMPLATE.read_text(encoding="utf-8")
++    if template.count(JOINED_PLACEHOLDER) != 1 or template.count(SPLIT_PLACEHOLDER) != 1:
++        raise SystemExit("expected one joined and one split declaration placeholder")
++    generated = template.replace(JOINED_PLACEHOLDER, JOINED_DECLARATION)
++    generated = generated.replace(SPLIT_PLACEHOLDER, split_declarations)
++
++    common = ["-triple", "arm64-apple-macosx15", "-fobjc-runtime=macosx-15",
++              "-fobjc-arc", "-fblocks", "-x", "objective-c"]
++    with tempfile.TemporaryDirectory(prefix="nvn-arc-ownership-") as temp:
++        fixture = Path(temp) / "t_nvn_arc_ownership_generated.m"
++        ir_path = Path(temp) / "t_nvn_arc_ownership_generated.ll"
++        fixture.write_text(generated, encoding="utf-8")
++
++        joined_ast = ast_function(command, common, fixture, "joined_control")
++        split_ast = ast_function(command, common, fixture, "production_split")
++        joined_types = {name: ownership_type(joined_ast, name) for name in ("vs", "fs")}
++        split_types = {name: ownership_type(split_ast, name) for name in ("vs", "fs")}
++        if joined_types != {"vs": "NvShader *__unsafe_unretained", "fs": "NvShader *__strong"}:
++            raise AssertionError(f"joined-control AST ownership changed: {joined_types}")
++        if split_types != {"vs": "NvShader *__unsafe_unretained", "fs": "NvShader *__unsafe_unretained"}:
++            raise AssertionError(f"production AST ownership is not fully borrowed: {split_types}")
++
++        subprocess.run(
++            command + common + ["-O2", "-emit-llvm", "-o", str(ir_path), str(fixture)],
++            check=True,
++        )
++        ir = ir_path.read_text(encoding="utf-8")
++        joined_ir = function_body_from_ir(ir, "joined_control")
++        split_ir = function_body_from_ir(ir, "production_split")
++        joined_counts = {op: arc_calls(joined_ir, op) for op in ("retain", "release")}
++        split_counts = {op: arc_calls(split_ir, op) for op in ("retain", "release")}
++        if joined_counts != {"retain": 1, "release": 1}:
++            raise AssertionError(f"joined control did not retain/release fs once at -O2: {joined_counts}")
++        if split_counts != {"retain": 0, "release": 0}:
++            raise AssertionError(f"split locals still emit ARC traffic at -O2: {split_counts}")
++
++    print("PASS: actual pso_get_/predictor declarations are both borrowed; joined control retains/releases fs once; split emits no local ARC pair")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
 diff --git a/dm/gfx/tests/run_nvn_pair_batch_native.py b/dm/gfx/tests/run_nvn_pair_batch_native.py
 new file mode 100644
 index 0000000..cc573de
@@ -1023,6 +1220,35 @@ index 0000000..303a224
 +
 +if __name__ == "__main__":
 +    raise SystemExit(main())
+diff --git a/dm/gfx/tests/t_nvn_arc_ownership_native.m b/dm/gfx/tests/t_nvn_arc_ownership_native.m
+new file mode 100644
+index 0000000..d40586b
+--- /dev/null
++++ b/dm/gfx/tests/t_nvn_arc_ownership_native.m
+@@ -0,0 +1,23 @@
++// Generated by run_nvn_arc_ownership_native.py; compile-only ARC AST/IR fixture.
++@class NvShader;
++__attribute__((objc_root_class))
++@interface NvProg { @public NvShader *sh[2]; }
++@end
++
++extern void escape_program(NvProg *program);
++extern void use_pair(NvShader *vertex, NvShader *fragment);
++extern void use_shader(NvShader *shader);
++
++void joined_control(NvProg *pr) {
++    JOINED_SHADER_LOCALS
++    escape_program(pr);
++    use_pair(vs, fs);
++    use_shader(fs);
++}
++
++void production_split(NvProg *pr) {
++    SPLIT_SHADER_LOCALS
++    escape_program(pr);
++    use_pair(vs, fs);
++    use_shader(fs);
++}
 diff --git a/dm/gfx/tests/t_nvn_pair_batch.m b/dm/gfx/tests/t_nvn_pair_batch.m
 new file mode 100644
 index 0000000..b49b27b
@@ -1370,6 +1596,62 @@ index 0000000..6c45665
 +    puts("PASS: RT survey distinguishes logical/Metal/mip/pass layouts, deduplicates, and saturates without mutation");
 +    return 0;
 +}
+diff --git a/dm/gfx/tests/test_nvn_arc_ownership.py b/dm/gfx/tests/test_nvn_arc_ownership.py
+new file mode 100644
+index 0000000..3854a4c
+--- /dev/null
++++ b/dm/gfx/tests/test_nvn_arc_ownership.py
+@@ -0,0 +1,50 @@
++"""Source wiring and native Clang ARC ownership/codegen regression for NVN shader locals."""
++from pathlib import Path
++import subprocess
++import sys
++import unittest
++
++from dm.gfx.tests.run_nvn_arc_ownership_native import function_body
++
++
++ROOT = Path(__file__).resolve().parents[3]
++SOURCE = ROOT / "dm/gfx/nvn/nvn_mtl.m"
++NATIVE = ROOT / "dm/gfx/tests/run_nvn_arc_ownership_native.py"
++
++
++class NVNArcOwnershipTests(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.source = SOURCE.read_text(encoding="utf-8")
++
++    def test_both_runtime_helpers_borrow_both_shader_stages(self):
++        expected = [
++            "__unsafe_unretained NvShader *vs = pr->sh[0];",
++            "__unsafe_unretained NvShader *fs = pr->sh[1];",
++        ]
++        for signature in (
++            "pso_get_(NvProg *pr, MTLRenderPassDescriptor *unused) {",
++            "static void pso_predict_rest_(void) {",
++        ):
++            body = function_body(self.source, signature)
++            lines = [line.strip() for line in body.splitlines()]
++            pairs = [i for i in range(len(lines) - 1) if lines[i:i + 2] == expected]
++            self.assertEqual(len(pairs), 1, signature)
++            self.assertNotIn("__unsafe_unretained NvShader *vs = pr->sh[0], *fs", body)
++
++    def test_strong_shader_cache_owners_remain(self):
++        self.assertIn("static NSMutableDictionary<NSString *, NvShader *> *g_shcache;", self.source)
++        shader_get = function_body(self.source, "static NvShader *shader_get(NSString *pc, int stage) {")
++        self.assertIn("g_shcache[pc] = o", shader_get)
++        self.assertIn("o->sh[st] = sh", self.source)
++
++    def test_native_ast_and_optimized_codegen_fixture(self):
++        result = subprocess.run([sys.executable, str(NATIVE)], cwd=ROOT, capture_output=True, text=True)
++        if result.returncode == 77:
++            self.skipTest(result.stdout.strip())
++        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
++        self.assertIn("PASS: actual pso_get_/predictor declarations", result.stdout)
++
++
++if __name__ == "__main__":
++    unittest.main()
 diff --git a/dm/gfx/tests/test_nvn_pair_batch.py b/dm/gfx/tests/test_nvn_pair_batch.py
 new file mode 100644
 index 0000000..e85a68b
@@ -2131,7 +2413,7 @@ index 29912b1..2b7981b 100644
  
  `python3 scripts/regress.py impact <base>..<head>` (or one commit) maps a change to those names: the functions around its changed lines, followed through the host's callers to the NVN entry points and HLE functions they serve, and the rules of `dm/tools/impact_map.tsv` (a file, or functions in it, to manifest rows: `dmsh_atomic.py` to the image atomic features, the prepare-step functions of `nvn_mtl.m` to the games that run it). It lists the games that use what the change touches, those reached only through a broad rule (every game of the API), and the profiles without a manifest as unknown. It reads only git and the committed manifests, so it needs neither game files nor a harness root: the report is printed, and written as `impact.md` and `impact.json` to `--out` or, when there is one, `<root>/reports/`. Run it before a change to the chain or host, and run `regress.py check` on the games it names that you have; ask their owners for the others. A changed file no rule maps is listed: add a rule for it.
 diff --git a/docs/agents/symptoms.md b/docs/agents/symptoms.md
-index 0358e52..011d997 100644
+index 0358e52..bb67a76 100644
 --- a/docs/agents/symptoms.md
 +++ b/docs/agents/symptoms.md
 @@ -289,6 +289,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
@@ -2159,11 +2441,12 @@ index 0358e52..011d997 100644
  - the ground kept stale 32×32 blocks where the G-buffer draw failed the depth test: blocks of a stale image where a depth pre-pass and a later pass with other vertex shaders meet (Odyssey: 32×32 blocks on every fourth frame). → [Position invariance across shaders](../reference/shaders.md#position-invariance-across-shaders)
  - making a pipeline archive prints `Max Unstruct ID 758 in function agc.main in shader 13941 exceeds supported limit`, and one pipeline takes many minutes, in `metal-tt` offline or in the host's prebuild on the device (`Preparing pipelines` holding one count for minutes). The line is a note, not an error: `metal-tt` goes on, exits 0 and writes that pipeline into the archive. → [Front end at -O1: Apple's control-flow lowering](../reference/shaders.md#front-end-at--o1-apples-control-flow-lowering)
  - the half of Mario facing the camera's left was white (GitHub issue 72, on an iPhone). → [min, max and clamp with a NaN operand](../reference/shaders.md#min-max-and-clamp-with-a-nan-operand)
-@@ -550,6 +554,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+@@ -550,6 +554,8 @@ One line per symptom in the [subsystem references](../reference/): what you see
  - hundreds of geometry raster passes in combat, despite support for batching consecutive geometry draws. → [Geometry runs across occlusion query boundaries](../reference/shaders.md#geometry-runs-across-occlusion-query-boundaries)
  - geometry preparation dominates rendering CPU even after geometry passes have been batched; primitive assembly and capture-index deduplication repeat for unchanged meshes. → [Prepared geometry indices reused after byte comparison](../reference/shaders.md#prepared-geometry-indices-reused-after-byte-comparison)
  - geometry vertex-capture passes consume substantial GPU time before geometry compute or depth rasterization. → [Geometry capture initializes only missing words](../reference/shaders.md#geometry-capture-initializes-only-missing-words)
 +- the first resolution of a normal two-stage program loads its missing vertex and pixel libraries serially on the submit thread. → [Opt-in joined loading for a demanded cold vertex and pixel pair](../reference/shaders.md#opt-in-joined-loading-for-a-demanded-cold-vertex-and-pixel-pair)
++- Clang's AST gives `vs` an `__unsafe_unretained` type but makes `fs` `__strong` in a comma-separated `NvShader *vs, *fs` declaration. At `-O2`, a minimal class-owner fixture emits one retain/release pair for the fragment local; the equivalent split, explicitly borrowed declarations emit none. → [ARC-qualified shader locals in the pipeline helpers](../reference/shaders.md#arc-qualified-shader-locals-in-the-pipeline-helpers)
  
  ## Game state
  
@@ -2211,7 +2494,7 @@ index c5151dc..488eb0d 100644
 +- **Check:** the native fake-copy fixture injects both actual source helpers and independently expects 8 bytes for RG32Float/RGBA16Unorm/RGBA16Float, 1 for R8Unorm, and 16 for RGBA32Float. It checks header and payload lengths; unsupported formats must allocate nothing and create no raw file.
 +- **Found on:** the [Odyssey iPad lighting audit](../../dm/games/0100000000010000/README.md#found-on-this-game). Source-confirmed diagnostic error; it does not establish that the game renders those formats incorrectly.
 diff --git a/docs/reference/shaders.md b/docs/reference/shaders.md
-index 7dbec3c..8e6e5f3 100644
+index 7dbec3c..37cd629 100644
 --- a/docs/reference/shaders.md
 +++ b/docs/reference/shaders.md
 @@ -402,6 +402,14 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
@@ -2229,7 +2512,7 @@ index 7dbec3c..8e6e5f3 100644
  ### Position invariance across shaders
  
  - **Symptom:** the ground kept stale 32×32 blocks where the G-buffer draw failed the depth test: blocks of a stale image where a depth pre-pass and a later pass with other vertex shaders meet (Odyssey: 32×32 blocks on every fourth frame).
-@@ -964,3 +972,12 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
+@@ -964,3 +972,20 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
  - **Fix:** `dmsh_geometry.capture` initializes only words absent from the captured outputs. The capture slot map stores each selected word once, including defaults for absent outputs. Position W, point size, generic W, clip distances, layer and viewport retain their existing bit values. Full capture selects all 144 words; lean capture selects its consumed words. Shaders and host must be rebuilt together.
  - **Check:** the synthetic throughput comparison alternates control/candidate order and verifies all 9,437,184 captured words against both the original buffer and literal expected values. Mac runs vary in timing, so their percentage gain does not establish iPhone gameplay FPS. The optional real-translator capture fixture in `t_geometry` also checks all uncaptured defaults. All 1,225 NieR shaders build for Mac and iPhone; standard geometry replay and dependency checks pass.
  - **Found on:** [NieR:Automata US 1.0.3](../../dm/games/010056B015FE8000/README.md#factory-combat-capture-and-9s-texture-follow-up), iPhone City Ruins: 14 geometry groups in the captured frame spend 7.485 ms in vertex capture, 6.512 ms in compute and 1.019 ms in depth raster. The accompanying pass dump affects total frame time; its large uncovered GPU interval must not be treated as a clean gameplay hitch measurement.
@@ -2242,6 +2525,14 @@ index 7dbec3c..8e6e5f3 100644
 +- **Experiment:** `DM_NVN_PAIR_LOAD=1` joins two parallel `shader_load` calls only when the program has exactly one mapped vertex and one pixel stage, distinct keys, both absent from the cache, and prewarm has started, finished and left no pending items. The default remains the original path. Workers return attempt-local objects; the submit thread publishes and records successful stages in original order. Failures are not immediately retried by the same program lookup and are not entered into a new global failure cache. Geometry, compute, builtins, layer variants, cached stages and single-miss cases keep their original path.
 +- **Check:** `test_nvn_pair_batch.py` plus the native Foundation fake-loader fixture check gates, joined execution, local failure results and ARC ownership without a GPU. The period summary reports batch/count/time only when enabled. Parallel construction may increase temporary memory or compiler contention; a device A/B with nonzero eligible batches is required before enabling it by default or claiming a speedup. Existing shader options and cache identities do not change.
 +- **Found on:** the [Odyssey iPad first-use audit](../../dm/games/0100000000010000/README.md#found-on-this-game). This is a controlled experiment, not a device-validated FPS improvement.
++
++### ARC-qualified shader locals in the pipeline helpers
++
++- **Symptom:** Clang's AST gives `vs` an `__unsafe_unretained` type but makes `fs` `__strong` in a comma-separated `NvShader *vs, *fs` declaration. At `-O2`, a minimal class-owner fixture emits one retain/release pair for the fragment local; the equivalent split, explicitly borrowed declarations emit none.
++- **Cause:** in this declaration form the ownership qualifier attaches to the first pointer declarator; the second pointer defaults to strong. The program's shader array and `g_shcache` already provide strong ownership for both stages.
++- **Fix:** `pso_get_` and `pso_predict_rest_` declare the two shader pointers separately and explicitly borrow both. The cache and program owners remain unchanged.
++- **Check:** `test_nvn_arc_ownership.py` extracts the actual declarations, checks the joined control and production AST types, and compares optimized IR for the local ARC pair. It needs no Metal device. This proves only the minimal fixture's compiler traffic; the complete host translation unit and device frame times were not measured.
++- **Found on:** the [Odyssey iPad first-use source audit](../../dm/games/0100000000010000/README.md#found-on-this-game). No first-use hitch cause or device performance gain is established.
 diff --git a/scripts/regress.py b/scripts/regress.py
 index 3bdad23..df0109d 100644
 --- a/scripts/regress.py
