@@ -1,29 +1,103 @@
 diff --git a/dm/games/0100000000010000/README.md b/dm/games/0100000000010000/README.md
-index fe83bf3..7a086f6 100644
+index fe83bf3..f071121 100644
 --- a/dm/games/0100000000010000/README.md
 +++ b/dm/games/0100000000010000/README.md
-@@ -58,6 +58,8 @@ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in
+@@ -58,6 +58,10 @@ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in
  
  General host and tool changes first needed here; each applies to every game:
  
++- **Disjoint long-frame creation timing:** [Nested prediction libraries counted twice in long-frame totals](../../../docs/reference/frame-rate.md#nested-prediction-libraries-counted-twice-in-long-frame-totals). Measurement correction only; device performance is not implied.
++
 +- **CRLF prewarm parsing (source audit; device validation pending):** [CRLF prewarm rows retain a carriage return](../../../docs/reference/shaders.md#crlf-prewarm-rows-retain-a-carriage-return). The observed iPad list was LF; this hardening preserves its cache format and does not explain the recorded first-use hitches.
 +
  - **BAHS pairs omitted from vertex padding:** [Pixel shader inputs the vertex shader does not write](../../../docs/reference/shaders.md#pixel-shader-inputs-the-vertex-shader-does-not-write).
  - **Front end at `-O1`** (`dmsh_build.py` and `ios_metal.py`): [Front end at -O1: Apple's control-flow lowering](../../../docs/reference/shaders.md#front-end-at--o1-apples-control-flow-lowering).
  - **Pipeline archive flush periods** (no compile waits for a flush; the prepare step stops at the last pair handed out): [A compile that does not return stalls every flush and draw](../../../docs/reference/shaders.md#a-compile-that-does-not-return-stalls-every-flush-and-draw).
+diff --git a/dm/gfx/nvn/hle_nvn.c b/dm/gfx/nvn/hle_nvn.c
+index 38bddf5..85e1336 100644
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -14,6 +14,7 @@
+ #include "nvn_tex.h"
+ #include "nvn_mtl.h"
+ #include "nvn_pace.h"
++#include "nvn_timing.h"
+ #include "nvn_fstep.h"
+ #include "nvn_timestamp.h"
+ #include "../../host/front.h"
+@@ -1399,7 +1400,7 @@ __attribute__((weak)) int dm_low_power_now(void) { return 0; }   // Low Power Mo
+ typedef struct { uint64_t f; double fr, nv, t_s, make_ms, up_mb, up_ms; unsigned pso, lib, up, rup, hy; } lf_rec;   // hy: draws with a hybrid (pulling) pipeline
+ static lf_rec g_lf[LFN];
+ __attribute__((weak)) void dm_longframe_note(const char *what) { LOG("[longframe] %s", what); }   // Default (graphics unit tests); the strong definition in the host's diag.c adds scene context and writes perf.txt
+-extern void mtl_create_ns(uint64_t *lib_ns, uint64_t *pso_ns); extern void mtl_hybrid_stats(uint64_t *draws, uint64_t *made, uint64_t *none); extern uint64_t mtl_upload_bytes(void); extern void mtl_pkg_stats(uint64_t *uploads, uint64_t *reuploads);
++extern int mtl_create_ns(uint64_t *lib_ns, uint64_t *pso_ns, uint64_t *predict_lib_ns); extern void mtl_hybrid_stats(uint64_t *draws, uint64_t *made, uint64_t *none); extern uint64_t mtl_upload_bytes(void); extern void mtl_pkg_stats(uint64_t *uploads, uint64_t *reuploads);
+ static const char *const g_tname[6] = {"frame time", "frame work", "NVN submit+present", "GPU", "translation layer recording", "translation layer submit"};
+ static void tpush(int k, double v) { g_tw[k][g_tn[k]++ % TWIN] = v; }
+ // Thermal attribution (iOS DM_HEAT): per-frame GPU milliseconds are kept in a separate ring, taking the mean / p95 "since the last read" (at most the last HRN frames), without interfering with the timing summary's 300-frame window
+@@ -1870,10 +1871,25 @@ NVN(nvnQueuePresentTexture, void, NVNqueue *q, NVNwindow *w, int idx) {
+         static uint64_t plib, ppso; uint64_t lib_, pso_; mtl_create_stats(&lib_, &pso_);
+         trow(f, "@lib_new", (double)(lib_ - plib)); trow(f, "@pso_new", (double)(pso_ - ppso));
+         {   // long-frame log: this frame's items are first recorded into the ring; whether to print is decided 8 frames later, once the GPU time has arrived (see below)
+-            static uint64_t plns, ppns, pup, prup, pub, phy; uint64_t lns, pns, up, rup, ub, hy, hm_, hn_; mtl_create_ns(&lns, &pns); mtl_pkg_stats(&up, &rup); ub = mtl_upload_bytes(); mtl_hybrid_stats(&hy, &hm_, &hn_);
++            static nvn_timing_totals previous; static uint64_t pup, prup, pub, phy;
++            uint64_t lns, pns, predict_lib_ns, up, rup, ub, hy, hm_, hn_;
++            int counters_valid = mtl_create_ns(&lns, &pns, &predict_lib_ns);
++            nvn_timing_totals current = {lns, pns, predict_lib_ns}; nvn_timing_frame compile_time;
++            nvn_timing_frame_delta(&previous, &current, counters_valid, &compile_time);
++            static int timing_warning_logged;
++            if (!compile_time.make_valid && !timing_warning_logged) {
++                timing_warning_logged = 1;
++                LOG("[RED] invalid pipeline timing snapshot; aggregate compile time is unknown for affected frames");
++            }
++            mtl_pkg_stats(&up, &rup); ub = mtl_upload_bytes(); mtl_hybrid_stats(&hy, &hm_, &hn_);
++            trow(f, "@lib_ms", compile_time.deltas_valid ? (double)compile_time.lib_ns / 1e6 : -1.0);
++            trow(f, "@pso_inclusive_ms", compile_time.deltas_valid ? (double)compile_time.pso_ns / 1e6 : -1.0);
++            trow(f, "@predict_lib_ms", compile_time.deltas_valid ? (double)compile_time.predict_lib_ns / 1e6 : -1.0);
++            trow(f, "@make_ms", compile_time.make_valid ? (double)compile_time.make_ns / 1e6 : -1.0);
+             lf_rec *r = &g_lf[f % LFN]; r->f = f; r->fr = fr; r->nv = nv; r->t_s = (now_ns() - g_t0_ns) / 1e9; r->pso = (unsigned)(pso_ - ppso); r->lib = (unsigned)(lib_ - plib);
+-            r->make_ms = ((lns - plns) + (pns - ppns)) / 1e6; r->up = (unsigned)(up - pup); r->rup = (unsigned)(rup - prup); r->up_mb = (ub - pub) / 1048576.0; r->up_ms = up_ms;
+-            r->hy = (unsigned)(hy - phy); plns = lns; ppns = pns; pup = up; prup = rup; pub = ub; phy = hy;
++            r->make_ms = compile_time.make_valid ? (double)compile_time.make_ns / 1e6 : -1.0;
++            r->up = (unsigned)(up - pup); r->rup = (unsigned)(rup - prup); r->up_mb = (ub - pub) / 1048576.0; r->up_ms = up_ms;
++            r->hy = (unsigned)(hy - phy); previous = current; pup = up; prup = rup; pub = ub; phy = hy;
+         }
+         plib = lib_; ppso = pso_;
+         trow(f, "@t_s", (now_ns() - g_t0_ns) / 1e9);
 diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
-index c5d269c..ebc4973 100644
+index c5d269c..973480b 100644
 --- a/dm/gfx/nvn/nvn_mtl.m
 +++ b/dm/gfx/nvn/nvn_mtl.m
-@@ -29,6 +29,7 @@
+@@ -29,6 +29,8 @@
  #include "nvn_cover.h"
  #include "nvn_primitive.h"
  #include "nvn_timestamp.h"
 +#include "nvn_rt_survey.h"
++#include "nvn_timing.h"
  #include "dmsh_chain.h"   // DMSH_CHAIN: the translation chain version of the B shader library expected by this source tree, one for every game (beside this file, tools/dmsh_chain.py --header)
  #include "game_profile.h"   // game profile constants (profile id, the profile's switches)
  #ifdef DM_SHELL
-@@ -2776,6 +2777,57 @@ static void pass_dims(MTL4RenderPassDescriptor *pd, NSUInteger nc, NSUInteger *w
+@@ -1291,7 +1293,8 @@ static uint64_t bp_now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,
+ static uint64_t g_bp_t0;   // Time of process start (when this module is loaded)
+ __attribute__((constructor)) static void bp_t0(void) { g_bp_t0 = bp_now(); }
+ static int bootprof(void) { static int v = -1; if (v < 0) v = getenv("DM_BOOTPROF") != NULL; return v; }
+-static uint64_t g_bp_lib_n, g_bp_lib_ns, g_bp_pso_n, g_bp_pso_ns, g_bp_up_bytes, g_bp_first_present;
++static uint64_t g_bp_lib_n, g_bp_lib_ns, g_bp_pso_n, g_bp_pso_ns, g_bp_pred_lib_ns, g_bp_up_bytes, g_bp_first_present;
++static int g_bp_timing_valid = 1;
+ static uint64_t g_up_total_ns;   // Cumulative upload time (same source as the per-frame @upload_ms)
+ // ---------- Per-frame GPU time aggregation ----------
+ #define GRING 1024
+@@ -2139,7 +2142,9 @@ static id<MTLTexture> pkg_upload(const tex_t *t, uint64_t *stamp, id<MTLTexture>
+ uint64_t mtl_upload_ns_take(void) { return atomic_exchange(&g_upload_ns, 0); }
+ uint64_t mtl_upload_gpu_ns_take(void) { return atomic_exchange(&g_upload_gpu_ns, 0); }
+ void mtl_create_stats(uint64_t *lib, uint64_t *pso) { *lib = g_bp_lib_n; *pso = g_bp_pso_n; }
+-void mtl_create_ns(uint64_t *lib_ns, uint64_t *pso_ns) { *lib_ns = g_bp_lib_ns; *pso_ns = g_bp_pso_ns; }   // Cumulative time spent synchronously creating shader libraries / pipelines on the spot (the long-frame log takes the per-frame difference)
++int mtl_create_ns(uint64_t *lib_ns, uint64_t *pso_ns, uint64_t *predict_lib_ns) {
++    *lib_ns = g_bp_lib_ns; *pso_ns = g_bp_pso_ns; *predict_lib_ns = g_bp_pred_lib_ns; return g_bp_timing_valid;
++}   // Cumulative inclusive library / pipeline timing plus the nested library subset; the long-frame log takes per-frame differences
+ uint64_t mtl_upload_bytes(void) { return g_bp_up_bytes; }   // Cumulative texture upload bytes
+ // Diagnostic DM_NVN_ZBLOCK=1: all-zero 16-byte blocks of each ASTC texture uploaded on the CPU, per level (an all-zero ASTC block decodes as the error colour, magenta). tex_mtl_ logs
+ // a texture whose bound levels hold any (zb_report), with each level's zero blocks, its total and whether all its pages are mapped (sparse pools)
+@@ -2776,6 +2781,57 @@ static void pass_dims(MTL4RenderPassDescriptor *pd, NSUInteger nc, NSUInteger *w
      if (!*w) { *w = MAX(pd.renderTargetWidth, 1); *h = MAX(pd.renderTargetHeight, 1); }   // attachment-less pass (rp_begin_ex_): its explicit size
  }
  
@@ -81,7 +155,7 @@ index c5d269c..ebc4973 100644
  // ---------- DM_NVN_PASSGPU=<file>: per-pass GPU time (stage-boundary timestamp counters) ----------
  // Each render pass samples 4 points (vertex start/end, fragment start/end), a compute pass 2 points; resolved after the command buffer completes and accumulated by 'index of the pass within the frame'.
  // Each line: frame idx kind gpu_ms inc_ms w h fmt0 dfmt load draws t0_ns t1_ns (kind: R render / C compute; load: L load / C clear for each color attachment + depth)
-@@ -3397,6 +3449,7 @@ static id<MTL4RenderCommandEncoder> rp_begin_ex_(int clear_only) {
+@@ -3397,6 +3453,7 @@ static id<MTL4RenderCommandEncoder> rp_begin_ex_(int clear_only) {
          if (pd.depthAttachment.texture) { id<MTLTexture> t = pd.depthAttachment.texture; NSUInteger have = t.arrayLength * (t.textureType == MTLTextureTypeCube || t.textureType == MTLTextureTypeCubeArray ? 6 : 1) - pd.depthAttachment.slice; if (have < nl) nl = have; }
          if (nl != NSUIntegerMax && nl > 1) { pd.renderTargetArrayLength = nl; PD("L %llu layered pass: %lu layers", g_stat_pass + 1, (unsigned long)nl); }
      }
@@ -89,7 +163,7 @@ index c5d269c..ebc4973 100644
      pg_render(pd, (NSUInteger)R.rt.n);
      { void td_note(id pd, NSUInteger nc); td_note(pd, (NSUInteger)R.rt.n);
        void ts_note(id pd, NSUInteger nc); ts_note(pd, (NSUInteger)R.rt.n);
-@@ -3622,6 +3675,16 @@ static FILE *pso_user_file(void) {
+@@ -3622,6 +3679,16 @@ static FILE *pso_user_file(void) {
      if (path) g_pso_user = fopen(path.fileSystemRepresentation, "a");
      return g_pso_user;
  }
@@ -106,7 +180,7 @@ index c5d269c..ebc4973 100644
  static void pso_user_record(const char *fmt, ...) {
      FILE *f = pso_user_file();
      if (!f) return;
-@@ -3631,7 +3694,7 @@ static void pso_user_record(const char *fmt, ...) {
+@@ -3631,7 +3698,7 @@ static void pso_user_record(const char *fmt, ...) {
          NSString *seed = g_shmap_path ? [g_shmap_path.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"pso_manifest.tsv"] : nil;
          NSMutableArray<NSString *> *paths = [NSMutableArray array]; if (seed) [paths addObject:seed]; NSString *user = pso_user_path(); if (user) [paths addObject:user];
          for (NSString *path in paths) { NSString *txt = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
@@ -115,7 +189,7 @@ index c5d269c..ebc4973 100644
      }
      size_t ll = strlen(line); NSString *s = [[NSString alloc] initWithBytes:line length:ll && line[ll - 1] == '\n' ? ll - 1 : ll encoding:NSUTF8StringEncoding];   // Compared with the manifest file line by line (without the newline)
      if (!s || [g_pso_user_seen containsObject:s]) return;
-@@ -5841,7 +5904,7 @@ static NSString *pre_stamp(NSString *txt, int zero) {
+@@ -5841,7 +5908,7 @@ static NSString *pre_stamp(NSString *txt, int zero) {
  }
  static NSArray<NSArray<NSString *> *> *pre_parse(NSString *txt) {   // (vertex key, pixel key) per line, without empty lines, comments and repeated lines
      NSMutableArray<NSArray<NSString *> *> *pairs = [NSMutableArray array]; NSMutableSet<NSString *> *seen = [NSMutableSet set];
@@ -124,7 +198,34 @@ index c5d269c..ebc4973 100644
      return pairs;
  }
  // Whether the archive bundled with the app (pso_bundle_open) holds this run's prebuild: its prebuilt.tsv is the stamp the device would write for these pairs and this depth mode,
-@@ -6108,9 +6171,10 @@ static NSArray<WarmTask *> *warm_parse(NSArray<NSString *> *paths, long *lines)
+@@ -5980,6 +6047,7 @@ static __unsafe_unretained id<MTLRenderPipelineState> sm_amp_get(const pso_key *
+         os_unfair_lock_lock(&g_sm_amp_lock); g_sm_amp[i].ps = ps; g_sm_amp[i].done = 1; os_unfair_lock_unlock(&g_sm_amp_lock); });
+     return nil;
+ }
++static void pso_predict_accounted(void);
+ static __unsafe_unretained id<MTLRenderPipelineState> pso_get_(NvProg *pr, MTLRenderPassDescriptor *unused) {
+     (void)unused;
+     g_pso_pull = 0;   // set again only where a pulling pipeline is returned: a stale 1 made the next draw, whose pipeline came from the cache, bind the layout block instead of its streams
+@@ -6021,7 +6089,7 @@ static __unsafe_unretained id<MTLRenderPipelineState> pso_get_(NvProg *pr, MTLRe
+                 if (h) {
+                     if (st == 0) pso_pend_demand(&k, vs, fs);
+                     g_pso_pull = 1; g_hy_ns += bp_now() - bt;
+-                    if (g_pp_submit_mark != g_sub_serial) { g_pp_submit_mark = g_sub_serial; uint64_t t0 = bp_now(); pso_predict_rest(); g_bp_pso_ns += bp_now() - t0; }
++                    if (g_pp_submit_mark != g_sub_serial) { g_pp_submit_mark = g_sub_serial; pso_predict_accounted(); }
+                     return h;
+                 }
+             }
+@@ -6060,8 +6128,7 @@ static __unsafe_unretained id<MTLRenderPipelineState> pso_get_(NvProg *pr, MTLRe
+     // Metal may serialize requests internally. Submit the pipeline needed now before speculative work, and preserve record-on-use above.
+     static int predict = -1; if (predict < 0) { const char *e = getenv("DM_NVN_PREDICT"); predict = !(e && !strcmp(e, "0")); if (!predict) MLOG("DM_NVN_PREDICT=0: no parallel precompile prediction"); }
+     if (predict && g_pp_submit_mark != g_sub_serial) {
+-        g_pp_submit_mark = g_sub_serial; uint64_t scan_t0 = bp_now(); pso_predict_rest();
+-        g_bp_pso_ns += bp_now() - scan_t0;   // Keep lookahead work in the pipeline-miss timing, as before
++        g_pp_submit_mark = g_sub_serial; pso_predict_accounted();   // Keep lookahead work in the inclusive pipeline timing, as before
+     }
+     return ps;
+ }
+@@ -6108,9 +6175,10 @@ static NSArray<WarmTask *> *warm_parse(NSArray<NSString *> *paths, long *lines)
      for (NSString *path in paths) {
          NSString *txt = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
          if (!txt) { MLOG("[RED] cannot read prewarm list: %s", path.UTF8String); continue; }
@@ -137,6 +238,20 @@ index c5d269c..ebc4973 100644
              if (!line.length || [line hasPrefix:@"#"] || [seen containsObject:line]) continue;
              [seen addObject:line];
              NSArray<NSString *> *c = [line componentsSeparatedByString:@"\t"];
+@@ -7078,6 +7146,13 @@ static void shader_prefetch_rest(void) {
+ }
+ static void pso_predict_rest_(void);
+ static void pso_predict_rest(void) { uint64_t t0 = bp_now(); shader_prefetch_rest(); pso_predict_rest_(); g_pt_pred_n++; g_pt_pred_ns += bp_now() - t0; }
++static uint64_t pso_accounted_clock(void *context) { (void)context; return bp_now(); }
++static void pso_accounted_predict(void *context) { (void)context; pso_predict_rest(); }
++static void pso_predict_accounted(void) {
++    (void)nvn_timing_account_prediction(&g_bp_lib_ns, &g_bp_pso_ns, &g_bp_pred_lib_ns,
++                                        &g_bp_timing_valid, pso_accounted_clock,
++                                        pso_accounted_predict, NULL);
++}
+ // state_op also sets the scissor, which lives in R, not S: it is restored with S. Without that the replay went on with the last scissor of the rest of the submission until its next
+ // OP_SCISSOR. OCTOPATH TRAVELER II (Unreal Engine 4.27) with pipelines built on demand: from Castti's opening flashback and the battlefield of Hikari's opening on, the picture was bright
+ // green and white, in every run with the prediction and in none without it (DM_NVN_PREDICT=0); a short prewarm list hid it, as fewer pipelines missed
 diff --git a/dm/gfx/nvn/nvn_rt_survey.h b/dm/gfx/nvn/nvn_rt_survey.h
 new file mode 100644
 index 0000000..773e9d9
@@ -166,6 +281,203 @@ index 0000000..773e9d9
 +    return 1;
 +}
 +#endif
+diff --git a/dm/gfx/nvn/nvn_timing.h b/dm/gfx/nvn/nvn_timing.h
+new file mode 100644
+index 0000000..2ae0ff3
+--- /dev/null
++++ b/dm/gfx/nvn/nvn_timing.h
+@@ -0,0 +1,86 @@
++#ifndef DM_NVN_TIMING_H
++#define DM_NVN_TIMING_H
++
++#include <stdint.h>
++
++typedef uint64_t (*nvn_timing_clock_fn)(void *context);
++typedef void (*nvn_timing_predict_fn)(void *context);
++
++typedef struct {
++    uint64_t lib_ns;
++    uint64_t pso_ns;
++    uint64_t predict_lib_ns;
++} nvn_timing_totals;
++
++typedef struct {
++    uint64_t lib_ns;
++    uint64_t pso_ns;
++    uint64_t predict_lib_ns;
++    uint64_t make_ns;
++    int deltas_valid;
++    int make_valid;
++} nvn_timing_frame;
++
++// Keep the existing inclusive pipeline time while measuring its nested library portion.
++static inline int nvn_timing_account_prediction(uint64_t *lib_ns, uint64_t *pso_ns,
++                                                 uint64_t *predict_lib_ns, int *valid,
++                                                 nvn_timing_clock_fn clock_now,
++                                                 nvn_timing_predict_fn predict, void *context) {
++    if (!lib_ns || !pso_ns || !predict_lib_ns || !valid || !clock_now || !predict) {
++        if (valid) *valid = 0;
++        return 0;
++    }
++    uint64_t lib_before = *lib_ns;
++    uint64_t start = clock_now(context);
++    predict(context);
++    uint64_t end = clock_now(context);
++    if (end < start) {
++        *valid = 0;
++        return 0;
++    }
++    uint64_t elapsed = end - start;
++    int ok = 1;
++    if (elapsed > UINT64_MAX - *pso_ns) {
++        *valid = 0;
++        ok = 0;
++    } else {
++        *pso_ns += elapsed;
++    }
++    if (*lib_ns < lib_before) {
++        *valid = 0;
++        return 0;
++    }
++    uint64_t nested_lib = *lib_ns - lib_before;
++    if (nested_lib > UINT64_MAX - *predict_lib_ns) {
++        *valid = 0;
++        return 0;
++    }
++    *predict_lib_ns += nested_lib;
++    return ok;
++}
++
++// A component delta can remain useful even if its overlap invariant fails; only make_ns is then unknown.
++static inline void nvn_timing_frame_delta(const nvn_timing_totals *previous,
++                                           const nvn_timing_totals *current,
++                                           int counters_valid, nvn_timing_frame *out) {
++    if (!out) return;
++    out->lib_ns = out->pso_ns = out->predict_lib_ns = out->make_ns = 0;
++    out->deltas_valid = out->make_valid = 0;
++    if (!previous || !current || !counters_valid ||
++        current->lib_ns < previous->lib_ns ||
++        current->pso_ns < previous->pso_ns ||
++        current->predict_lib_ns < previous->predict_lib_ns) return;
++
++    out->lib_ns = current->lib_ns - previous->lib_ns;
++    out->pso_ns = current->pso_ns - previous->pso_ns;
++    out->predict_lib_ns = current->predict_lib_ns - previous->predict_lib_ns;
++    out->deltas_valid = 1;
++    if (out->predict_lib_ns > out->lib_ns || out->predict_lib_ns > out->pso_ns) return;
++
++    uint64_t exclusive_lib_ns = out->lib_ns - out->predict_lib_ns;
++    if (out->pso_ns > UINT64_MAX - exclusive_lib_ns) return;
++    out->make_ns = exclusive_lib_ns + out->pso_ns;
++    out->make_valid = 1;
++}
++
++#endif
+diff --git a/dm/gfx/tests/nvn_timing_native.c b/dm/gfx/tests/nvn_timing_native.c
+new file mode 100644
+index 0000000..c35524f
+--- /dev/null
++++ b/dm/gfx/tests/nvn_timing_native.c
+@@ -0,0 +1,99 @@
++#include <assert.h>
++#include <stdint.h>
++#include <stdio.h>
++#include "nvn_timing.h"
++
++typedef struct {
++    uint64_t now_ns;
++    uint64_t *lib_ns;
++    uint64_t prefetch_ns;
++    uint64_t direct_load_ns;
++    uint64_t scan_ns;
++} fake_prediction;
++
++static uint64_t fake_clock(void *context) {
++    return ((fake_prediction *)context)->now_ns;
++}
++
++static void fake_predict(void *context) {
++    fake_prediction *p = (fake_prediction *)context;
++    p->now_ns += p->prefetch_ns;
++    *p->lib_ns += p->prefetch_ns;
++    p->now_ns += p->direct_load_ns;
++    *p->lib_ns += p->direct_load_ns;
++    p->now_ns += p->scan_ns;
++}
++
++static void test_frame_aggregation(void) {
++    nvn_timing_totals previous = {0, 0, 0};
++    nvn_timing_frame frame;
++
++    nvn_timing_totals current = {150, 200, 100};
++    nvn_timing_frame_delta(&previous, &current, 1, &frame);
++    assert(frame.deltas_valid && frame.make_valid);
++    assert(frame.lib_ns == 150 && frame.pso_ns == 200 && frame.predict_lib_ns == 100);
++    assert(frame.make_ns == 250);  // Old additive total was 350 units.
++
++    previous = current;
++    current = (nvn_timing_totals){240, 225, 100};
++    nvn_timing_frame_delta(&previous, &current, 1, &frame);
++    assert(frame.deltas_valid && frame.make_valid && frame.make_ns == 115);
++
++    previous = (nvn_timing_totals){0, 0, 0};
++    current = (nvn_timing_totals){95, 80, 80};
++    nvn_timing_frame_delta(&previous, &current, 1, &frame);
++    assert(frame.deltas_valid && frame.make_valid && frame.make_ns == 95);
++
++    current = (nvn_timing_totals){30, 40, 31};
++    nvn_timing_frame_delta(&previous, &current, 1, &frame);
++    assert(frame.deltas_valid && !frame.make_valid);
++
++    current = (nvn_timing_totals){UINT64_MAX, 1, 0};
++    nvn_timing_frame_delta(&previous, &current, 1, &frame);
++    assert(frame.deltas_valid && !frame.make_valid);  // Addition must not wrap.
++
++    current = (nvn_timing_totals){10, 10, 0};
++    nvn_timing_frame_delta(&current, &previous, 1, &frame);
++    assert(!frame.deltas_valid && !frame.make_valid);  // A cumulative counter went backwards.
++
++    nvn_timing_frame_delta(&previous, &current, 0, &frame);
++    assert(!frame.deltas_valid && !frame.make_valid);  // The source marked its snapshot invalid.
++}
++
++static void test_accounted_prediction_wrapper(void) {
++    uint64_t lib_ns = 11, pso_ns = 23, predict_lib_ns = 4;
++    int valid = 1;
++    lib_ns += 5;  // A load before prediction must not enter predict_lib_ns.
++    fake_prediction p = {1000, &lib_ns, 70, 20, 10};
++
++    assert(nvn_timing_account_prediction(&lib_ns, &pso_ns, &predict_lib_ns, &valid,
++                                         fake_clock, fake_predict, &p));
++    assert(valid && pso_ns == 123 && lib_ns == 106 && predict_lib_ns == 94);
++    lib_ns += 7;  // A load after prediction must not enter predict_lib_ns.
++
++    nvn_timing_totals previous = {11, 23, 4};
++    nvn_timing_totals current = {lib_ns, pso_ns, predict_lib_ns};
++    nvn_timing_frame frame;
++    nvn_timing_frame_delta(&previous, &current, valid, &frame);
++    assert(frame.deltas_valid && frame.make_valid);
++    assert(frame.lib_ns == 102 && frame.pso_ns == 100 && frame.predict_lib_ns == 90);
++    assert(frame.make_ns == 112);  // 5 ns before + 100 ns prediction + 7 ns after.
++
++    p.now_ns = UINT64_MAX - 5;  // A wrapping clock invalidates aggregation rather than inventing a duration.
++    assert(!nvn_timing_account_prediction(&lib_ns, &pso_ns, &predict_lib_ns, &valid,
++                                          fake_clock, fake_predict, &p));
++    assert(!valid);
++
++    lib_ns = 10; pso_ns = 5; predict_lib_ns = UINT64_MAX - 2; valid = 1;
++    p = (fake_prediction){500, &lib_ns, 2, 1, 0};
++    assert(!nvn_timing_account_prediction(&lib_ns, &pso_ns, &predict_lib_ns, &valid,
++                                          fake_clock, fake_predict, &p));
++    assert(!valid && pso_ns == 8 && predict_lib_ns == UINT64_MAX - 2);
++}
++
++int main(void) {
++    test_frame_aggregation();
++    test_accounted_prediction_wrapper();
++    puts("PASS: NVN inclusive PSO, nested library and frame aggregate timing");
++    return 0;
++}
 diff --git a/dm/gfx/tests/run_nvn_text_lines_native.py b/dm/gfx/tests/run_nvn_text_lines_native.py
 new file mode 100644
 index 0000000..86cf082
@@ -330,6 +642,62 @@ index 0000000..86cf082
 +
 +if __name__ == "__main__":
 +    raise SystemExit(main())
+diff --git a/dm/gfx/tests/run_nvn_timing_native.py b/dm/gfx/tests/run_nvn_timing_native.py
+new file mode 100644
+index 0000000..303a224
+--- /dev/null
++++ b/dm/gfx/tests/run_nvn_timing_native.py
+@@ -0,0 +1,50 @@
++#!/usr/bin/env python3
++"""Compile and run the pure-C NVN timing helper tests with Zig on Windows or Clang on macOS."""
++from pathlib import Path
++import os
++import shutil
++import subprocess
++import sys
++import tempfile
++
++
++ROOT = Path(__file__).resolve().parents[3]
++SOURCE = Path(__file__).with_name("nvn_timing_native.c")
++
++
++def main():
++    if sys.platform == "darwin":
++        compiler = shutil.which("xcrun")
++        if not compiler:
++            print("SKIP: xcrun is required for the macOS native timing test")
++            return 77
++        command = [compiler, "clang"]
++    elif sys.platform == "win32":
++        compiler = shutil.which("zig")
++        if not compiler:
++            print("SKIP: Zig is required for the Windows native timing test")
++            return 77
++        command = [compiler, "cc"]
++    else:
++        compiler = shutil.which("clang") or shutil.which("cc")
++        if not compiler:
++            print("SKIP: a C compiler is required for the native timing test")
++            return 77
++        command = [compiler]
++
++    with tempfile.TemporaryDirectory(prefix="nvn-timing-native-") as temp:
++        executable = Path(temp) / ("nvn_timing_test.exe" if sys.platform == "win32" else "nvn_timing_test")
++        compile_command = command + ["-std=c11", "-Wall", "-Wextra", "-Werror",
++                                     "-I", str(ROOT / "dm/gfx/nvn"), str(SOURCE), "-o", str(executable)]
++        env = os.environ.copy()
++        if sys.platform == "win32" and not env.get("ZIG_LIB_DIR"):
++            zig_lib = Path(compiler).resolve().parent / "lib"
++            if zig_lib.is_dir():
++                env["ZIG_LIB_DIR"] = str(zig_lib)
++        subprocess.run(compile_command, cwd=ROOT, env=env, check=True)
++        subprocess.run([str(executable)], cwd=ROOT, check=True)
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
 diff --git a/dm/gfx/tests/t_rt_survey.c b/dm/gfx/tests/t_rt_survey.c
 new file mode 100644
 index 0000000..6c45665
@@ -453,6 +821,102 @@ index 0000000..7d0f1e0
 +
 +    @unittest.skipUnless(sys.platform == "darwin", "native Foundation parser harness requires macOS/Xcode")
 +    def test_native_foundation_fixture(self):
++        subprocess.run([sys.executable, str(NATIVE)], cwd=ROOT, check=True)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/dm/gfx/tests/test_nvn_timing.py b/dm/gfx/tests/test_nvn_timing.py
+new file mode 100644
+index 0000000..dc47508
+--- /dev/null
++++ b/dm/gfx/tests/test_nvn_timing.py
+@@ -0,0 +1,90 @@
++"""Source wiring and native arithmetic tests for NVN timing accounting."""
++from pathlib import Path
++import subprocess
++import sys
++import unittest
++
++
++ROOT = Path(__file__).resolve().parents[3]
++MTL = ROOT / "dm/gfx/nvn/nvn_mtl.m"
++HLE = ROOT / "dm/gfx/nvn/hle_nvn.c"
++NATIVE = ROOT / "dm/gfx/tests/run_nvn_timing_native.py"
++
++
++def function_body(source: str, signature: str) -> str:
++    start = source.index(signature)
++    brace = source.index("{", start)
++    depth = 0
++    state = None
++    escaped = False
++    i = brace
++    while i < len(source):
++        ch = source[i]
++        nxt = source[i + 1] if i + 1 < len(source) else ""
++        if state == "line":
++            if ch == "\n":
++                state = None
++        elif state == "block":
++            if ch == "*" and nxt == "/":
++                state = None
++                i += 1
++        elif state:
++            if escaped:
++                escaped = False
++            elif ch == "\\":
++                escaped = True
++            elif ch == state:
++                state = None
++        elif ch == "/" and nxt == "/":
++            state = "line"
++            i += 1
++        elif ch == "/" and nxt == "*":
++            state = "block"
++            i += 1
++        elif ch in ('"', "'"):
++            state = ch
++        elif ch == "{":
++            depth += 1
++        elif ch == "}":
++            depth -= 1
++            if depth == 0:
++                return source[start:i + 1]
++        i += 1
++    raise AssertionError(f"unclosed function body: {signature}")
++
++
++class NVNTimingTests(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.mtl = MTL.read_text(encoding="utf-8")
++        cls.hle = HLE.read_text(encoding="utf-8")
++
++    def test_both_predictor_call_sites_use_one_accounting_wrapper(self):
++        body = function_body(self.mtl, "pso_get_(NvProg *pr, MTLRenderPassDescriptor *unused) {")
++        self.assertEqual(body.count("pso_predict_accounted()"), 2)
++        self.assertNotIn("pso_predict_rest()", body)
++        wrapper = function_body(self.mtl, "static void pso_predict_accounted(void) {")
++        self.assertIn("nvn_timing_account_prediction(&g_bp_lib_ns, &g_bp_pso_ns, &g_bp_pred_lib_ns", wrapper)
++        self.assertIn("&g_bp_timing_valid", wrapper)
++        callback = function_body(self.mtl, "static void pso_accounted_predict(void *context)")
++        self.assertIn("pso_predict_rest()", callback)
++
++    def test_snapshot_exports_nested_counter_and_validity(self):
++        snapshot = function_body(self.mtl, "int mtl_create_ns(uint64_t *lib_ns, uint64_t *pso_ns, uint64_t *predict_lib_ns)")
++        self.assertIn("*predict_lib_ns = g_bp_pred_lib_ns", snapshot)
++        self.assertIn("return g_bp_timing_valid", snapshot)
++
++    def test_longframe_and_tsv_use_one_validated_delta(self):
++        self.assertIn("nvn_timing_frame_delta(&previous, &current, counters_valid, &compile_time)", self.hle)
++        for metric in ("@lib_ms", "@pso_inclusive_ms", "@predict_lib_ms", "@make_ms"):
++            self.assertIn(f'trow(f, "{metric}"', self.hle)
++        self.assertIn("r->make_ms = compile_time.make_valid ?", self.hle)
++        self.assertIn("aggregate compile time is unknown", self.hle)
++        self.assertNotIn("((lns - plns) + (pns - ppns))", self.hle)
++
++    def test_native_pure_c_fixture(self):
 +        subprocess.run([sys.executable, str(NATIVE)], cwd=ROOT, check=True)
 +
 +
@@ -851,10 +1315,18 @@ index 29912b1..2b7981b 100644
  
  `python3 scripts/regress.py impact <base>..<head>` (or one commit) maps a change to those names: the functions around its changed lines, followed through the host's callers to the NVN entry points and HLE functions they serve, and the rules of `dm/tools/impact_map.tsv` (a file, or functions in it, to manifest rows: `dmsh_atomic.py` to the image atomic features, the prepare-step functions of `nvn_mtl.m` to the games that run it). It lists the games that use what the change touches, those reached only through a broad rule (every game of the API), and the profiles without a manifest as unknown. It reads only git and the committed manifests, so it needs neither game files nor a harness root: the report is printed, and written as `impact.md` and `impact.json` to `--out` or, when there is one, `<root>/reports/`. Run it before a change to the chain or host, and run `regress.py check` on the games it names that you have; ask their owners for the others. A changed file no rule maps is listed: add a rule for it.
 diff --git a/docs/agents/symptoms.md b/docs/agents/symptoms.md
-index 0358e52..4898e85 100644
+index 0358e52..3e3bed6 100644
 --- a/docs/agents/symptoms.md
 +++ b/docs/agents/symptoms.md
-@@ -480,6 +480,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+@@ -289,6 +289,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+ - the submit thread's CPU samples dominated by `mtl_addr` / `mtl_gpu_addr` (vertex buffers in `draw`, uniform buffers in `encode_args`). → [Address to memory pool lookups by binary search](../reference/frame-rate.md#address-to-memory-pool-lookups-by-binary-search)
+ - gameplay has low CPU clocks, large render submission wall time compared with thread CPU time, and default QoS (`0x15`) on the main guest thread while workers report user-interactive (`0x21`). → [Main guest thread keeps inherited default QoS](../reference/frame-rate.md#main-guest-thread-keeps-inherited-default-qos)
+ - stalls of 30–60 ms about once a second, at 30 fps and at 60 (99th percentile 63–127 ms); the main thread waits 20–34 ms for the render thread once a second. → [Time-constraint computation declared below the thread's peaks](../reference/frame-rate.md#time-constraint-computation-declared-below-the-threads-peaks)
++- a long-frame diagnostic's combined creation time exceeds the distinct pipeline and shader-library work it is meant to describe. → [Nested prediction libraries counted twice in long-frame totals](../reference/frame-rate.md#nested-prediction-libraries-counted-twice-in-long-frame-totals)
+ 
+ ## NVN objects
+ 
+@@ -480,6 +481,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
  - SPIRV-Cross can't parse the SPIR-V (`nullptr` exception). → [SPIRV-Cross parse failures](../reference/shaders.md#spirv-cross-parse-failures)
  - `Fragment input(s) user(locnN) mismatching vertex shader output type(s) or not written by vertex shader` and the draw is skipped; the host reports `[RED] failed to create render pipeline (vertex … fragment …)`. Offline packing fails with `pso_offline: metal-tt failed` for the same reason. → [Pixel shader inputs the vertex shader does not write](../reference/shaders.md#pixel-shader-inputs-the-vertex-shader-does-not-write)
  - outdoors dim and nothing casts a sun shadow (every shadow-map lookup fails). → [Unwritten components of a written output start as (0, 0, 0, 1)](../reference/shaders.md#unwritten-components-of-a-written-output-start-as-0-0-0-1)
@@ -862,6 +1334,23 @@ index 0358e52..4898e85 100644
  - the ground kept stale 32×32 blocks where the G-buffer draw failed the depth test: blocks of a stale image where a depth pre-pass and a later pass with other vertex shaders meet (Odyssey: 32×32 blocks on every fourth frame). → [Position invariance across shaders](../reference/shaders.md#position-invariance-across-shaders)
  - making a pipeline archive prints `Max Unstruct ID 758 in function agc.main in shader 13941 exceeds supported limit`, and one pipeline takes many minutes, in `metal-tt` offline or in the host's prebuild on the device (`Preparing pipelines` holding one count for minutes). The line is a note, not an error: `metal-tt` goes on, exits 0 and writes that pipeline into the archive. → [Front end at -O1: Apple's control-flow lowering](../reference/shaders.md#front-end-at--o1-apples-control-flow-lowering)
  - the half of Mario facing the camera's left was white (GitHub issue 72, on an iPhone). → [min, max and clamp with a NaN operand](../reference/shaders.md#min-max-and-clamp-with-a-nan-operand)
+diff --git a/docs/reference/frame-rate.md b/docs/reference/frame-rate.md
+index a438de6..8ba819b 100644
+--- a/docs/reference/frame-rate.md
++++ b/docs/reference/frame-rate.md
+@@ -264,3 +264,12 @@ Frame pacing: the host's frame step, engine frame limiters, present intervals an
+ - **Cause:** the thread that acquires the window (here the render thread) runs under a time-constraint policy whose computation the host re-declares every 120 frames; it was 1.25 × the 90th percentile of that thread's CPU time per frame. This render thread needs 1.9–2.0 ms a frame with one or two frames in 120 near 4.4 ms, against 2.5 ms declared, and each frame past the declaration stalled the thread. Probes on both threads' waits showed the main thread's waits; adding probes slowed the render thread and the stalls vanished, and `DM_RT=0` or a fixed `DM_RT_COMP=5` / `10` removed them too (99th percentile 18–21 ms) at the same CPU energy.
+ - **Fix:** the declaration also covers 1.1 × the window's peak (`rt_comp_tick` in `hle_nvn.c`): 5.6 ms here, 60.0 fps, 99th percentile 21 ms.
+ - **Found on:** [DARK SOULS: REMASTERED](../../dm/games/01004AB00A260000/README.md), in the Asylum cell.
++
++
++### Nested prediction libraries counted twice in long-frame totals
++
++- **Symptom:** a long-frame diagnostic's combined creation time exceeds the distinct pipeline and shader-library work it is meant to describe.
++- **Cause:** the inclusive pipeline timer includes prediction. Prediction's parallel prefetch and direct shader loads also increment the library timer, so adding both counters repeats their nested interval. The separate window summaries intentionally retain inclusive timings and must not be summed.
++- **Fix:** both predictor call sites use one accounting wrapper. It retains inclusive counters and records the nested library subset. Long-frame `in all` and TSV `@make_ms` use library plus pipeline minus nested library time. `@lib_ms`, `@pso_inclusive_ms` and `@predict_lib_ms` expose the components. Invalid deltas or overlap produce an explicit unknown value, never unsigned underflow or a fabricated zero. Rendering, prediction order and caches are unchanged.
++- **Check:** `test_nvn_timing.py` exercises the actual pure-C accounting with a fake clock/predictor, nested and outside loads, repeated snapshots, overflow and invalid counters. It also checks both runtime call sites and the TSV wiring. This corrects measurement, not frame rate.
++- **Found on:** the [Odyssey iPad audit](../../dm/games/0100000000010000/README.md#found-on-this-game). Old per-frame totals cannot be corrected from nearby untagged prefetch messages; only window-level overlap bounds are available.
 diff --git a/docs/reference/shaders.md b/docs/reference/shaders.md
 index 7dbec3c..ea04cbf 100644
 --- a/docs/reference/shaders.md

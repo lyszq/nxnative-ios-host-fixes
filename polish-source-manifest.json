@@ -1,10 +1,10 @@
 {
   "baseline_local_commit": "247b957d7525033f4d602a0c3242eaad96d977ab",
-  "source_local_commit": "a95502def862375c69fbf59d7147ecd0711bc17a",
+  "source_local_commit": "1b30a84b74986a1b97ddb309be774097f35f80d0",
   "base_upstream": "337186cf3ce778dd1b89092e8958652cb4d7ceb3",
   "base_fork": "59492c868416d82cdd5b57fbbf78753d044412d9",
   "applies_after": "host-fixes.patch",
-  "patch_sha256": "80878b2229a52fface395068f2f52d89ac427b94104c739aaa2d8ee09edf69f8",
+  "patch_sha256": "e1d1bdb246ae710b8257c8ed41becdfc524c7bcd8337cf5479c979be9da4802e",
   "unchanged_cache_interfaces": [
     "dm/gfx/nvn/dm_shell_msl.h",
     "dm/gfx/nvn/dmsh_chain.h",
@@ -13,19 +13,35 @@
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
-      "normalized_sha256": "56072e2964a2278e868b5fe56cbd009d74a4d36024e9c18e0f4c5dcc67f2d16d"
+      "normalized_sha256": "1232a608f9c123f2acc1489ab5598ae6e0accbd9e4c39a6d6cd0ad29134a74e0"
+    },
+    {
+      "path": "dm/gfx/nvn/hle_nvn.c",
+      "normalized_sha256": "51a3ddf652433c6c627b277e05120b2baffe04d3e7ea14c38212db6b5e699420"
     },
     {
       "path": "dm/gfx/nvn/nvn_mtl.m",
-      "normalized_sha256": "1fa58c75636c29169f624561d0a1b61aaff3b73176b17bd5466ee0dfa48ab979"
+      "normalized_sha256": "062f81f53cc43eb9882368c45afe0e5109d603c35fdb9779a3e7f7657761303e"
     },
     {
       "path": "dm/gfx/nvn/nvn_rt_survey.h",
       "normalized_sha256": "1139f53dbfcc19087e2bff2606da17bab1d4f9b48f7e7b769f48449716000ff9"
     },
     {
+      "path": "dm/gfx/nvn/nvn_timing.h",
+      "normalized_sha256": "f55d7b52d49fa8b2244ae9bcf1dacdecd550aa474437388ae699bd10be3eb8dd"
+    },
+    {
+      "path": "dm/gfx/tests/nvn_timing_native.c",
+      "normalized_sha256": "961bdb334416eb6c6d2f319858ebf940a9c3d39f112f4c36725235a24db9e8e0"
+    },
+    {
       "path": "dm/gfx/tests/run_nvn_text_lines_native.py",
       "normalized_sha256": "1e595677480d20b8e314638a37ea919c74f11bbe1f7ca3418e263a7f71a5de4f"
+    },
+    {
+      "path": "dm/gfx/tests/run_nvn_timing_native.py",
+      "normalized_sha256": "2a5780a38f958459b6a5cffdd97264f4e78603a6572e18d66dadaac4ed5d983c"
     },
     {
       "path": "dm/gfx/tests/t_rt_survey.c",
@@ -34,6 +50,10 @@
     {
       "path": "dm/gfx/tests/test_nvn_text_lines.py",
       "normalized_sha256": "eadeb44534a389b5757d214f47af11878cb7d12e7591c60882e160141b0291fd"
+    },
+    {
+      "path": "dm/gfx/tests/test_nvn_timing.py",
+      "normalized_sha256": "b33ad9b9bcbb620fb70303968d0c5f3751b1910ed8c281954ccb452af3aa0415"
     },
     {
       "path": "dm/gfx/tests/test_rt_survey.py",
@@ -73,7 +93,11 @@
     },
     {
       "path": "docs/agents/symptoms.md",
-      "normalized_sha256": "9641e8949ce9db8081ec624aaf13bf627182579896ad65971567a6d2cdb17b24"
+      "normalized_sha256": "fa70c6153b9f9a93b32564276dbc7bf6ecc1a505da5c765d9539567da65e7ec9"
+    },
+    {
+      "path": "docs/reference/frame-rate.md",
+      "normalized_sha256": "e228a4c16d02df63da6ed9d5ad15ada6bf118653ff21e2289b5c2fd90b5c33e1"
     },
     {
       "path": "docs/reference/shaders.md",
