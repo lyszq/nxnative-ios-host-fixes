@@ -1,11 +1,13 @@
 diff --git a/dm/games/0100000000010000/README.md b/dm/games/0100000000010000/README.md
-index fe83bf3..f071121 100644
+index fe83bf3..70a966d 100644
 --- a/dm/games/0100000000010000/README.md
 +++ b/dm/games/0100000000010000/README.md
-@@ -58,6 +58,10 @@ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in
+@@ -58,6 +58,12 @@ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in
  
  General host and tool changes first needed here; each applies to every game:
  
++- **Opt-in cold vertex/pixel loading:** [Joined loading for a demanded cold pair](../../../docs/reference/shaders.md#opt-in-joined-loading-for-a-demanded-cold-vertex-and-pixel-pair). Default off; native fixture checks do not establish a device performance gain.
++
 +- **Disjoint long-frame creation timing:** [Nested prediction libraries counted twice in long-frame totals](../../../docs/reference/frame-rate.md#nested-prediction-libraries-counted-twice-in-long-frame-totals). Measurement correction only; device performance is not implied.
 +
 +- **CRLF prewarm parsing (source audit; device validation pending):** [CRLF prewarm rows retain a carriage return](../../../docs/reference/shaders.md#crlf-prewarm-rows-retain-a-carriage-return). The observed iPad list was LF; this hardening preserves its cache format and does not explain the recorded first-use hitches.
@@ -64,29 +66,40 @@ index 38bddf5..85e1336 100644
          plib = lib_; ppso = pso_;
          trow(f, "@t_s", (now_ns() - g_t0_ns) / 1e9);
 diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
-index c5d269c..973480b 100644
+index c5d269c..7a5e8e1 100644
 --- a/dm/gfx/nvn/nvn_mtl.m
 +++ b/dm/gfx/nvn/nvn_mtl.m
-@@ -29,6 +29,8 @@
+@@ -29,6 +29,9 @@
  #include "nvn_cover.h"
  #include "nvn_primitive.h"
  #include "nvn_timestamp.h"
 +#include "nvn_rt_survey.h"
 +#include "nvn_timing.h"
++#include "nvn_pair_batch.h"
  #include "dmsh_chain.h"   // DMSH_CHAIN: the translation chain version of the B shader library expected by this source tree, one for every game (beside this file, tools/dmsh_chain.py --header)
  #include "game_profile.h"   // game profile constants (profile id, the profile's switches)
  #ifdef DM_SHELL
-@@ -1291,7 +1293,8 @@ static uint64_t bp_now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,
+@@ -1291,7 +1294,18 @@ static uint64_t bp_now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,
  static uint64_t g_bp_t0;   // Time of process start (when this module is loaded)
  __attribute__((constructor)) static void bp_t0(void) { g_bp_t0 = bp_now(); }
  static int bootprof(void) { static int v = -1; if (v < 0) v = getenv("DM_BOOTPROF") != NULL; return v; }
 -static uint64_t g_bp_lib_n, g_bp_lib_ns, g_bp_pso_n, g_bp_pso_ns, g_bp_up_bytes, g_bp_first_present;
 +static uint64_t g_bp_lib_n, g_bp_lib_ns, g_bp_pso_n, g_bp_pso_ns, g_bp_pred_lib_ns, g_bp_up_bytes, g_bp_first_present;
 +static int g_bp_timing_valid = 1;
++static int pair_load_on(void) {
++    static int v = -1;
++    if (v < 0) {
++        const char *e = getenv("DM_NVN_PAIR_LOAD");
++        v = e && !strcmp(e, "1");
++        if (v) MLOG("DM_NVN_PAIR_LOAD=1: cold demanded vertex + pixel libraries may load together after warm-up (opt-in experiment)");
++    }
++    return v;
++}
++static uint64_t g_pair_batches, g_pair_loaded, g_pair_failed, g_pair_ns;
  static uint64_t g_up_total_ns;   // Cumulative upload time (same source as the per-frame @upload_ms)
  // ---------- Per-frame GPU time aggregation ----------
  #define GRING 1024
-@@ -2139,7 +2142,9 @@ static id<MTLTexture> pkg_upload(const tex_t *t, uint64_t *stamp, id<MTLTexture>
+@@ -2139,7 +2153,9 @@ static id<MTLTexture> pkg_upload(const tex_t *t, uint64_t *stamp, id<MTLTexture>
  uint64_t mtl_upload_ns_take(void) { return atomic_exchange(&g_upload_ns, 0); }
  uint64_t mtl_upload_gpu_ns_take(void) { return atomic_exchange(&g_upload_gpu_ns, 0); }
  void mtl_create_stats(uint64_t *lib, uint64_t *pso) { *lib = g_bp_lib_n; *pso = g_bp_pso_n; }
@@ -97,7 +110,7 @@ index c5d269c..973480b 100644
  uint64_t mtl_upload_bytes(void) { return g_bp_up_bytes; }   // Cumulative texture upload bytes
  // Diagnostic DM_NVN_ZBLOCK=1: all-zero 16-byte blocks of each ASTC texture uploaded on the CPU, per level (an all-zero ASTC block decodes as the error colour, magenta). tex_mtl_ logs
  // a texture whose bound levels hold any (zb_report), with each level's zero blocks, its total and whether all its pages are mapped (sparse pools)
-@@ -2776,6 +2781,57 @@ static void pass_dims(MTL4RenderPassDescriptor *pd, NSUInteger nc, NSUInteger *w
+@@ -2776,6 +2792,57 @@ static void pass_dims(MTL4RenderPassDescriptor *pd, NSUInteger nc, NSUInteger *w
      if (!*w) { *w = MAX(pd.renderTargetWidth, 1); *h = MAX(pd.renderTargetHeight, 1); }   // attachment-less pass (rp_begin_ex_): its explicit size
  }
  
@@ -155,7 +168,7 @@ index c5d269c..973480b 100644
  // ---------- DM_NVN_PASSGPU=<file>: per-pass GPU time (stage-boundary timestamp counters) ----------
  // Each render pass samples 4 points (vertex start/end, fragment start/end), a compute pass 2 points; resolved after the command buffer completes and accumulated by 'index of the pass within the frame'.
  // Each line: frame idx kind gpu_ms inc_ms w h fmt0 dfmt load draws t0_ns t1_ns (kind: R render / C compute; load: L load / C clear for each color attachment + depth)
-@@ -3397,6 +3453,7 @@ static id<MTL4RenderCommandEncoder> rp_begin_ex_(int clear_only) {
+@@ -3397,6 +3464,7 @@ static id<MTL4RenderCommandEncoder> rp_begin_ex_(int clear_only) {
          if (pd.depthAttachment.texture) { id<MTLTexture> t = pd.depthAttachment.texture; NSUInteger have = t.arrayLength * (t.textureType == MTLTextureTypeCube || t.textureType == MTLTextureTypeCubeArray ? 6 : 1) - pd.depthAttachment.slice; if (have < nl) nl = have; }
          if (nl != NSUIntegerMax && nl > 1) { pd.renderTargetArrayLength = nl; PD("L %llu layered pass: %lu layers", g_stat_pass + 1, (unsigned long)nl); }
      }
@@ -163,7 +176,7 @@ index c5d269c..973480b 100644
      pg_render(pd, (NSUInteger)R.rt.n);
      { void td_note(id pd, NSUInteger nc); td_note(pd, (NSUInteger)R.rt.n);
        void ts_note(id pd, NSUInteger nc); ts_note(pd, (NSUInteger)R.rt.n);
-@@ -3622,6 +3679,16 @@ static FILE *pso_user_file(void) {
+@@ -3622,6 +3690,16 @@ static FILE *pso_user_file(void) {
      if (path) g_pso_user = fopen(path.fileSystemRepresentation, "a");
      return g_pso_user;
  }
@@ -180,7 +193,7 @@ index c5d269c..973480b 100644
  static void pso_user_record(const char *fmt, ...) {
      FILE *f = pso_user_file();
      if (!f) return;
-@@ -3631,7 +3698,7 @@ static void pso_user_record(const char *fmt, ...) {
+@@ -3631,7 +3709,7 @@ static void pso_user_record(const char *fmt, ...) {
          NSString *seed = g_shmap_path ? [g_shmap_path.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"pso_manifest.tsv"] : nil;
          NSMutableArray<NSString *> *paths = [NSMutableArray array]; if (seed) [paths addObject:seed]; NSString *user = pso_user_path(); if (user) [paths addObject:user];
          for (NSString *path in paths) { NSString *txt = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
@@ -189,7 +202,83 @@ index c5d269c..973480b 100644
      }
      size_t ll = strlen(line); NSString *s = [[NSString alloc] initWithBytes:line length:ll && line[ll - 1] == '\n' ? ll - 1 : ll encoding:NSUTF8StringEncoding];   // Compared with the manifest file line by line (without the newline)
      if (!s || [g_pso_user_seen containsObject:s]) return;
-@@ -5841,7 +5908,7 @@ static NSString *pre_stamp(NSString *txt, int zero) {
+@@ -3882,6 +3960,47 @@ static __unsafe_unretained NvProg *prog_get(const prog_t *cp) {   // Called only
+     if (have) { lp = p; lser = p->serial; lgen = gen; lpr = have; return have; }
+     shmap_load();
+     NvProg *o = [NvProg new];
++    NSArray<NSString *> *pair_keys = nil; NSArray<NSNumber *> *pair_stages = nil; NSArray *pair_results = nil;
++    BOOL pair_attempted = NO;
++    if (p->nstage == 2 && pair_load_on()) {
++        NSMutableArray<NSString *> *keys = [NSMutableArray arrayWithCapacity:2];
++        NSMutableArray<NSNumber *> *stages = [NSMutableArray arrayWithCapacity:2];
++        for (unsigned i = 0; i < 2; i++) {
++            uint8_t md[8]; prog_key(p, i, md);
++            NSString *k = [NSString stringWithFormat:@"%02x%02x%02x%02x%02x%02x%02x%02x", md[0], md[1], md[2], md[3], md[4], md[5], md[6], md[7]];
++            int st = stage_of(g_shmap[k]);
++            if (st < 0 || st > 1) { [keys removeAllObjects]; [stages removeAllObjects]; break; }
++            [keys addObject:[k stringByAppendingString:@"_b"]]; [stages addObject:@(st)];
++        }
++        if (keys.count == 2) {
++            pair_keys = [keys copy]; pair_stages = [stages copy];
++            NSDictionary *cache = g_shcache ?: @{};
++            BOOL warm_running = atomic_load(&g_warm_running), warm_ready = atomic_load(&g_warm_ready);
++            if (nvn_pair_load_eligible(pair_keys, pair_stages, cache, YES, g_warm_started, warm_running, warm_ready)) {
++                // shader_load has lazily cached switches; initialize them here before either worker can be first.
++                (void)tex_dyn_slots_on(); (void)rt_range_on();
++                uint64_t t0 = bp_now();
++                pair_results = nvn_pair_load_joined(pair_keys, pair_stages, cache, YES,
++                                                     g_warm_started, warm_running, warm_ready,
++                                                     ^id(NSString *key, NSInteger stage) { return shader_load(key, (int)stage, 0); },
++                                                     &pair_attempted);
++                if (pair_attempted) {
++                    uint64_t dt = bp_now() - t0; unsigned got = 0;
++                    if (!g_shcache) g_shcache = [NSMutableDictionary dictionary];
++                    for (NSUInteger i = 0; i < pair_results.count; i++) {
++                        id value = pair_results[i]; if (value == NSNull.null) continue;
++                        NvShader *sh = value; NSString *key = pair_keys[i]; int stage = pair_stages[i].intValue;
++                        g_shcache[key] = sh; got++;
++                        pso_record("S\t%s\t%d\n", key.UTF8String, stage);
++                        pso_user_record("S\t%s\t%d\n", key.UTF8String, stage);
++                    }
++                    g_bp_lib_n += got; g_bp_lib_ns += dt;
++                    g_pair_batches++; g_pair_loaded += got; g_pair_failed += 2 - got; g_pair_ns += dt;
++                    static int logged; if (logged++ < 8) MLOG("demanded shader pair: loaded %u of 2 libraries together in %.1f ms", got, dt / 1e6);
++                }
++            }
++        }
++    }
+     for (unsigned i = 0; i < p->nstage; i++) {
+         // Key = sha256(first 0x880 bytes of the control section + code area): many of Mario's shaders share a control section but differ in code (dm/gfx/tools/shader_split.py). It was computed at SetShaders (hle_nvn.c): by now the game may have freed the control section
+         uint8_t md[8]; prog_key(p, i, md);
+@@ -3900,7 +4019,12 @@ static __unsafe_unretained NvProg *prog_get(const prog_t *cp) {   // Called only
+             continue;
+         }
+         int st = stage_of(stage);
+-        NvShader *sh = st >= 0 ? shader_get([k stringByAppendingString:@"_b"], st) : nil;
++        NvShader *sh = nil;
++        if (st >= 0) {
++            if (pair_attempted && i < pair_results.count) {
++                id value = pair_results[i]; if (value != NSNull.null) sh = value;
++            } else sh = shader_get([k stringByAppendingString:@"_b"], st);
++        }
+         if (sh) o->sh[st] = sh; else MLOG("[RED] shader %s (%s) failed to load: build the shaders with dm/gfx/tools/dmsh_build.py first", k.UTF8String, stage.UTF8String);
+         if (!sh && st == 2) strlcpy(o->gs_miss, k.UTF8String, sizeof o->gs_miss);
+     }
+@@ -5751,6 +5875,13 @@ void mtl_pso_line(char *o, size_t n) {
+              d[0] / 1e6, d[1] / 1e6, (unsigned long long)d[10], d[11] / 1e6, (unsigned long long)d[2], d[3] / 1e6, (unsigned long long)d[4], d[5] / 1e6, (unsigned long long)d[6], d[7] / 1e6,
+              (unsigned long long)d[8], d[9] / 1e6, (unsigned long long)d[12], (unsigned long long)d[13], (unsigned long long)d[17], (unsigned long long)d[14], (unsigned long long)d[15], (unsigned long long)d[16], (unsigned long long)(v[14] - v[15] - v[16]));
+     memcpy(p, v, sizeof p);
++    if (pair_load_on() && g_pair_batches) {
++        static uint64_t pb, pl, pf, pair_ns_prev; size_t op = strlen(o);
++        if (op < n) snprintf(o + op, n - op, "; demanded VS+FS batches %llu, libraries loaded %llu, failed %llu / %.1f ms",
++                             (unsigned long long)(g_pair_batches - pb), (unsigned long long)(g_pair_loaded - pl),
++                             (unsigned long long)(g_pair_failed - pf), (g_pair_ns - pair_ns_prev) / 1e6);
++        pb = g_pair_batches; pl = g_pair_loaded; pf = g_pair_failed; pair_ns_prev = g_pair_ns;
++    }
+     static uint64_t pn[5], pns[5]; size_t o2 = strlen(o);
+     o2 += snprintf(o + o2, n > o2 ? n - o2 : 0, "; draws that waited:");
+     for (int i = 0; i < 5; i++) if (g_pw_n[i] > pn[i]) o2 += snprintf(o + o2, n > o2 ? n - o2 : 0, " %s %llu / %.1f ms,", g_pw_why[i], (unsigned long long)(g_pw_n[i] - pn[i]), (g_pw_ns[i] - pns[i]) / 1e6);
+@@ -5841,7 +5972,7 @@ static NSString *pre_stamp(NSString *txt, int zero) {
  }
  static NSArray<NSArray<NSString *> *> *pre_parse(NSString *txt) {   // (vertex key, pixel key) per line, without empty lines, comments and repeated lines
      NSMutableArray<NSArray<NSString *> *> *pairs = [NSMutableArray array]; NSMutableSet<NSString *> *seen = [NSMutableSet set];
@@ -198,7 +287,7 @@ index c5d269c..973480b 100644
      return pairs;
  }
  // Whether the archive bundled with the app (pso_bundle_open) holds this run's prebuild: its prebuilt.tsv is the stamp the device would write for these pairs and this depth mode,
-@@ -5980,6 +6047,7 @@ static __unsafe_unretained id<MTLRenderPipelineState> sm_amp_get(const pso_key *
+@@ -5980,6 +6111,7 @@ static __unsafe_unretained id<MTLRenderPipelineState> sm_amp_get(const pso_key *
          os_unfair_lock_lock(&g_sm_amp_lock); g_sm_amp[i].ps = ps; g_sm_amp[i].done = 1; os_unfair_lock_unlock(&g_sm_amp_lock); });
      return nil;
  }
@@ -206,7 +295,7 @@ index c5d269c..973480b 100644
  static __unsafe_unretained id<MTLRenderPipelineState> pso_get_(NvProg *pr, MTLRenderPassDescriptor *unused) {
      (void)unused;
      g_pso_pull = 0;   // set again only where a pulling pipeline is returned: a stale 1 made the next draw, whose pipeline came from the cache, bind the layout block instead of its streams
-@@ -6021,7 +6089,7 @@ static __unsafe_unretained id<MTLRenderPipelineState> pso_get_(NvProg *pr, MTLRe
+@@ -6021,7 +6153,7 @@ static __unsafe_unretained id<MTLRenderPipelineState> pso_get_(NvProg *pr, MTLRe
                  if (h) {
                      if (st == 0) pso_pend_demand(&k, vs, fs);
                      g_pso_pull = 1; g_hy_ns += bp_now() - bt;
@@ -215,7 +304,7 @@ index c5d269c..973480b 100644
                      return h;
                  }
              }
-@@ -6060,8 +6128,7 @@ static __unsafe_unretained id<MTLRenderPipelineState> pso_get_(NvProg *pr, MTLRe
+@@ -6060,8 +6192,7 @@ static __unsafe_unretained id<MTLRenderPipelineState> pso_get_(NvProg *pr, MTLRe
      // Metal may serialize requests internally. Submit the pipeline needed now before speculative work, and preserve record-on-use above.
      static int predict = -1; if (predict < 0) { const char *e = getenv("DM_NVN_PREDICT"); predict = !(e && !strcmp(e, "0")); if (!predict) MLOG("DM_NVN_PREDICT=0: no parallel precompile prediction"); }
      if (predict && g_pp_submit_mark != g_sub_serial) {
@@ -225,7 +314,7 @@ index c5d269c..973480b 100644
      }
      return ps;
  }
-@@ -6108,9 +6175,10 @@ static NSArray<WarmTask *> *warm_parse(NSArray<NSString *> *paths, long *lines)
+@@ -6108,9 +6239,10 @@ static NSArray<WarmTask *> *warm_parse(NSArray<NSString *> *paths, long *lines)
      for (NSString *path in paths) {
          NSString *txt = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
          if (!txt) { MLOG("[RED] cannot read prewarm list: %s", path.UTF8String); continue; }
@@ -238,7 +327,7 @@ index c5d269c..973480b 100644
              if (!line.length || [line hasPrefix:@"#"] || [seen containsObject:line]) continue;
              [seen addObject:line];
              NSArray<NSString *> *c = [line componentsSeparatedByString:@"\t"];
-@@ -7078,6 +7146,13 @@ static void shader_prefetch_rest(void) {
+@@ -7078,6 +7210,13 @@ static void shader_prefetch_rest(void) {
  }
  static void pso_predict_rest_(void);
  static void pso_predict_rest(void) { uint64_t t0 = bp_now(); shader_prefetch_rest(); pso_predict_rest_(); g_pt_pred_n++; g_pt_pred_ns += bp_now() - t0; }
@@ -252,6 +341,71 @@ index c5d269c..973480b 100644
  // state_op also sets the scissor, which lives in R, not S: it is restored with S. Without that the replay went on with the last scissor of the rest of the submission until its next
  // OP_SCISSOR. OCTOPATH TRAVELER II (Unreal Engine 4.27) with pipelines built on demand: from Castti's opening flashback and the battlefield of Hikari's opening on, the picture was bright
  // green and white, in every run with the prediction and in none without it (DM_NVN_PREDICT=0); a short prewarm list hid it, as fewer pipelines missed
+diff --git a/dm/gfx/nvn/nvn_pair_batch.h b/dm/gfx/nvn/nvn_pair_batch.h
+new file mode 100644
+index 0000000..2dc5fce
+--- /dev/null
++++ b/dm/gfx/nvn/nvn_pair_batch.h
+@@ -0,0 +1,59 @@
++#ifndef NVN_PAIR_BATCH_H
++#define NVN_PAIR_BATCH_H
++
++#import <Foundation/Foundation.h>
++#import <dispatch/dispatch.h>
++
++NS_ASSUME_NONNULL_BEGIN
++
++// Joined, demand-driven loading of exactly one vertex and one pixel library.
++// The caller owns cache publication; loader workers only return per-attempt objects.
++typedef id _Nullable (^nvn_pair_shader_loader)(NSString *key, NSInteger stage);
++
++static inline BOOL nvn_pair_load_eligible(NSArray<NSString *> * _Nullable keys,
++                                          NSArray<NSNumber *> * _Nullable stages,
++                                          NSDictionary<NSString *, id> * _Nullable cache,
++                                          BOOL enabled,
++                                          BOOL warm_started,
++                                          BOOL warm_running,
++                                          BOOL warm_ready) {
++    if (!enabled || !warm_started || warm_running || warm_ready || !keys || !stages || !cache ||
++        keys.count != 2 || stages.count != 2) return NO;
++    NSString *key0 = keys[0], *key1 = keys[1];
++    if (![key0 isKindOfClass:NSString.class] || !key0.length ||
++        ![key1 isKindOfClass:NSString.class] || !key1.length || [key0 isEqualToString:key1]) return NO;
++    id stage0_value = stages[0], stage1_value = stages[1];
++    if (![stage0_value isKindOfClass:NSNumber.class] || ![stage1_value isKindOfClass:NSNumber.class]) return NO;
++    NSInteger stage0 = [stage0_value integerValue], stage1 = [stage1_value integerValue];
++    if (!((stage0 == 0 && stage1 == 1) || (stage0 == 1 && stage1 == 0))) return NO;
++    return cache[key0] == nil && cache[key1] == nil;
++}
++
++// Results stay aligned with input order. NSNull marks an attempted load failure,
++// so the submit-thread caller can avoid immediately retrying that stage serially.
++static inline NSArray * _Nullable nvn_pair_load_joined(NSArray<NSString *> * _Nullable keys,
++                                                        NSArray<NSNumber *> * _Nullable stages,
++                                                        NSDictionary<NSString *, id> * _Nullable cache,
++                                                        BOOL enabled,
++                                                        BOOL warm_started,
++                                                        BOOL warm_running,
++                                                        BOOL warm_ready,
++                                                        nvn_pair_shader_loader _Nullable loader,
++                                                        BOOL * _Nullable attempted) {
++    if (attempted) *attempted = NO;
++    if (!loader || !nvn_pair_load_eligible(keys, stages, cache, enabled,
++                                           warm_started, warm_running, warm_ready)) return nil;
++    if (attempted) *attempted = YES;
++    NSMutableArray *results = [NSMutableArray arrayWithObjects:NSNull.null, NSNull.null, nil];
++    NSLock *result_lock = [NSLock new];
++    dispatch_apply(2, DISPATCH_APPLY_AUTO, ^(size_t i) { @autoreleasepool {
++        id value = loader(keys[i], stages[i].integerValue);
++        if (value) {
++            [result_lock lock]; results[i] = value; [result_lock unlock];
++        }
++    } });
++    return [results copy];
++}
++
++NS_ASSUME_NONNULL_END
++#endif
 diff --git a/dm/gfx/nvn/nvn_rt_survey.h b/dm/gfx/nvn/nvn_rt_survey.h
 new file mode 100644
 index 0000000..773e9d9
@@ -478,6 +632,43 @@ index 0000000..c35524f
 +    puts("PASS: NVN inclusive PSO, nested library and frame aggregate timing");
 +    return 0;
 +}
+diff --git a/dm/gfx/tests/run_nvn_pair_batch_native.py b/dm/gfx/tests/run_nvn_pair_batch_native.py
+new file mode 100644
+index 0000000..cc573de
+--- /dev/null
++++ b/dm/gfx/tests/run_nvn_pair_batch_native.py
+@@ -0,0 +1,31 @@
++#!/usr/bin/env python3
++"""Compile the Foundation-only NVN pair-batch tests on macOS without a Metal device."""
++from pathlib import Path
++import shutil
++import subprocess
++import sys
++import tempfile
++
++
++ROOT = Path(__file__).resolve().parents[3]
++SOURCE = Path(__file__).resolve().with_name("t_nvn_pair_batch.m")
++
++
++def main():
++    if sys.platform != "darwin":
++        print("SKIP: native Foundation pair-batch test requires macOS/Xcode")
++        return 77
++    xcrun = shutil.which("xcrun")
++    if not xcrun:
++        print("SKIP: xcrun is required for the native Foundation pair-batch test")
++        return 77
++    with tempfile.TemporaryDirectory(prefix="nvn-pair-batch-") as temp:
++        executable = Path(temp) / "nvn_pair_batch_test"
++        subprocess.run([xcrun, "clang", "-fobjc-arc", "-fblocks", "-Wall", "-Wextra", "-Werror",
++                        "-framework", "Foundation", str(SOURCE), "-o", str(executable)], cwd=ROOT, check=True)
++        subprocess.run([str(executable)], cwd=ROOT, check=True)
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
 diff --git a/dm/gfx/tests/run_nvn_text_lines_native.py b/dm/gfx/tests/run_nvn_text_lines_native.py
 new file mode 100644
 index 0000000..86cf082
@@ -698,6 +889,128 @@ index 0000000..303a224
 +
 +if __name__ == "__main__":
 +    raise SystemExit(main())
+diff --git a/dm/gfx/tests/t_nvn_pair_batch.m b/dm/gfx/tests/t_nvn_pair_batch.m
+new file mode 100644
+index 0000000..121828a
+--- /dev/null
++++ b/dm/gfx/tests/t_nvn_pair_batch.m
+@@ -0,0 +1,116 @@
++// Joined cold VS+FS shader loads: pure Foundation and fake loaders, no Metal device.
++#import <Foundation/Foundation.h>
++#include <assert.h>
++#import "../nvn/nvn_pair_batch.h"
++
++static NSArray<NSString *> *pair_keys(void) { return @[@"pixel-key_b", @"vertex-key_b"]; }
++static NSArray<NSNumber *> *pair_stages(void) { return @[@1, @0]; }
++
++static NSArray *run_pair(NSArray<NSString *> *keys, NSArray<NSNumber *> *stages,
++                         NSDictionary<NSString *, id> *cache, BOOL enabled,
++                         BOOL warm_started, BOOL warm_running, BOOL warm_ready,
++                         nvn_pair_shader_loader loader, BOOL *attempted) {
++    return nvn_pair_load_joined(keys, stages, cache, enabled, warm_started,
++                                warm_running, warm_ready, loader, attempted);
++}
++
++static void test_eligibility_gates(void) {
++    NSDictionary *empty = @{};
++    __block int calls = 0;
++    nvn_pair_shader_loader loader = ^id(NSString *key, NSInteger stage) { (void)key; (void)stage; calls++; return [NSObject new]; };
++    struct { BOOL enabled, started, running, ready; } gates[] = {
++        {NO, YES, NO, NO}, {YES, NO, NO, NO}, {YES, YES, YES, NO}, {YES, YES, NO, YES}
++    };
++    for (NSUInteger i = 0; i < sizeof gates / sizeof gates[0]; i++) {
++        BOOL attempted = YES;
++        NSArray *result = run_pair(pair_keys(), pair_stages(), empty, gates[i].enabled,
++                                   gates[i].started, gates[i].running, gates[i].ready, loader, &attempted);
++        assert(!attempted && !result && calls == 0);
++    }
++    BOOL attempted = YES;
++    assert(!run_pair(pair_keys(), @[@0, @0], empty, YES, YES, NO, NO, loader, &attempted));
++    assert(!attempted && calls == 0);  // Two vertices (or two pixels) are not a render pair.
++    assert(!run_pair(@[@"same", @"same"], @[@0, @1], empty, YES, YES, NO, NO, loader, &attempted));
++    assert(!attempted && calls == 0);
++    assert(!run_pair(@[@"", @"pixel"], @[@0, @1], empty, YES, YES, NO, NO, loader, &attempted));
++    assert(!attempted && calls == 0);
++    NSArray *keys = pair_keys();
++    assert(!run_pair(keys, pair_stages(), @{keys[0]: @YES}, YES, YES, NO, NO, loader, &attempted));
++    assert(!attempted && calls == 0);  // Either cached stage keeps the serial/cache-hit path.
++    assert(!run_pair(keys, pair_stages(), @{keys[1]: @YES}, YES, YES, NO, NO, loader, &attempted));
++    assert(!attempted && calls == 0);
++    assert(!run_pair(pair_keys(), pair_stages(), empty, YES, YES, NO, NO, nil, &attempted));
++    assert(!attempted && calls == 0);
++}
++
++static void test_joined_parallel_identity(void) {
++    NSCondition *condition = [NSCondition new];
++    dispatch_semaphore_t done = dispatch_semaphore_create(0);
++    __block NSUInteger entered = 0, max_entered = 0;
++    __block BOOL released = NO, attempted = NO;
++    __block NSArray *result = nil;
++    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
++        result = run_pair(pair_keys(), pair_stages(), @{}, YES, YES, NO, NO,
++                          ^id(NSString *key, NSInteger stage) {
++            [condition lock];
++            entered++; if (entered > max_entered) max_entered = entered;
++            [condition broadcast];
++            while (!released) [condition wait];
++            [condition unlock];
++            return [NSString stringWithFormat:@"%@:%ld", key, (long)stage];
++        }, &attempted);
++        dispatch_semaphore_signal(done);
++    });
++    [condition lock];
++    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5.0];
++    while (entered < 2 && [condition waitUntilDate:deadline]) {}
++    BOOL overlapped = entered == 2;
++    released = YES; [condition broadcast]; [condition unlock];
++    long finished = dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
++    assert(finished == 0 && overlapped && max_entered == 2 && attempted);
++    assert(result.count == 2);
++    assert([result[0] isEqual:@"pixel-key_b:1"] && [result[1] isEqual:@"vertex-key_b:0"]);
++}
++
++static void test_failure_is_local_and_not_retried(void) {
++    NSMutableDictionary<NSString *, NSNumber *> *calls = [NSMutableDictionary dictionary];
++    @synchronized (calls) { calls[@"pixel-key_b"] = @0; calls[@"vertex-key_b"] = @0; }
++    BOOL attempted = NO;
++    NSArray *result = run_pair(pair_keys(), pair_stages(), @{}, YES, YES, NO, NO,
++                               ^id(NSString *key, NSInteger stage) {
++        (void)stage;
++        @synchronized (calls) { calls[key] = @(calls[key].intValue + 1); }
++        return [key isEqualToString:@"pixel-key_b"] ? nil : [NSObject new];
++    }, &attempted);
++    assert(attempted && result.count == 2 && result[0] == NSNull.null && result[1] != NSNull.null);
++    @synchronized (calls) { assert(calls[@"pixel-key_b"].intValue == 1 && calls[@"vertex-key_b"].intValue == 1); }
++}
++
++static void test_result_owns_worker_object(void) {
++    __block __weak NSObject *pixel_object = nil, *vertex_object = nil;
++    NSArray *result = nil;
++    BOOL attempted = NO;
++    @autoreleasepool {
++        result = run_pair(pair_keys(), pair_stages(), @{}, YES, YES, NO, NO,
++                          ^id(NSString *key, NSInteger stage) {
++            (void)key;
++            NSObject *value = [NSObject new];
++            if (stage == 1) pixel_object = value; else vertex_object = value;
++            return value;
++        }, &attempted);
++    }
++    assert(attempted && pixel_object != nil && vertex_object != nil && result[0] != NSNull.null && result[1] != NSNull.null);
++    result = nil;
++    assert(pixel_object == nil && vertex_object == nil);
++}
++
++int main(void) {
++    @autoreleasepool {
++        test_eligibility_gates();
++        test_joined_parallel_identity();
++        test_failure_is_local_and_not_retried();
++        test_result_owns_worker_object();
++    }
++    puts("PASS: NVN opt-in cold VS+FS batch gates, joined execution, local failures and ownership");
++    return 0;
++}
 diff --git a/dm/gfx/tests/t_rt_survey.c b/dm/gfx/tests/t_rt_survey.c
 new file mode 100644
 index 0000000..6c45665
@@ -739,6 +1052,109 @@ index 0000000..6c45665
 +    puts("PASS: RT survey distinguishes logical/Metal/mip/pass layouts, deduplicates, and saturates without mutation");
 +    return 0;
 +}
+diff --git a/dm/gfx/tests/test_nvn_pair_batch.py b/dm/gfx/tests/test_nvn_pair_batch.py
+new file mode 100644
+index 0000000..e85a68b
+--- /dev/null
++++ b/dm/gfx/tests/test_nvn_pair_batch.py
+@@ -0,0 +1,97 @@
++"""Source guards for the strict opt-in, demand-only VS+FS batch loader."""
++from pathlib import Path
++import subprocess
++import sys
++import unittest
++
++
++ROOT = Path(__file__).resolve().parents[3]
++SOURCE = ROOT / "dm/gfx/nvn/nvn_mtl.m"
++HELPER = ROOT / "dm/gfx/nvn/nvn_pair_batch.h"
++NATIVE = ROOT / "dm/gfx/tests/run_nvn_pair_batch_native.py"
++
++
++def function_body(source: str, signature: str) -> str:
++    start = source.index(signature)
++    brace = source.index("{", start)
++    depth = 0
++    quote = None
++    escaped = False
++    i = brace
++    while i < len(source):
++        ch = source[i]
++        if quote:
++            if escaped:
++                escaped = False
++            elif ch == "\\":
++                escaped = True
++            elif ch == quote:
++                quote = None
++            i += 1
++            continue
++        if source.startswith("//", i):
++            newline = source.find("\n", i + 2)
++            i = len(source) if newline < 0 else newline + 1
++            continue
++        if source.startswith("/*", i):
++            end = source.find("*/", i + 2)
++            if end < 0:
++                raise AssertionError(f"unclosed comment in: {signature}")
++            i = end + 2
++            continue
++        if ch in ('"', "'"):
++            quote = ch
++        elif ch == "{":
++            depth += 1
++        elif ch == "}":
++            depth -= 1
++            if depth == 0:
++                return source[start:i + 1]
++        i += 1
++    raise AssertionError(f"unclosed function body: {signature}")
++
++
++class NVNPairBatchTests(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.source = SOURCE.read_text(encoding="utf-8")
++        cls.helper = HELPER.read_text(encoding="utf-8")
++
++    def test_flag_is_strict_opt_in_and_pair_is_demand_only(self):
++        flag = function_body(self.source, "static int pair_load_on(void)")
++        self.assertIn('getenv("DM_NVN_PAIR_LOAD")', flag)
++        self.assertIn('!strcmp(e, "1")', flag)
++        self.assertIn("if (p->nstage == 2 && pair_load_on())", function_body(self.source, "static __unsafe_unretained NvProg *prog_get"))
++        self.assertNotIn("pso_predict_rest", function_body(self.source, "static __unsafe_unretained NvProg *prog_get"))
++
++    def test_exact_stage_cache_and_warm_gates(self):
++        eligible = function_body(self.helper, "static inline BOOL nvn_pair_load_eligible")
++        self.assertIn("keys.count != 2 || stages.count != 2", eligible)
++        self.assertIn("stage0 == 0 && stage1 == 1", eligible)
++        self.assertIn("stage0 == 1 && stage1 == 0", eligible)
++        self.assertIn("[key0 isEqualToString:key1]", eligible)
++        self.assertIn("cache[key0] == nil && cache[key1] == nil", eligible)
++        self.assertIn("!warm_started || warm_running || warm_ready", eligible)
++
++    def test_worker_results_are_local_and_submission_thread_publishes_in_order(self):
++        body = function_body(self.source, "static __unsafe_unretained NvProg *prog_get")
++        batch = body.index("pair_results = nvn_pair_load_joined")
++        publish = body.index("g_shcache[key] = sh", batch)
++        record = body.index('pso_record("S\\t%s\\t%d\\n", key.UTF8String, stage)', publish)
++        consume = body.index("if (pair_attempted && i < pair_results.count)", record)
++        self.assertLess(batch, publish)
++        self.assertLess(publish, record)
++        self.assertLess(record, consume)
++        self.assertIn("uint64_t dt = bp_now() - t0; unsigned got = 0", body)
++        self.assertIn("g_bp_lib_n += got; g_bp_lib_ns += dt", body)
++        self.assertIn("g_pair_failed += 2 - got", body)
++        self.assertNotIn("g_shcache", self.helper)
++        self.assertNotIn("pso_record", self.helper)
++
++    @unittest.skipUnless(sys.platform == "darwin", "native Foundation batch fixture requires macOS/Xcode")
++    def test_native_foundation_fake_loader(self):
++        subprocess.run([sys.executable, str(NATIVE)], cwd=ROOT, check=True)
++
++
++if __name__ == "__main__":
++    unittest.main()
 diff --git a/dm/gfx/tests/test_nvn_text_lines.py b/dm/gfx/tests/test_nvn_text_lines.py
 new file mode 100644
 index 0000000..7d0f1e0
@@ -1315,7 +1731,7 @@ index 29912b1..2b7981b 100644
  
  `python3 scripts/regress.py impact <base>..<head>` (or one commit) maps a change to those names: the functions around its changed lines, followed through the host's callers to the NVN entry points and HLE functions they serve, and the rules of `dm/tools/impact_map.tsv` (a file, or functions in it, to manifest rows: `dmsh_atomic.py` to the image atomic features, the prepare-step functions of `nvn_mtl.m` to the games that run it). It lists the games that use what the change touches, those reached only through a broad rule (every game of the API), and the profiles without a manifest as unknown. It reads only git and the committed manifests, so it needs neither game files nor a harness root: the report is printed, and written as `impact.md` and `impact.json` to `--out` or, when there is one, `<root>/reports/`. Run it before a change to the chain or host, and run `regress.py check` on the games it names that you have; ask their owners for the others. A changed file no rule maps is listed: add a rule for it.
 diff --git a/docs/agents/symptoms.md b/docs/agents/symptoms.md
-index 0358e52..3e3bed6 100644
+index 0358e52..70f1310 100644
 --- a/docs/agents/symptoms.md
 +++ b/docs/agents/symptoms.md
 @@ -289,6 +289,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
@@ -1334,6 +1750,14 @@ index 0358e52..3e3bed6 100644
  - the ground kept stale 32×32 blocks where the G-buffer draw failed the depth test: blocks of a stale image where a depth pre-pass and a later pass with other vertex shaders meet (Odyssey: 32×32 blocks on every fourth frame). → [Position invariance across shaders](../reference/shaders.md#position-invariance-across-shaders)
  - making a pipeline archive prints `Max Unstruct ID 758 in function agc.main in shader 13941 exceeds supported limit`, and one pipeline takes many minutes, in `metal-tt` offline or in the host's prebuild on the device (`Preparing pipelines` holding one count for minutes). The line is a note, not an error: `metal-tt` goes on, exits 0 and writes that pipeline into the archive. → [Front end at -O1: Apple's control-flow lowering](../reference/shaders.md#front-end-at--o1-apples-control-flow-lowering)
  - the half of Mario facing the camera's left was white (GitHub issue 72, on an iPhone). → [min, max and clamp with a NaN operand](../reference/shaders.md#min-max-and-clamp-with-a-nan-operand)
+@@ -550,6 +552,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+ - hundreds of geometry raster passes in combat, despite support for batching consecutive geometry draws. → [Geometry runs across occlusion query boundaries](../reference/shaders.md#geometry-runs-across-occlusion-query-boundaries)
+ - geometry preparation dominates rendering CPU even after geometry passes have been batched; primitive assembly and capture-index deduplication repeat for unchanged meshes. → [Prepared geometry indices reused after byte comparison](../reference/shaders.md#prepared-geometry-indices-reused-after-byte-comparison)
+ - geometry vertex-capture passes consume substantial GPU time before geometry compute or depth rasterization. → [Geometry capture initializes only missing words](../reference/shaders.md#geometry-capture-initializes-only-missing-words)
++- the first resolution of a normal two-stage program loads its missing vertex and pixel libraries serially on the submit thread. → [Opt-in joined loading for a demanded cold vertex and pixel pair](../reference/shaders.md#opt-in-joined-loading-for-a-demanded-cold-vertex-and-pixel-pair)
+ 
+ ## Game state
+ 
 diff --git a/docs/reference/frame-rate.md b/docs/reference/frame-rate.md
 index a438de6..8ba819b 100644
 --- a/docs/reference/frame-rate.md
@@ -1352,7 +1776,7 @@ index a438de6..8ba819b 100644
 +- **Check:** `test_nvn_timing.py` exercises the actual pure-C accounting with a fake clock/predictor, nested and outside loads, repeated snapshots, overflow and invalid counters. It also checks both runtime call sites and the TSV wiring. This corrects measurement, not frame rate.
 +- **Found on:** the [Odyssey iPad audit](../../dm/games/0100000000010000/README.md#found-on-this-game). Old per-frame totals cannot be corrected from nearby untagged prefetch messages; only window-level overlap bounds are available.
 diff --git a/docs/reference/shaders.md b/docs/reference/shaders.md
-index 7dbec3c..ea04cbf 100644
+index 7dbec3c..8e6e5f3 100644
 --- a/docs/reference/shaders.md
 +++ b/docs/reference/shaders.md
 @@ -402,6 +402,14 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
@@ -1370,6 +1794,19 @@ index 7dbec3c..ea04cbf 100644
  ### Position invariance across shaders
  
  - **Symptom:** the ground kept stale 32×32 blocks where the G-buffer draw failed the depth test: blocks of a stale image where a depth pre-pass and a later pass with other vertex shaders meet (Odyssey: 32×32 blocks on every fourth frame).
+@@ -964,3 +972,12 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
+ - **Fix:** `dmsh_geometry.capture` initializes only words absent from the captured outputs. The capture slot map stores each selected word once, including defaults for absent outputs. Position W, point size, generic W, clip distances, layer and viewport retain their existing bit values. Full capture selects all 144 words; lean capture selects its consumed words. Shaders and host must be rebuilt together.
+ - **Check:** the synthetic throughput comparison alternates control/candidate order and verifies all 9,437,184 captured words against both the original buffer and literal expected values. Mac runs vary in timing, so their percentage gain does not establish iPhone gameplay FPS. The optional real-translator capture fixture in `t_geometry` also checks all uncaptured defaults. All 1,225 NieR shaders build for Mac and iPhone; standard geometry replay and dependency checks pass.
+ - **Found on:** [NieR:Automata US 1.0.3](../../dm/games/010056B015FE8000/README.md#factory-combat-capture-and-9s-texture-follow-up), iPhone City Ruins: 14 geometry groups in the captured frame spend 7.485 ms in vertex capture, 6.512 ms in compute and 1.019 ms in depth raster. The accompanying pass dump affects total frame time; its large uncovered GPU interval must not be treated as a clean gameplay hitch measurement.
++
++
++### Opt-in joined loading for a demanded cold vertex and pixel pair
++
++- **Symptom:** the first resolution of a normal two-stage program loads its missing vertex and pixel libraries serially on the submit thread.
++- **Cause:** `prog_get` ordinarily calls `shader_get` for each stage in order. These are both required by the same program, unlike speculative future prefetch.
++- **Experiment:** `DM_NVN_PAIR_LOAD=1` joins two parallel `shader_load` calls only when the program has exactly one mapped vertex and one pixel stage, distinct keys, both absent from the cache, and prewarm has started, finished and left no pending items. The default remains the original path. Workers return attempt-local objects; the submit thread publishes and records successful stages in original order. Failures are not immediately retried by the same program lookup and are not entered into a new global failure cache. Geometry, compute, builtins, layer variants, cached stages and single-miss cases keep their original path.
++- **Check:** `test_nvn_pair_batch.py` plus the native Foundation fake-loader fixture check gates, joined execution, local failure results and ARC ownership without a GPU. The period summary reports batch/count/time only when enabled. Parallel construction may increase temporary memory or compiler contention; a device A/B with nonzero eligible batches is required before enabling it by default or claiming a speedup. Existing shader options and cache identities do not change.
++- **Found on:** the [Odyssey iPad first-use audit](../../dm/games/0100000000010000/README.md#found-on-this-game). This is a controlled experiment, not a device-validated FPS improvement.
 diff --git a/scripts/regress.py b/scripts/regress.py
 index 3bdad23..df0109d 100644
 --- a/scripts/regress.py
