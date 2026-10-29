@@ -71,7 +71,7 @@ jobs:
       - name: Source guards and CPU-only render-target census
         working-directory: shell
         run: |
-          python3 -m unittest dm.tools.tests.test_shell_msl_policy dm.tools.tests.test_shell_identity_policy dm.gfx.tests.test_nvn_text_lines dm.gfx.tests.test_rt_survey dm.gfx.tests.test_nvn_timing dm.gfx.tests.test_nvn_pair_batch -v
+          python3 -m unittest dm.tools.tests.test_shell_msl_policy dm.tools.tests.test_shell_identity_policy dm.gfx.tests.test_nvn_text_lines dm.gfx.tests.test_rt_survey dm.gfx.tests.test_nvn_timing dm.gfx.tests.test_nvn_pair_batch dm.gfx.tests.test_nvn_snapraw -v
       - name: Actual source-loading ownership and Foundation identity tests
         working-directory: shell
         run: |
