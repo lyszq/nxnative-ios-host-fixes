@@ -1305,7 +1305,7 @@ index 7213fd5..c19a4a7 100644
  
 diff --git a/dm/tools/tests/test_windows_metal.py b/dm/tools/tests/test_windows_metal.py
 new file mode 100644
-index 0000000..62ab141
+index 0000000..062ba87
 --- /dev/null
 +++ b/dm/tools/tests/test_windows_metal.py
 @@ -0,0 +1,92 @@
@@ -1332,7 +1332,7 @@ index 0000000..62ab141
 +    def setUp(self):
 +        self.tmp = tempfile.TemporaryDirectory(prefix='windows-metal-')
 +        self.addCleanup(self.tmp.cleanup)
-+        self.bin = Path(self.tmp.name) / 'tools with spaces'
++        self.bin = (Path(self.tmp.name) / 'tools with spaces').resolve()
 +        self.bin.mkdir()
 +        (self.bin / 'metal.exe').write_bytes(b'synthetic compiler identity')
 +        (self.bin / 'metallib.exe').write_bytes(b'synthetic linker identity')

@@ -1,7 +1,7 @@
 {
-  "source_local_commit": "2c32b1cc1ba1eb4a873e184796156d54504319b7",
+  "source_local_commit": "0e1218061bef7a3418ab6cad2206ab5a8929f607",
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "e0c84aa661ee39da84a6d9267745c8bb995d4117bfe7984a6533f006f622bf2b",
+  "patch_sha256": "140c4b1314628cdc68512ca8edc9cfde3723a05296ce283d35eae4b85f504298",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
@@ -101,7 +101,7 @@
     },
     {
       "path": "dm/tools/tests/test_windows_metal.py",
-      "normalized_sha256": "c2da8890681285ee0c8e31d92cc4ad3ce38143978c9b6b357562f8c00a1e03b2"
+      "normalized_sha256": "2e095699640a40a0377d24d6ed0b774cd40cab419e4da8231b1c234d6fe52f3f"
     },
     {
       "path": "docs/agents/symptoms.md",
