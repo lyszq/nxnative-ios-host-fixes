@@ -891,10 +891,10 @@ index 0000000..303a224
 +    raise SystemExit(main())
 diff --git a/dm/gfx/tests/t_nvn_pair_batch.m b/dm/gfx/tests/t_nvn_pair_batch.m
 new file mode 100644
-index 0000000..121828a
+index 0000000..f0df234
 --- /dev/null
 +++ b/dm/gfx/tests/t_nvn_pair_batch.m
-@@ -0,0 +1,116 @@
+@@ -0,0 +1,121 @@
 +// Joined cold VS+FS shader loads: pure Foundation and fake loaders, no Metal device.
 +#import <Foundation/Foundation.h>
 +#include <assert.h>
@@ -996,7 +996,12 @@ index 0000000..121828a
 +            return value;
 +        }, &attempted);
 +    }
-+    assert(attempted && pixel_object != nil && vertex_object != nil && result[0] != NSNull.null && result[1] != NSNull.null);
++    // Weak loads can create autoreleased strong temporaries. Drain those before
++    // testing release of the array's ownership, rather than retaining the objects
++    // ourselves until the test's outer autorelease pool closes.
++    @autoreleasepool {
++        assert(attempted && pixel_object != nil && vertex_object != nil && result[0] != NSNull.null && result[1] != NSNull.null);
++    }
 +    result = nil;
 +    assert(pixel_object == nil && vertex_object == nil);
 +}
