@@ -1,14 +1,16 @@
-name: Build reviewed game-free host
+name: Build reviewed game-free polish host
 on:
   workflow_dispatch:
   push:
     paths:
       - host-fixes.patch
+      - polish-fixes.patch
+      - polish-source-manifest.json
       - .github/workflows/host-build.yml
 permissions:
   contents: read
 concurrency:
-  group: reviewed-host-main
+  group: reviewed-host-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   host:
@@ -18,6 +20,8 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: xinerqu/ns2ios-shell
@@ -58,9 +62,23 @@ jobs:
           set -euo pipefail
           git -C shell apply --check "$GITHUB_WORKSPACE/host-fixes.patch"
           git -C shell apply "$GITHUB_WORKSPACE/host-fixes.patch"
+          git -C shell apply --check "$GITHUB_WORKSPACE/polish-fixes.patch"
+          git -C shell apply "$GITHUB_WORKSPACE/polish-fixes.patch"
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          manifest = json.loads(Path('polish-source-manifest.json').read_text())
+          assert hashlib.sha256(Path('polish-fixes.patch').read_bytes()).hexdigest() == manifest['patch_sha256']
+          for entry in manifest['files']:
+              data = (Path('shell') / entry['path']).read_bytes().replace(b'\r\n', b'\n')
+              assert hashlib.sha256(data).hexdigest() == entry['normalized_sha256'], entry['path']
+          assert not Path('shell/dm/host/dm_obs_frame.h').exists(), 'experimental projection sources must stay out of this host'
+          print('PASS: reviewed stable polish source identities; original Guest ABI/cache interfaces')
+          PY
           cd shell
-          python3 -m unittest dm.tools.tests.test_shell_msl_policy -v
+          python3 -m unittest dm.tools.tests.test_shell_msl_policy dm.tools.tests.test_shell_identity_policy dm.gfx.tests.test_nvn_text_lines dm.gfx.tests.test_rt_survey dm.gfx.tests.test_nvn_timing dm.gfx.tests.test_nvn_pair_batch dm.gfx.tests.test_nvn_snapraw dm.gfx.tests.test_nvn_arc_ownership dm.tools.tests.test_regress -v
           python3 dm/tools/tests/run_shell_msl_native.py
+          python3 dm/tools/tests/run_shell_identity_native.py
       - name: Install build dependencies
         run: |
           set -euo pipefail
@@ -89,3 +107,5 @@ jobs:
             ${{ runner.temp }}/dm-work/build/shell/entitlements.txt
             ${{ runner.temp }}/shell.out
             source-manifest.json
+            polish-source-manifest.json
+            polish-fixes.patch

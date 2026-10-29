@@ -25,3 +25,11 @@ uploaded here. No Apple developer signing identity is used by this workflow.
 The base project is Copyright (c) 2026 seedds and is distributed under the
 MIT license included in LICENSE. The Windows shell route comes from
 [xinerqu/ns2ios-shell](https://github.com/xinerqu/ns2ios-shell).
+
+
+On the polish branch, the host workflow additionally applies `polish-fixes.patch`
+and verifies every entry of `polish-source-manifest.json` before native tests and
+compilation. The original Guest ABI and shader cache policy/epoch are retained.
+The separate unused projection prerequisite patch is checked by the check-only
+workflow, and is deliberately excluded from this stable host build. Resolution
+and camera Guest variants remain private local experiments and are not uploaded.
