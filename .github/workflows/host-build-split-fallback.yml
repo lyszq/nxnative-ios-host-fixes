@@ -1,0 +1,182 @@
+name: Build small F5 host on macOS 26
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/host-build-split-fallback.yml
+      - host-fixes.patch
+      - polish-fixes.patch
+      - polish-source-manifest.json
+      - display-host.patch
+      - display-source-manifest.json
+      - graphics-host.patch
+      - graphics-source-manifest.json
+      - .github/workflows/host-build.yml
+permissions:
+  contents: read
+concurrency:
+  group: reviewed-host-split-fallback-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  host:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: xinerqu/ns2ios-shell
+          ref: 59492c868416d82cdd5b57fbbf78753d044412d9
+          path: fork
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: seedds/nxnative
+          ref: 337186cf3ce778dd1b89092e8958652cb4d7ceb3
+          path: shell
+          persist-credentials: false
+      - name: Assemble the pinned release sources
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          fork, shell = Path('fork'), Path('shell')
+          for raw in (fork / '.shell-overlay.txt').read_text().splitlines():
+              if not raw.startswith('+ '):
+                  continue
+              name = raw[1:].split('#', 1)[0].strip()
+              if not name:
+                  continue
+              source, target = fork / name, shell / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              if source.is_dir():
+                  shutil.copytree(source, target, dirs_exist_ok=True)
+              else:
+                  shutil.copy2(source, target)
+          PY
+          for patch in "$GITHUB_WORKSPACE/fork/.shell-patches/"*.patch; do
+            git -C shell apply --whitespace=nowarn "$patch"
+          done
+      - name: Apply the reviewed host changes
+        run: |
+          set -euo pipefail
+          git -C shell apply --check "$GITHUB_WORKSPACE/host-fixes.patch"
+          git -C shell apply "$GITHUB_WORKSPACE/host-fixes.patch"
+          git -C shell apply --check "$GITHUB_WORKSPACE/polish-fixes.patch"
+          git -C shell apply "$GITHUB_WORKSPACE/polish-fixes.patch"
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          manifest = json.loads(Path('polish-source-manifest.json').read_text())
+          assert hashlib.sha256(Path('polish-fixes.patch').read_bytes()).hexdigest() == manifest['patch_sha256']
+          for entry in manifest['files']:
+              data = (Path('shell') / entry['path']).read_bytes().replace(b'\r\n', b'\n')
+              assert hashlib.sha256(data).hexdigest() == entry['normalized_sha256'], entry['path']
+          PY
+          git -C shell apply --check "$GITHUB_WORKSPACE/display-host.patch"
+          git -C shell apply "$GITHUB_WORKSPACE/display-host.patch"
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          assert Path('shell/dm/host/dm_obs_frame.h').exists(), 'display frame helper missing'
+          display = json.loads(Path('display-source-manifest.json').read_text())
+          assert hashlib.sha256(Path('display-host.patch').read_bytes()).hexdigest() == display['patch_sha256']
+          for entry in display['files']:
+              data = (Path('shell') / entry['path']).read_bytes().replace(b'\r\n', b'\n')
+              assert hashlib.sha256(data).hexdigest() == entry['normalized_sha256'], entry['path']
+          print('PASS: reviewed stable and display source identities; no game inputs present')
+          PY
+          git -C shell apply --check "$GITHUB_WORKSPACE/graphics-host.patch"
+          git -C shell apply "$GITHUB_WORKSPACE/graphics-host.patch"
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          manifest = json.loads(Path('graphics-source-manifest.json').read_text())
+          assert hashlib.sha256(Path('graphics-host.patch').read_bytes()).hexdigest() == manifest['patch_sha256']
+          for entry in manifest['files']:
+              data = (Path('shell') / entry['path']).read_bytes().replace(b'\r\n', b'\n')
+              assert hashlib.sha256(data).hexdigest() == entry['normalized_sha256'], entry['path']
+          print('PASS: reviewed F5 game-free source identities')
+          PY
+          cd shell
+          python3 -m unittest dm.tools.tests.test_shell_msl_policy dm.tools.tests.test_shell_identity_policy dm.gfx.tests.test_nvn_text_lines dm.gfx.tests.test_rt_survey dm.gfx.tests.test_nvn_timing dm.gfx.tests.test_nvn_sbw dm.gfx.tests.test_nvn_pair_batch dm.gfx.tests.test_nvn_snapraw dm.gfx.tests.test_nvn_arc_ownership dm.tools.tests.test_regress -v
+          python3 -W ignore::ResourceWarning -m unittest dm.tools.tests.test_nsp_chain.TableTools dm.tools.tests.test_shader_toolchain_cache -v
+          python3 -m unittest dm.gfx.tests.test_nvn_vbuf_bounds dm.gfx.tests.test_nvn_resource_rebind dm.tools.tests.test_windows_metal -v
+          python3 dm/tools/tests/run_language_native.py
+          python3 dm/tools/tests/run_shell_msl_native.py
+          python3 dm/tools/tests/run_shell_identity_native.py
+          python3 dm/tools/tests/run_external_shaders_native.py
+          python3 -m unittest dm.tools.tests.test_launcher_settings dm.ios.tests.test_launcher_storage -v
+          python3 dm/tools/tests/run_obs_frame_native.py
+      - name: Actual display policy and CommonCrypto initialization fixtures
+        working-directory: shell
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, tempfile
+          host = Path('dm/host').resolve()
+          with tempfile.TemporaryDirectory() as td:
+              td = Path(td)
+              (td/'game_profile.h').write_text('/* synthetic profile */\n')
+              common = ['xcrun','clang','-std=c11','-O1','-UNDEBUG','-Wall','-Wextra','-Werror','-D_DARWIN_C_SOURCE','-I',str(td),'-I',str(host)]
+              policy = td/'policy'
+              subprocess.run(common+[str(host/'tests/t_odyssey_display_policy.c'),str(host/'dm_odyssey_display_policy.c'),'-o',str(policy)],check=True)
+              subprocess.run([str(policy)],check=True)
+              asset = td/'asset'
+              subprocess.run(common+[str(host/'tests/t_odyssey_display_asset.c'),str(host/'hle_odyssey_display.c'),str(host/'dm_odyssey_display_policy.c'),str(host/'dm_vertical_fov.c'),'-lm','-o',str(asset)],check=True)
+              cases = ('stock', 'stock-high', 'default-1080p', 'default-1080p-4x3', 'default-missing-gates', 'default-wrong-build', 'default-no-gates', 'projection-trace', 'active', 'wide-active', 'invalid', 'invalid-high', 'bad-aspect', 'wrong-build', 'missing-gates', 'bad-hash', 'handheld', 'fd0-manifest', 'fd0-asset', 'high-missing-pair', 'high-bad-hash', 'high-missing-asset', 'native-unsupported', '1440-wide', '1440-4x3', 'native-wide', 'native-4x3')
+              for case in cases:
+                  result = subprocess.run([str(asset),case],capture_output=True,text=True,check=True)
+                  assert f'PASS: Odyssey display fixture scenario {case}' in result.stdout, case
+                  diagnostics = result.stdout + result.stderr
+                  if case == 'projection-trace':
+                      assert diagnostics.count(' first input ') == 32, diagnostics
+                      assert diagnostics.count(' lifetime calls=') == 8 * 32, diagnostics
+                      summaries = [line for line in diagnostics.splitlines() if 'Odyssey projection trace counts:' in line]
+                      assert len(summaries) == 8, diagnostics
+                      assert all('tracked=32' in line and 'invalid=1' in line and 'overflow=1' in line for line in summaries), diagnostics
+                  else: assert 'Odyssey projection trace' not in diagnostics, case
+              for case in ('high-wrong-build','high-missing-gate'):
+                  result = subprocess.run([str(asset),case],capture_output=True)
+                  assert result.returncode != 0, case
+          print('PASS: actual host policy, file/hash handling, default restoration and display callbacks')
+          PY
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          python3 -m pip install --quiet --break-system-packages fonttools
+      - name: Build only the game-free shell
+        env:
+          DM_ROOT: ${{ runner.temp }}/dm-work
+        run: |
+          set -euo pipefail
+          cd shell
+          SDK=$(xcrun --sdk iphoneos --show-sdk-version)
+          test "${SDK%%.*}" -ge 26
+          bash dm/ios/tools/shell_build.sh 2>&1 | tee "$RUNNER_TEMP/shell.out"
+      - name: Upload shell input and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reviewed-game-free-shell
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/dm-work/build/shell/nxnative-shell-build-input.zip
+            ${{ runner.temp }}/dm-work/build/shell/build.log
+            ${{ runner.temp }}/dm-work/build/shell/sign.log
+            ${{ runner.temp }}/dm-work/build/shell/entitlements.txt
+            ${{ runner.temp }}/shell.out
+            source-manifest.json
+            polish-source-manifest.json
+            polish-fixes.patch
+            display-source-manifest.json
+            display-host.patch
+            graphics-source-manifest.json
+            graphics-host.patch
