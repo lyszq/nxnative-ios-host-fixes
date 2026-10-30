@@ -1,5 +1,5 @@
 diff --git a/dm/games/0100000000010000/README.md b/dm/games/0100000000010000/README.md
-index bf60f53..0f50267 100644
+index bf60f53..e14e6de 100644
 --- a/dm/games/0100000000010000/README.md
 +++ b/dm/games/0100000000010000/README.md
 @@ -22,7 +22,8 @@ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in
@@ -28,6 +28,15 @@ index bf60f53..0f50267 100644
  - **Storage-write tracking follow-up:** [A size-zero storage write needlessly invalidates every partial uniform shadow](../../../docs/reference/rendering.md#a-size-zero-storage-write-needlessly-invalidates-every-partial-uniform-shadow). The upstream host correction is ported and tested with synthetic native bookkeeping; Odyssey GPU behavior and performance remain unmeasured.
  - **Shader build sidecars:** [AppleDouble files are not shader build outputs](../../../docs/reference/packing.md#appledouble-files-are-not-shader-build-outputs). Exact output-name filtering preserves the existing shader/cache identity.
  
+@@ -87,6 +90,8 @@ General host and tool changes first needed here; each applies to every game:
+ 
+ ## Open
+ 
++- **F5 split delivery:** the user reported that the 733 MB all-in-one IPA could not be sideloaded. A small IPA plus an unchanged external shader ZIP is supported by [separate iOS shader delivery](../../../docs/reference/packing.md#separate-ios-shader-delivery). This does not establish the precise sideloader failure cause; device acceptance remains pending.
++
+ - The three thunder geometry shaders do not translate.
+ - The silent first minute of sound.
+ - development.md calls SDK 7.3.2 "the oldest so far"; Mario Kart 8 Deluxe (SDK 4.4.0) is older now.
 diff --git a/dm/gfx/nvn/dm_shell_msl.h b/dm/gfx/nvn/dm_shell_msl.h
 index 87a5ff2..21e8c9a 100644
 --- a/dm/gfx/nvn/dm_shell_msl.h
@@ -1125,6 +1134,74 @@ index 6b9b359..7bbd782 100644
  
  // The source with the chosen colour outputs declared unsigned/signed, and every value written to them converted.
  // mask: bits 0-7 = colour slots that must be unsigned, bits 8-15 = slots that must be signed.
+diff --git a/dm/ios/Sources/dm_shader_prep.m b/dm/ios/Sources/dm_shader_prep.m
+index f924276..bd33760 100644
+--- a/dm/ios/Sources/dm_shader_prep.m
++++ b/dm/ios/Sources/dm_shader_prep.m
+@@ -23,7 +23,10 @@
+ static void pl(NSString *s) { fprintf(stderr, "[dm] %s\n", s.UTF8String); }
+ static int lg(void) { NSString *l = NSLocale.preferredLanguages.firstObject; return [l hasPrefix:@"zh"] ? 1 : [l hasPrefix:@"es"] ? 2 : 0; }   // 系统首选语言：1 中文 / 2 西语 / 0 其余英文 | System preferred language: 1 Chinese / 2 Spanish / 0 English otherwise
+ #define L3(zh, en, es) (lg() == 1 ? (zh) : lg() == 2 ? (es) : (en))
+-static NSString *msldir(void) { return [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"msl"]; }
++static NSString *msldir(void) {
++    const char *root = getenv("DM_MSL_DIR");
++    return root && *root ? [NSString stringWithUTF8String:root] : [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"msl"];
++}
+ static NSString *libdir(void) {   // <包>/msl/b-<链版本>：壳里只有一个版本目录 | <package>/msl/b-<chain version>: the shell has only one version directory
+     NSString *msl = msldir();
+     for (NSString *d in [NSFileManager.defaultManager contentsOfDirectoryAtPath:msl error:nil] ?: @[]) if ([d hasPrefix:@"b-"]) return [msl stringByAppendingPathComponent:d];
+diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
+index 5718ba3..4829e1c 100644
+--- a/dm/ios/Sources/front_ios.m
++++ b/dm/ios/Sources/front_ios.m
+@@ -61,7 +61,7 @@ static void launcher_done(void) { [g_root startGame]; }
+         lb.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+         lb.numberOfLines = 0; lb.textAlignment = NSTextAlignmentCenter; lb.textColor = UIColor.whiteColor;
+         const char *why = front_ios_boot_message();
+-        lb.text = why ? [NSString stringWithFormat:@"Game files unusable.\n%s", why] : @"Game files not found.\nPut the RomFS folder into this App's Documents as \"romfs\" (Files app), then restart.";
++        lb.text = why ? [NSString stringWithFormat:@"Game data unavailable.\n%s", why] : @"Game files not found.\nPut the RomFS folder into this App's Documents as \"romfs\" (Files app), then restart.";
+         [self.view addSubview:lb]; return;
+     }
+     front_ios_audio_watch();
+diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
+index 5a76083..81c8ec6 100644
+--- a/dm/ios/Sources/main.m
++++ b/dm/ios/Sources/main.m
+@@ -13,6 +13,7 @@
+ #include "romfs_image.h"
+ #include "romfs_identity.h"
+ #include "player_env.h"
++#include "dm_external_shaders.h"
+ #ifdef DM_SHELL
+ #include "dm_shell_identity.h"
+ #endif
+@@ -99,7 +100,7 @@ static int boot_env(void) {
+     NSString *res = NSBundle.mainBundle.resourcePath;
+     for (NSString *d in @[@"save", @"temp"]) [fm createDirectoryAtPath:[doc stringByAppendingPathComponent:d] withIntermediateDirectories:YES attributes:nil error:nil];
+     // Keep game files and scratch data out of device backups (Documents is backed up by default; a RomFS placed there is many GB). Saves, logs and the pipeline list stay in the backup
+-    for (NSString *d in @[@"romfs", @"romfs.img", @"temp"]) {
++    for (NSString *d in @[@"romfs", @"romfs.img", @"temp", @"msl"]) {
+         NSURL *u = [NSURL fileURLWithPath:[doc stringByAppendingPathComponent:d]]; NSError *e = nil;
+         if ([fm fileExistsAtPath:u.path] && ![u setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:&e]) fprintf(stderr, "boot: %s could not be excluded from backup: %s\n", d.UTF8String, e.localizedDescription.UTF8String);
+     }
+@@ -174,7 +175,16 @@ static int boot_env(void) {
+     NSString *odysseyDisplay = [dm stringByAppendingPathComponent:@"odyssey-display"];
+     setenv("DM_ODYSSEY_DISPLAY_ROOT", odysseyDisplay.fileSystemRepresentation, 1);
+     setenv("DM_NVN_SHMAP", [dm stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);
+-    setenv("DM_MSL_DIR", [res stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 0);
++    NSString *shaderReason = nil;
++    NSString *shaderRoot = dm_ios_shader_root(res, doc, &shaderReason);
++    if (!shaderRoot) {
++        snprintf(g_boot_message, sizeof g_boot_message, "%s", shaderReason.UTF8String);
++        fprintf(stderr, "[RED] boot: %s\n", g_boot_message);
++        return 0;
++    }
++    setenv("DM_MSL_DIR", shaderRoot.fileSystemRepresentation,
++           [fm fileExistsAtPath:[dm stringByAppendingPathComponent:@"external-shaders.json"]] ? 1 : 0);
++    fprintf(stderr, "boot: shader resources %s\n", getenv("DM_MSL_DIR"));
+     setenv("DM_FONT_DIR", [dm stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
+     NSString *aoc = [res stringByAppendingPathComponent:@"aoc"];   // add-on content: build_ipa.sh puts the RomFS extracted from the player's DLC NSPs at <App>/aoc/<index>/
+     if ([fm fileExistsAtPath:aoc]) setenv("DM_AOC_DIR", aoc.fileSystemRepresentation, 0);
 diff --git a/dm/ios/tools/ios_metal.py b/dm/ios/tools/ios_metal.py
 index f270b18..3071fad 100644
 --- a/dm/ios/tools/ios_metal.py
@@ -1491,10 +1568,18 @@ index 0000000..8512506
 +if __name__ == '__main__':
 +    unittest.main()
 diff --git a/docs/agents/symptoms.md b/docs/agents/symptoms.md
-index b643b5f..e682b52 100644
+index b643b5f..d2ca6c1 100644
 --- a/docs/agents/symptoms.md
 +++ b/docs/agents/symptoms.md
-@@ -182,6 +182,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+@@ -11,6 +11,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+ - reducing the iPhone transfer to one image still creates thousands of resource files on the Mac, and build scanners require the expanded folder. → [Building creates a full RomFS tree before packing its image](../reference/packing.md#building-creates-a-full-romfs-tree-before-packing-its-image)
+ - the NSP script stops at the shader split of a registered profile with `[RED] 13744 file(s) could not be read, their shaders are left out (first: AI/FileEntry/FileEntry.Product.100.byml.zs: CalledProcessError: Command ['zstd', '-d', '-c', '-q', '…/extract/v0/RomFS.img/AI/…'] returned non-zero exit status 1.)`. → [The zstd command given a path inside the image](../reference/packing.md#the-zstd-command-given-a-path-inside-the-image)
+ - starting a Mac app through a front end with unchanged settings enables the encode thread, and can disable Metal 4 pipelines and the pipeline archive; starting the same app from Finder keeps the host's defaults. → [A Mac front end's default settings change Metal execution paths](../reference/packing.md#a-mac-front-ends-default-settings-change-metal-execution-paths)
++- a shader-heavy IPA is too large or contains too many resources for a player's sideload workflow. → [Separate iOS shader delivery](../reference/packing.md#separate-ios-shader-delivery)
+ - `decompress NSZ` stops immediately with `nsz: error: unrecognized arguments: --keys …`. → [NSZ decompression rejects `--keys`](../reference/packing.md#nsz-decompression-rejects---keys)
+ - the extraction of a game whose base is an XCI that also carries its update (a "1G+1U" dump) stops with `[RED] nx_extract exit code -6`. `extract_v<version>.log` lists the update's build IDs even for the base game alone, then ends in an unhandled exception from the RomFS (`ResultFsNonRealDataVerificationFailed (2002-4604): Hash error!` from `RomFsFileSystem..ctor`, or `ArgumentException` / `InvalidOperationException` from the patch layers). → [A cartridge dump with its update on it extracts the update as the base game](../reference/packing.md#a-cartridge-dump-with-its-update-on-it-extracts-the-update-as-the-base-game)
+ - a build on exFAT or FAT finishes its Metal libraries, then `c1_guard.py` stops with a UTF-8 decoding error; Metal cache prefill may reject an otherwise valid folder. → [AppleDouble files are not shader build outputs](../reference/packing.md#appledouble-files-are-not-shader-build-outputs)
+@@ -182,6 +183,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
  - the boot sits at a black loading screen for good, CPU nearly idle, every thread waiting, about 1 boot in 6 (3 in 4 with four Mac hosts at once); the title movie is never opened, and the save files are never probed. → [Network requests stay on hold before they settle](../reference/services.md#network-requests-stay-on-hold-before-they-settle)
  - one thread at 100% CPU from boot, with one SVC in 99 s (`NexusRevolution Socket`, `main+0x92c7c4`, the game's network thread). → [Socket `Poll` and `Select` with nothing to wait on](../reference/services.md#socket-poll-and-select-with-nothing-to-wait-on)
  - the first comparison in `nnMain` aborted in `sm`. → [Language codes](../reference/services.md#language-codes)
@@ -1502,7 +1587,7 @@ index b643b5f..e682b52 100644
  - abort in `sm::Initialize` under `nn::settings::GetAvailableLanguageCodes` (early in `nnMain`, `main+0x327888`); abort in `sm::Initialize` under `nn::settings::GetAvailableLanguageCodeCount()` (`main+0x117590`). → [Available language codes and their count](../reference/services.md#available-language-codes-and-their-count)
  - the font engine runs on garbage; crash after the shared fonts load, looking up the "?" glyph (`main+0x6c73c0`, a font cache lookup returning null), with SDK 10's `ScalableFontEngine::LoadFont` failing with error 403 and `SetFont` with 301 on both stand-in fonts; or Japanese, Korean or Chinese text draws nothing in a Unity game while Latin text is fine (Patrick's Parabox's language menu showed three blank lines). → [Shared font address: BFTTF header or bare TTF](../reference/services.md#shared-font-address-bfttf-header-or-bare-ttf)
  - abort in `nn::sm::Initialize` under `nn::pl::sharedresource::GetPlatformSharedResourceManager` (first thing in `nnMain`). → [Shared fonts requested all at once](../reference/services.md#shared-fonts-requested-all-at-once)
-@@ -408,6 +409,8 @@ One line per symptom in the [subsystem references](../reference/): what you see
+@@ -408,6 +410,8 @@ One line per symptom in the [subsystem references](../reference/): what you see
  - `vertex attribute format … not mapped` (printed once). → [Vertex formats Metal lacks](../reference/rendering.md#vertex-formats-metal-lacks)
  - the assertion `buffer index (31) must be < 31`. → [Vertex streams 14 and 15 at Metal slots 14 and 15](../reference/rendering.md#vertex-streams-14-and-15-at-metal-slots-14-and-15)
  - Scaleform fills come out as solid white or light grey sheets over the whole screen, hard-edged triangles and bands, and the menu text is missing (a language list or a title screen that is all white behind its button prompt). → [Vertex streams at addresses that are not 4-byte aligned](../reference/rendering.md#vertex-streams-at-addresses-that-are-not-4-byte-aligned)
@@ -1511,6 +1596,24 @@ index b643b5f..e682b52 100644
  - scenes and characters black, only foliage, light shafts and the HUD drawn; pass dumps full of `Z … draw skipped: no program bound`. → [Programs bound per stage](../reference/rendering.md#programs-bound-per-stage)
  - `[RED] failed to create render pipeline (vertex 790573a52b9c5053_b fragment f39fb42850f50ecd_b): Fragment input(s) user(locn0),user(locn1) … not written by vertex shader`, once on entering the first investigation; `texture type mismatch: shader declares a cube, texture is 2D` (a pixel shader run with another pair's bindings). → [Composite program taken again after a replay state restore](../reference/rendering.md#composite-program-taken-again-after-a-replay-state-restore)
  - `no program bound before the draw`, `program has no vertex shader` (a draw after a dispatch is dropped); `the dispatched program has no compute shader` (a dispatch after a graphics bind). → [Compute programs bound apart from graphics programs](../reference/rendering.md#compute-programs-bound-apart-from-graphics-programs)
+diff --git a/docs/reference/packing.md b/docs/reference/packing.md
+index 03669d3..ae2ac83 100644
+--- a/docs/reference/packing.md
++++ b/docs/reference/packing.md
+@@ -57,6 +57,13 @@
+ - **Fix:** a setting's default may be `<ios>|<mac>`, selected before resolving a profile macro or build variable. Metal 4 uses `DM_GAME_PSO_MTL4|1`, the encode thread `1|0`. The generator validates the platform and the pair. Tests cover a profile with Metal 4 on and one with it off, and both platforms; the host and shader chain are unchanged.
+ - **Found on:** synthetic metadata generation for [Super Mario Bros. Wonder](../../dm/games/010015100B514000/README.md) while reviewing [PR #352](https://github.com/seedds/nxnative/pull/352); checked against the native defaults, without a gameplay run.
+ 
++### Separate iOS shader delivery
++
++- **Symptom:** a shader-heavy IPA is too large or contains too many resources for a player's sideload workflow.
++- **Cause:** both compiled Metal libraries and matching fragment learning sources are inside the signed app bundle. Removing them alone leaves the loader looking in the bundle.
++- **Fix:** an opt-in bundle manifest, `dm/external-shaders.json`, selects `Documents/msl`. The separate ZIP contains `msl/pack.json` with identical manifest bytes and `msl/b-<chain>/` with the original resources. The bundle retains only that chain's small `inputs.tsv`. Before host preload, the shell checks manifest identity, input stamp and directory-entry count; a missing, wrong or incomplete pack shows a Files installation hint and does not start the game. Preparation and runtime loading use the same selected root. These are identity/completeness checks, not a per-member cryptographic integrity scan. Existing bundled builds keep their original path, and saves, RomFS and shader caches are preserved. Native Foundation fixtures exercise the production locator; physical-device installation remains untested.
++- **Found on:** [Super Mario Odyssey](../../dm/games/0100000000010000/README.md), splitting the F5 package after a user-reported sideload failure.
++
+ ## Compressed inputs
+ 
+ ### NSZ decompression rejects `--keys`
 diff --git a/docs/reference/rendering.md b/docs/reference/rendering.md
 index 77b2067..f464fa0 100644
 --- a/docs/reference/rendering.md
@@ -1567,3 +1670,122 @@ index d5a49be..bf968bd 100644
  - **Found on:** listed among the mechanisms first met in [Super Mario Bros. Wonder](../../dm/games/010015100B514000/README.md); the source gives the 8,337 of 12,809 count without naming the game.
  
  ### Front end at -O1: Apple's control-flow lowering
+diff --git a/dm/ios/Sources/dm_external_shaders.h b/dm/ios/Sources/dm_external_shaders.h
+new file mode 100644
+--- /dev/null
++++ b/dm/ios/Sources/dm_external_shaders.h
+@@ -0,0 +1,42 @@
++// Separate shader delivery: opt in with a bundled manifest, keep saves and old packs intact.
++#pragma once
++#import <Foundation/Foundation.h>
++
++static inline NSString *dm_ios_shader_root(NSString *bundle, NSString *documents, NSString **reason) {
++    if (reason) *reason = nil;
++    NSFileManager *fm = NSFileManager.defaultManager;
++    NSString *bundled = [bundle stringByAppendingPathComponent:@"msl"];
++    NSString *manifest = [bundle stringByAppendingPathComponent:@"dm/external-shaders.json"];
++    if (![fm fileExistsAtPath:manifest]) return bundled;
++    NSData *expected = [NSData dataWithContentsOfFile:manifest];
++    id value = expected ? [NSJSONSerialization JSONObjectWithData:expected options:0 error:nil] : nil;
++    NSDictionary *meta = [value isKindOfClass:NSDictionary.class] ? value : nil;
++    id chainValue = meta[@"chain"];
++    NSString *chain = [chainValue isKindOfClass:NSString.class] ? chainValue : nil;
++    BOOL validChain = chain.length == 14 && [chain hasPrefix:@"b-"] &&
++        [[chain substringFromIndex:2] rangeOfCharacterFromSet:
++         [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdef"].invertedSet].location == NSNotFound;
++    id count = meta[@"resources"];
++    if (![meta[@"schema"] isEqual:@1] || !validChain || ![count isKindOfClass:NSNumber.class] || [count unsignedIntegerValue] == 0) {
++        if (reason) *reason = @"The app's shader delivery information is invalid. Install the matching IPA again.";
++        return nil;
++    }
++    NSString *root = [documents stringByAppendingPathComponent:@"msl"];
++    [fm createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:nil];
++    NSData *installed = [NSData dataWithContentsOfFile:[root stringByAppendingPathComponent:@"pack.json"]];
++    NSString *directory = [root stringByAppendingPathComponent:chain];
++    NSData *wantedStamp = [NSData dataWithContentsOfFile:[[bundled stringByAppendingPathComponent:chain] stringByAppendingPathComponent:@"inputs.tsv"]];
++    NSData *actualStamp = [NSData dataWithContentsOfFile:[directory stringByAppendingPathComponent:@"inputs.tsv"]];
++    if (!installed || ![installed isEqualToData:expected] || !wantedStamp || ![wantedStamp isEqualToData:actualStamp]) {
++        if (reason) *reason = @"Shaders are missing or belong to another version. Unzip the matching shader ZIP in Files and move its msl folder into this app under On My iPad. Then fully close and reopen the app. Keep your save and romfs.img.";
++        return nil;
++    }
++    // One directory listing, no per-file hash/CRC scan. This catches an interrupted copy.
++    NSArray<NSString *> *names = [fm contentsOfDirectoryAtPath:directory error:nil];
++    if (names.count != [count unsignedIntegerValue]) {
++        if (reason) *reason = @"The shader folder is incomplete. Finish copying the matching msl folder in Files, then fully close and reopen the app.";
++        return nil;
++    }
++    [[NSURL fileURLWithPath:root] setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
++    return root;
++}
+diff --git a/dm/tools/tests/run_external_shaders_native.py b/dm/tools/tests/run_external_shaders_native.py
+new file mode 100644
+--- /dev/null
++++ b/dm/tools/tests/run_external_shaders_native.py
+@@ -0,0 +1,67 @@
++#!/usr/bin/env python3
++"""Exercise the production external-shader locator with actual Foundation files."""
++from pathlib import Path
++import subprocess
++import sys
++import tempfile
++
++ROOT = Path(__file__).resolve().parents[3]
++
++def main():
++    if sys.platform != 'darwin':
++        print('SKIP: external shader locator requires macOS/Foundation')
++        return 77
++    harness = r'''
++#import <Foundation/Foundation.h>
++#include <assert.h>
++#include <stdio.h>
++#include "dm_external_shaders.h"
++static void put(NSString *p, NSString *s) {
++    [NSFileManager.defaultManager createDirectoryAtPath:p.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
++    assert([s writeToFile:p atomically:YES encoding:NSUTF8StringEncoding error:nil]);
++}
++int main(void) { @autoreleasepool {
++    NSString *root = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
++    NSString *app = [root stringByAppendingPathComponent:@"app"], *doc = [root stringByAppendingPathComponent:@"Documents"];
++    NSString *bundled = [app stringByAppendingPathComponent:@"msl"], *external = [doc stringByAppendingPathComponent:@"msl"];
++    NSString *manifest = [app stringByAppendingPathComponent:@"dm/external-shaders.json"];
++    NSString *pack = [external stringByAppendingPathComponent:@"pack.json"];
++    NSString *bs = [bundled stringByAppendingPathComponent:@"b-123456abcdef/inputs.tsv"];
++    NSString *es = [external stringByAppendingPathComponent:@"b-123456abcdef/inputs.tsv"];
++    NSString *lib = [external stringByAppendingPathComponent:@"b-123456abcdef/key_b.metallib"];
++    NSString *meta = @"{\"schema\":1,\"chain\":\"b-123456abcdef\",\"resources\":2}";
++    NSString *why = @"stale";
++    assert([dm_ios_shader_root(app,doc,&why) isEqual:bundled] && why == nil);
++    put(manifest,@"not json"); assert(!dm_ios_shader_root(app,doc,&why) && why.length);
++    put(manifest,@"[]"); assert(!dm_ios_shader_root(app,doc,&why));
++    put(manifest,@"{\"schema\":1,\"chain\":\"../../escape12\",\"resources\":2}");
++    assert(!dm_ios_shader_root(app,doc,&why));
++    put(manifest,@"{\"schema\":1,\"chain\":\"b-123456abcdef\",\"resources\":\"2\"}");
++    assert(!dm_ios_shader_root(app,doc,&why));
++    put(manifest,meta); put(bs,@"inputs\tfixture\n");
++    assert(!dm_ios_shader_root(app,doc,&why));
++    put(pack,@"wrong pack"); assert(!dm_ios_shader_root(app,doc,&why));
++    put(pack,meta); assert(!dm_ios_shader_root(app,doc,&why));
++    put(es,@"inputs\tother\n"); assert(!dm_ios_shader_root(app,doc,&why));
++    put(es,@"inputs\tfixture\n"); assert(!dm_ios_shader_root(app,doc,&why));
++    put(lib,@"MTLB synthetic fixture");
++    assert([dm_ios_shader_root(app,doc,&why) isEqual:external] && why == nil);
++    assert([dm_ios_shader_root(app,doc,NULL) isEqual:external]);
++    [NSFileManager.defaultManager removeItemAtPath:manifest error:nil];
++    assert([dm_ios_shader_root(app,doc,&why) isEqual:bundled]);
++    assert([NSFileManager.defaultManager fileExistsAtPath:lib]);
++    [NSFileManager.defaultManager removeItemAtPath:root error:nil];
++    puts("PASS: 13 external shader locator cases (bundled, malformed, wrong pack/stamp, incomplete, valid)");
++} return 0; }
++'''
++    with tempfile.TemporaryDirectory(prefix='external-shaders-native-') as folder:
++        source, executable = Path(folder)/'test.m', Path(folder)/'test'
++        source.write_text(harness, encoding='utf-8', newline='\n')
++        subprocess.run(['xcrun','clang','-fobjc-arc','-Wall','-Wextra','-Werror',
++                        '-I',str(ROOT/'dm/ios/Sources'),'-framework','Foundation',
++                        str(source),'-o',str(executable)],check=True)
++        subprocess.run([str(executable)],check=True)
++    return 0
++
++if __name__ == '__main__':
++    raise SystemExit(main())
