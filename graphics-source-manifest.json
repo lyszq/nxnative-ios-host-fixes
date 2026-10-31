@@ -2,11 +2,11 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "c01942011374c45948aff5caf4055f02741492bdc180becbd2f88d2ffc3cab70",
+  "patch_sha256": "68ce1ef16c4dd73dc06244e5cf20c6ecb56b9664eaba8e90da8f9ebde1e74dbb",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
-      "normalized_sha256": "a5e0e047b4bc0b8faeba5fef99343661934e4795181c4856a98ecbdb00979d65"
+      "normalized_sha256": "2faabd0c4cb8c3ac456e90b2941d44fa81d54a472871067cc202fc9c3776484c"
     },
     {
       "path": "dm/gfx/nvn/dm_shell_msl.h",
@@ -30,7 +30,7 @@
     },
     {
       "path": "dm/gfx/nvn/nvn_mtl.m",
-      "normalized_sha256": "4ce2e82279754c76862da1939763a70dde1f29f243a3dbdcbad55e15b16b7526"
+      "normalized_sha256": "d53c97e5dff79fb27594fd4a33e3ae18805007f75aa73b443c206a1a06087c14"
     },
     {
       "path": "dm/gfx/nvn/nvn_obj.h",
@@ -47,6 +47,14 @@
     {
       "path": "dm/gfx/tests/t_pull.m",
       "normalized_sha256": "8259b5eafb0cf975299c4464b0bf9ca98985470a90cb0ba855d419781ce296d1"
+    },
+    {
+      "path": "dm/gfx/tests/t_rt_range.m",
+      "normalized_sha256": "7c235b6fe16dce6f0b0193c588a5f73cdacabfd412caf1acc87ef172a08bd852"
+    },
+    {
+      "path": "dm/gfx/tests/t_unwritten_store.m",
+      "normalized_sha256": "7f8654812d9046d5fb4b41fe504c9786cded913a2ca8a43770d2fadf0da51fbf"
     },
     {
       "path": "dm/gfx/tests/t_vbuf.m",
@@ -82,7 +90,7 @@
     },
     {
       "path": "dm/host/dm_odyssey_ui.h",
-      "normalized_sha256": "d91fd724e93f2920d087bc73626fe3280301e0c57e3341f94ebca96a7dc9d043"
+      "normalized_sha256": "41d002c4e35591a5ed81c2d1c150cac5b68e9ee71c867c5220d01aabc0345c60"
     },
     {
       "path": "dm/host/dm_overlay_assets.h",
@@ -110,7 +118,7 @@
     },
     {
       "path": "dm/host/tests/t_odyssey_display_asset.c",
-      "normalized_sha256": "6c51742354b91fa18f757462a37e14cddc2a3929c642aa711aef768a673a05d3"
+      "normalized_sha256": "f6160b765c1ffd1befee4f3379562d3ddf9f46bc9530da612d7c7ab742155efc"
     },
     {
       "path": "dm/ios/Sources/dm_external_shaders.h",
@@ -145,6 +153,10 @@
       "normalized_sha256": "5126f742b8d7286c9553c0ab2c7bf64c254cc7694c4d98139ad4541d412365d7"
     },
     {
+      "path": "dm/tools/tests/run_attachment_store_native.py",
+      "normalized_sha256": "1716021f50ceb8738a6489a47b5aea3420d8f1d43d23c7c7ed978f3bbf9e01ed"
+    },
+    {
       "path": "dm/tools/tests/run_command_memory_native.py",
       "normalized_sha256": "e1782d56e267e15ded3850ed4619aff991e277c0f57bc5bc3c949a09a2fc7fb5"
     },
@@ -166,7 +178,7 @@
     },
     {
       "path": "dm/tools/tests/run_odyssey_ui_native.py",
-      "normalized_sha256": "c43601fc35534ade2499426fcb1a617f71d290f903f8b9d0ce3423aa9de37005"
+      "normalized_sha256": "939874a0a2144861e958914d414fe096b25f5d83673ce9e19eab15cfc68c9621"
     },
     {
       "path": "dm/tools/tests/run_shell_msl_native.py",
@@ -186,7 +198,7 @@
     },
     {
       "path": "docs/agents/symptoms.md",
-      "normalized_sha256": "cb5f7bc88a7ebe681d4a747f8215a8fbd8d78d5a8bcd3fa72fbe983fcd8678da"
+      "normalized_sha256": "c795ff4e6cd3a331700e74b4675b20aaf705452fec85a98c4d3b6a848bf38257"
     },
     {
       "path": "docs/reference/nvn-objects.md",
@@ -198,7 +210,7 @@
     },
     {
       "path": "docs/reference/rendering.md",
-      "normalized_sha256": "586d7eb5a7a2fdf93f2f62747e217ec16da1d06c243a2ddb3173ad2ade12b141"
+      "normalized_sha256": "d7cd22ad91a6c95f7c08afd8096dff11e2dff05231478c5b566904afb28d3534"
     },
     {
       "path": "docs/reference/services.md",

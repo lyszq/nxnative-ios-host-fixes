@@ -1,5 +1,5 @@
 diff --git a/dm/games/0100000000010000/README.md b/dm/games/0100000000010000/README.md
-index bf60f53..440f37d 100644
+index bf60f53..4ee7184 100644
 --- a/dm/games/0100000000010000/README.md
 +++ b/dm/games/0100000000010000/README.md
 @@ -8,21 +8,22 @@ Update 1.4.1 (v393216) over the base game, SDK 7.3.2. Nintendo EPD's sead / agl
@@ -66,7 +66,7 @@ index bf60f53..440f37d 100644
  - The three thunder geometry shaders do not translate.
  - The silent first minute of sound.
  - development.md calls SDK 7.3.2 "the oldest so far"; Mario Kart 8 Deluxe (SDK 4.4.0) is older now.
-@@ -102,3 +107,14 @@ An explicit stock/off selection leaves the register frame and existing overlays
+@@ -102,3 +107,17 @@ An explicit stock/off selection leaves the register frame and existing overlays
  **F3 device observation, 2026-10-29:** the user reports working resolution switching and smooth native 2732x2048 gameplay on an 8 GB iPad Air M2, with high RAM use and little perceived improvement over 1080p. The 4:3 world view is reported correct; text and main-menu proportions remain distorted. Bloom/lighting flashes and short first-encounter hitches remain. These are user observations, not controlled frame-time, memory, or visual A/B measurements.
  
  **F4 default:** 1080p is recommended for memory efficiency and is the default for an unset supported display selection. Saved native, 1440p and stock values and explicit environment overrides retain precedence. When the launcher is skipped, the host adopts 1080p only for the exact docked build with complete display gates and validated assets; the standalone policy parser still treats an absent choice as stock. The 4:3 option stays off by default. A 4:3 1080p target is 1440x1080; wide 1080p is 1920x1080. No F4 device result is claimed.
@@ -81,6 +81,9 @@ index bf60f53..440f37d 100644
 +**F8 UI candidate:** the exact-build `dm_odyssey_ui.h` adapter temporarily composes original 1280x720 primary layout roots for proportional text/HUD at every accepted narrow preset, then restores animated local values. Named top/bottom HUD owners retain their edge anchors. Full-screen menu owners are observed at the layout draw dispatch, with the root draw visibility flags checked; StageScene render dispatch establishes gameplay. A one-frame classification latch keeps projection and layout consistent, and its completed-image aspect is stored in the Metal present queue. Title/loading frames without a stage render and observed menus use 16:9 letterboxing; gameplay uses the accepted narrow aspect. The iOS surface stays fixed, avoiding asynchronous view resizing. New package assembly removes exactly the six legacy 1080p layout overrides to prevent double compensation. Unsupported ABI or old overrides decline the adapter. The current menu-owner list covers Menu, Map, options, closet, shop and minigame menus; additional screens and transitions need physical acceptance. Synthetic native tests cover proportions, animated-value restoration, cyclic/malformed trees, ABI refusal and 250 open/close transitions, not device rendering. No shader-chain or Guest change.
 +
 +- **F8 fill lifetime:** see [Retiring changing buffer-fill patterns](../../../docs/reference/nvn-objects.md#retiring-changing-buffer-fill-patterns). This source defect was not established as another physical incident.
++
++
++**F8 device acceptance / F9 continuation:** the user reports the HUD/menu aspect behavior now works and requests smoother transitions. F9 interpolates the shared composition ratio over220ms with a quintic ease; camera, HUD and the queued image keep the same frame latch. Native fixtures check30/60/120Hz timing, mid-transition proportions, interrupted reversals and250open/close cycles. The user also reports recurring momentary bright-light flashes every few seconds at a fixed position/camera angle, more frequent while moving. [Unwritten attachment store contract](../../../docs/reference/rendering.md#unwritten-attachment-stores-without-lookahead) corrects a discovered Metal preservation violation. This is a general correctness fix and a plausible flicker candidate, not a confirmed physical flicker cure. Additional memory bandwidth may affect GPU time/power. The shader pack and bloom values stay unchanged. Existing UNWRITTEN_DC diagnostics now control bookkeeping only; they cannot re-enable the unsafe store omission.
 diff --git a/dm/gfx/nvn/dm_shell_msl.h b/dm/gfx/nvn/dm_shell_msl.h
 index 87a5ff2..21e8c9a 100644
 --- a/dm/gfx/nvn/dm_shell_msl.h
@@ -221,7 +224,7 @@ index dd159ac..42773e2 100644
      vconv_bind(re, j->vs, 1, &j->vertex_range, NULL);
      args_dirty_all(); encode_args(re, j->vs, 0, 1); enc_r_vbuf(re, 13, j->capture_info);
 diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
-index 8e032ea..5892b7c 100644
+index 8e032ea..77011f7 100644
 --- a/dm/gfx/nvn/nvn_mtl.m
 +++ b/dm/gfx/nvn/nvn_mtl.m
 @@ -1290,8 +1290,19 @@ void mtl_sub_fill(uint64_t dst, uint64_t n, uint32_t value) {
@@ -255,7 +258,21 @@ index 8e032ea..5892b7c 100644
  #define RED_ONCE(k, ...) do { if (!g_red_once[k]++) MLOG("[RED] " __VA_ARGS__); } while (0)
  // NVN vertex streams 0–15 → Metal vertex buffer slots: 0–13 go to 16–29 (30 is the constant fallback buffer), 14 and 15 to 14 and 15. Metal has only the 31 slots 0–30; translated shaders use only buffer(0) (the argument buffer),
  // and the host's own vertex functions read no vertex buffers. 13 Sentinels uses stream 15, and the old 16 + stream went out of range (Metal assertion: buffer index (31) must be < 31)
-@@ -4456,6 +4467,8 @@ static id<MTLSamplerState> samp_by_id(int sid) {   // Caller holds g_rmu
+@@ -3004,9 +3015,10 @@ void ms_after(void);
+ typedef struct { uint64_t ser, bytes; uint32_t lv, sl; int idx; uint8_t depth, state, ridx, drawn, why, load, wrote, wwhy; const char *wkey; int wslot; } sd_att;   // depth: 0 color 1 depth 2 stencil (the two parts of a combined depth-stencil texture are decided separately)   // state 0 undecided 1 needed 2 redundant; idx: color attachment index, -1 for depth
+ static sd_att g_sd[9]; static int g_nsd;
+ static int g_udc_ab = -1, g_udc_ab_on;
+-// Attachments this pass did not write (depth / stencil test only, color write mask 0, etc.) get their write-back changed to DontCare: the content is already in memory, saving one full write-back.
+-// On by default: on Mac, same-process on / off screenshots follow the same distribution as the null control; on A19 Pro, private Depth32F_S8 / RGBA8 read back after DontCare differ in 0 places.
+-// DM_NVN_UNWRITTEN_DC=0 turns it off (for equivalence comparison)
++// Track attachment writes for diagnostics. Loaded-but-unwritten is NOT proof
++// that DontCare preserves backing: Metal permits arbitrary contents afterwards.
++// Earlier device readbacks did not establish a portable preservation contract.
++// DM_NVN_UNWRITTEN_DC=0 skips this bookkeeping, not required attachment stores.
+ static int udc_on(void) {
+     if (g_udc_ab < 0) { const char *e = getenv("DM_NVN_UNWRITTEN_DC"); g_udc_ab = !(e && !strcmp(e, "0"));
+         const char *a = getenv("DM_NVN_UDC_AB"); if (a && !strcmp(a, "1")) { g_udc_ab = 0; g_udc_ab_on = 0; } }
+@@ -4456,6 +4468,8 @@ static id<MTLSamplerState> samp_by_id(int sid) {   // Caller holds g_rmu
      d.mipFilter = p.minf <= 1 ? MTLSamplerMipFilterNotMipmapped : (p.minf == 2 || p.minf == 3) ? MTLSamplerMipFilterNearest : MTLSamplerMipFilterLinear;
      d.sAddressMode = wrapm(p.ws); d.tAddressMode = wrapm(p.wt); d.rAddressMode = wrapm(p.wr);
      d.lodMinClamp = p.lod_min < 0 ? 0 : p.lod_min; d.lodMaxClamp = p.lod_max;
@@ -264,7 +281,7 @@ index 8e032ea..5892b7c 100644
      d.maxAnisotropy = p.aniso < 1 ? 1 : p.aniso > 16 ? 16 : (NSUInteger)p.aniso;
      if (p.cmp_mode) d.compareFunction = (MTLCompareFunction)(p.cmp_func - 1);
      // Reduction (NVN 1 min / 2 max): the minimum or maximum of the texels a filtered sample covers, per channel (Metal 26). Pokémon Legends: Z-A builds its depth pyramid with a min sampler
-@@ -4548,31 +4561,38 @@ static void ubd_dirty(uint64_t lo, uint64_t hi) {
+@@ -4548,31 +4562,38 @@ static void ubd_dirty(uint64_t lo, uint64_t hi) {
  // NVN permits byte-aligned vertex streams; Metal drops the low two address bits. Keep an aligned copy in the submission arena.
  // A CPU copy is safe only without GPU writers (including earlier submissions and sparse aliases). Otherwise copy on the GPU before
  // opening the draw's encoder. Guest writes and pool remaps invalidate reuse; scratch copies themselves do not change guest memory.
@@ -315,7 +332,7 @@ index 8e032ea..5892b7c 100644
      else {
          g_blit_alias = 1;
          id<MTL4ComputeCommandEncoder> e = blit();   // lands deferred updates and orders all preceding GPU writes, including aliases
-@@ -4583,11 +4603,41 @@ static uint64_t vbuf_unaligned(uint64_t addr, uint64_t size, int prepare) {
+@@ -4583,11 +4604,41 @@ static uint64_t vbuf_unaligned(uint64_t addr, uint64_t size, int prepare) {
      if (!c) { c = malloc(sizeof *c); if (!c) MDIE("cannot allocate vertex copy cache entry"); nvn_hm_put(&g_vbuf_unaligned, key, c); }
      *c = (vbuf_copy){ab.gpuAddress + off, g_wr_epoch, g_vbuf_write_epoch, g_sbw_gen, g_npend}; return c->gpu;
  }
@@ -359,7 +376,7 @@ index 8e032ea..5892b7c 100644
      sub = g_sub_serial; gen = pool_gen; sparse = sparse_gen;
  }
  // Resolved guest streams are separate from the table cache: vconv_bind may overwrite a stream's table slot.
-@@ -4598,7 +4648,7 @@ static void bind_vbufs(id<MTL4RenderCommandEncoder> en) {
+@@ -4598,7 +4649,7 @@ static void bind_vbufs(id<MTL4RenderCommandEncoder> en) {
      for (int s = 0; s < 16; s++) {
          uint64_t addr = S.vbuf[s].address, gpu;
          if (!addr) continue;
@@ -368,7 +385,7 @@ index 8e032ea..5892b7c 100644
          if (g_vbuf_cache && cache[s].addr == addr && cache[s].gen == gen) { gpu = cache[s].gpu; g_vbuf_reuse++; }
          else {
              void *mb; uint64_t mo; g_vbuf_resolve++;
-@@ -4623,7 +4673,9 @@ static void pull_layout_fill(pull_layout *Lp) {
+@@ -4623,7 +4674,9 @@ static void pull_layout_fill(pull_layout *Lp) {
      pull_layout L; memset(&L, 0, sizeof L); uint32_t lo[16] = {0};
      for (int st = 0; st < 16; st++) {
          uint64_t addr = S.vbuf[st].address, gpu; void *mb; uint64_t mo;
@@ -379,7 +396,7 @@ index 8e032ea..5892b7c 100644
          L.s[st].base = gpu & ~3ull; lo[st] = (uint32_t)(gpu & 3); L.s[st].stride = S.stream[st].stride; L.s[st].divisor = S.stream[st].divisor;
      }
      for (int a = 0; a < 16 && a < S.nattr; a++) {
-@@ -5032,7 +5084,7 @@ static void vc_stat(void) {   // every 3600 submissions
+@@ -5032,7 +5085,7 @@ static void vc_stat(void) {   // every 3600 submissions
      g_vc_stat = g_sub_serial; g_vc_conv = g_vc_whole = 0;
  }
  // Per submission, one conversion per (range, format, layout): KTGL draws the same mesh several times a frame (depth, shadow, G-buffer)
@@ -388,7 +405,7 @@ index 8e032ea..5892b7c 100644
  static void vconv_bind(id<MTL4RenderCommandEncoder> en, NvShader *vs, int tf, const p_draw *dw, const p_draw_idx *di) {   // tf: a transform feedback capture (no shadow inputs)
      const nvn_refl *rf = &vs->rf; int slot = VCONV_SLOT0, vc = vc_on(), rk = -1, on = vin_on(vs, NULL, tf); int64_t rlo = 0, rhi = 0;   // rk: the draw's vertex range is known (-1 = not looked up yet)
      vc_stat();
-@@ -5040,24 +5092,31 @@ static void vconv_bind(id<MTL4RenderCommandEncoder> en, NvShader *vs, int tf, co
+@@ -5040,24 +5093,31 @@ static void vconv_bind(id<MTL4RenderCommandEncoder> en, NvShader *vs, int tf, co
          if (!vconv_wanted(rf, v, NULL, on) || rf->v[v].nvn >= S.nattr) continue;
          int a = rf->v[v].nvn, st = S.attr[a].stream, f = S.attr[a].fmt; uint32_t off = S.attr[a].offset, stride = st < 16 ? S.stream[st].stride : 0;
          uint64_t addr = st < 16 ? S.vbuf[st].address : 0, size = st < 16 ? S.vbuf[st].size : 0, gpu = 0;
@@ -426,7 +443,7 @@ index 8e032ea..5892b7c 100644
          }
          if (gpu) enc_r_vbuf(en, (NSUInteger)slot, gpu - v0 * 16);   // vertex id v0 reads the first converted element
          slot++;
-@@ -5684,8 +5743,8 @@ extern int dm_shader_learn_enabled(void);
+@@ -5684,8 +5744,8 @@ extern int dm_shader_learn_enabled(void);
  // that one declaration in the shader's own source, converts the values written to it, compiles the source again and
  // builds the pipeline from the result. The row is kept in Documents, so the next launch's shader preparation compiles it
  // that way from the start and this never runs for that shader again.
@@ -437,7 +454,7 @@ index 8e032ea..5892b7c 100644
  static NSMutableDictionary<NSString *, id> *g_learn_fn;   // key -> LearnFn: a function built from the rewritten source
  static os_unfair_lock g_learn_lock = OS_UNFAIR_LOCK_INIT;
  @interface LearnFn : NSObject { @public id<MTLFunction> fn; unsigned mask; } @end
-@@ -5720,8 +5779,12 @@ static id<MTLFunction> learn_fn(NvShader *fs, unsigned mask) {
+@@ -5720,8 +5780,12 @@ static id<MTLFunction> learn_fn(NvShader *fs, unsigned mask) {
      // fs->key is a char[24], not an object: "%@" on it hands CFString a bare pointer and the format machinery sends
      // respondsToSelector to the characters themselves (SIGTRAP in objc_opt_respondsToSelector). "%s" it is.
      NSString *path = [NSString stringWithFormat:@"%@/%s.metallib", g_msl_dir, fs->key];
@@ -451,7 +468,7 @@ index 8e032ea..5892b7c 100644
      if (![txt hasPrefix:@"#"]) { MLOG("[RED] shader %s: %s is a compiled library, not source: its output types cannot be rewritten", fs->key, path.lastPathComponent.UTF8String); return nil; }
      size_t on = 0;
      char *w = dm_shader_learn_rewrite(txt.UTF8String, strlen(txt.UTF8String), mask, &on);
-@@ -6657,12 +6720,14 @@ static int img_atomic_ok(id<MTLTexture> t, const nvn_rbind *b) {
+@@ -6657,12 +6721,14 @@ static int img_atomic_ok(id<MTLTexture> t, const nvn_rbind *b) {
  static uint64_t g_draw_seq, g_fb_seq, g_fb_count; static int g_fb_n, g_fb_rebind;
  static __unsafe_unretained id<MTLTexture> g_fb_src[4]; static __strong id<MTLTexture> g_fb_use[4]; static uint64_t g_fb_rid[4];
  static uint8_t g_args_dirty[6] = {1, 1, 1, 1, 1, 1};
@@ -470,7 +487,35 @@ index 8e032ea..5892b7c 100644
      }
  }
  static NSUInteger g_args_mesh;   // nonzero: geometry-stage arguments go to this slot of the vertex table, which the mesh stage shares (geo_mesh_draw)
-@@ -9203,7 +9268,7 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
+@@ -7084,11 +7150,12 @@ static int sdx_decide(uint8_t st[9]);   // Store lookahead decision (for the ind
+ static void sd_finish(void) {
+     if (!g_nsd) return;
+     uint8_t nst[9];
+-    // Unchanged, loaded attachments already have their content in memory. Their proof depends only on writes in this pass, independently of future bindless readers or the optional lookahead.
++    // Store remains required even when a loaded attachment was not modified.
++    // Only an independent lifetime proof may permit discarding its contents.
+     if (tbdr_on() && sdx_decide(nst)) { for (int i = 0; i < g_nsd; i++) if (nst[i] == 2) g_sd[i].state = 2; else sd_need(&g_sd[i], nst[i] >> 2); }
+     else for (int i = 0; i < g_nsd; i++) sd_need(&g_sd[i], 6);   // Pass ended outside the list / index unavailable: always write back
+     for (int i = 0; i < g_nsd; i++) {
+-        sd_att *t = &g_sd[i]; int udc_dead = udc_on() && t->load && !t->wrote;
++        sd_att *t = &g_sd[i];
+         // A color attachment written in the same pass as the window texture does not enter the ledger: it is a link in the present chain, not a transient attachment that is 'reset every frame before use'.
+         // The in-run 'upscale' pass writes two textures at once - scene texture + window texture - and the UI composite was merged into the same pass, so in-run nobody reads back the scene texture; as soon as the game stops drawing 3D (loading screen)
+         // a separate composite pass samples it afterwards instead. 'About to enter the loading screen' is only known after the previous frame was submitted, so prediction cannot stop it: on iPad true fullscreen every install hits it once on the first act change
+@@ -7098,10 +7165,10 @@ static void sd_finish(void) {
+                                         && !xv_disabled(xtag = xv_tag_pass(R.rt.color[t->idx], t->lv, t->idx, &R.rt));
+         int xvdead = xvcand && xv_trial_get(xtag, 0) >= XV_TRIAL;   // Only after the trial period is the write-back really skipped
+         if (xvcand && !xvdead) xv_set(t->ser, t->lv, t->sl, XV_PROBE, xtag);   // Trial period: write back as usual, only track the next touch
+-        int dead = t->state == 2 || udc_dead || xvdead; MTLStoreAction sa = dead ? MTLStoreActionDontCare : MTLStoreActionStore;
++        int dead = t->state == 2 || xvdead; MTLStoreAction sa = dead ? MTLStoreActionDontCare : MTLStoreActionStore;
+         if (xvdead) { xv_set(t->ser, t->lv, t->sl, XV_INVALID, xtag); g_xv_dc++; }
+         if (t->depth == 1) [g_enc setDepthStoreAction:sa]; else if (t->depth == 2) [g_enc setStencilStoreAction:sa]; else [g_enc setColorStoreAction:sa atIndex:(NSUInteger)t->idx];
+-        g_sd_n_all++; if (dead) { g_sd_n_dead++; g_sd_dead_bytes += t->bytes; g_bw_store -= t->bytes; if (udc_dead) g_udc_saved_bytes += t->bytes; }
++        g_sd_n_all++; if (dead) { g_sd_n_dead++; g_sd_dead_bytes += t->bytes; g_bw_store -= t->bytes; }
+         if (!t->state) t->why = 5;
+         PD("Z %llu %s ser=%llu lv%u sl%u %s why=%d by=%s slot=%d", g_stat_pass, t->depth == 1 ? "d" : t->depth == 2 ? "s" : "c", (unsigned long long)t->ser, t->lv, t->sl, xvdead ? "dontcare-xv" : dead ? "dontcare" : "store", dead ? 0 : t->why, t->why == 1 && t->wkey ? t->wkey : "-", t->wslot);
+         if (udc_on()) PD("U %llu %s ser=%llu lv%u sl%u runtime=%s reason=%s state=%d load=%d", g_stat_pass, t->depth == 1 ? "d" : t->depth == 2 ? "s" : "c", (unsigned long long)t->ser, t->lv, t->sl, t->wrote ? "written" : "unwritten", t->wwhy == 1 ? "image_write" : t->wwhy == 2 ? "color_write_mask" : t->wwhy == 3 ? "fragment_output" : t->wwhy == 4 ? "depth_write" : t->wwhy == 5 ? "stencil_write" : "none", t->state, t->load);
+@@ -9203,7 +9270,7 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
      if (g_enc && g_pass.layered != g_rp_layered) rp_end();   // a layered pass only for layer-writing vertex shaders (see rp_begin_ex)
      if (g_enc && g_sm_pass && draw_samples_rt(pr)) { PD("M %llu a draw in the slice-merged pass samples its attachment; split here", g_stat_pass); rp_end(); }
      if (!g_enc && mode == 0 && !g_rp_layered && !defer_q_draw && g_exec_next && !tbdr_on() && !g_geo_program && sm_on()) sm_plan(pr);
@@ -479,7 +524,7 @@ index 8e032ea..5892b7c 100644
      id<MTLRenderCommandEncoder> en = rp_begin_ex(mode);
      g_rp_layered = 0; g_sm_plan.on = 0;
      g_fd_dw = NULL; g_fd_di = NULL;
-@@ -9213,7 +9278,7 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
+@@ -9213,7 +9280,7 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
          // A replayed draw may have ended Q's encoder to align a GPU-written stream. Restore this draw's streams and encoder.
          g_rp_layered = pr->sh[0] && pr->sh[0]->layer_out;
          if (g_enc && g_pass.layered != g_rp_layered) rp_end();
@@ -488,7 +533,7 @@ index 8e032ea..5892b7c 100644
          if (!en) return;
      }
      if (skip_d) { g_stat_ds_omit++; if (mode == 3) g_stat_s_only++; else if (mode == 4) g_stat_d_only++; }
-@@ -9280,6 +9345,14 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
+@@ -9280,6 +9347,14 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
      g_kd_force = kd_draw(pr, dw, di);
      if (pr->sh[0]) encode_args(en, pr->sh[0], 0, 1);
      if (pr->sh[1] && !S.rast_discard) encode_args(en, pr->sh[1], 1, 0);
@@ -503,7 +548,7 @@ index 8e032ea..5892b7c 100644
      // Parameter binding captures the actual resources under the registry lock; if the version changed between the eligibility check and the binding, split and retry before any GPU draw.
      if (g_rt_range_active && (g_pass.reg_gen != g_reg_gen || g_pass.ser_gen != g_ser_gen || g_pass.range_dirty != nvn_dirty_now())) { rp_end(); draw(dw, di); return; }
      int prim = dw ? dw->prim : di->prim;
-@@ -10688,7 +10761,10 @@ static id<MTLTexture> present_raw_src(id<MTLTexture> src) {
+@@ -10688,7 +10763,10 @@ static id<MTLTexture> present_raw_src(id<MTLTexture> src) {
  // The rectangle of the canvas (dw x dh) the picture (cw x ch) is drawn into: the picture's aspect ratio kept and centred, black bars in the rest (no stretching when the screen's ratio
  // differs from the game's, e.g. iPhone about 19.5:9 against the game's 16:9); when the ratios differ by under 1 % (the remainder from a game width that is a multiple of 8 in the
  // full-screen setup, e.g. 1952x900 against 2868x1320 differs by 0.17 %) the whole canvas, leaving no border of a few pixels
@@ -514,7 +559,7 @@ index 8e032ea..5892b7c 100644
      double s = fmin(dw / cw, dh / ch);
      MTLViewport vp = {floor((dw - cw * s) / 2), floor((dh - ch * s) / 2), round(cw * s), round(ch * s), 0, 1};
      if (fabs((dw / dh) / (cw / ch) - 1) < 0.01) vp = (MTLViewport){0, 0, dw, dh, 0, 1};
-@@ -10873,9 +10949,11 @@ static void present_gpu_note(double s, int fx) {
+@@ -10873,9 +10951,11 @@ static void present_gpu_note(double s, int fx) {
      n[fx] = 0;
  }
  static double g_link_it_tin;   // Enqueue time of the frame the display-link callback is presenting (read and written only on the display-link thread)
@@ -527,7 +572,7 @@ index 8e032ea..5892b7c 100644
      if (bootprof() && (g_present_n == 1 || g_present_n % 120 == 0)) {
          if (g_present_n == 1) g_bp_first_present = bp_now() - g_bp_t0;
          MLOG("[bootprof] t=%.3f s present #%llu: metallibs loaded %llu / %.1f ms; pipelines created %llu / %.1f ms (all synchronous on the submit thread); prewarmed and used: shaders %llu / render pipelines %llu / compute pipelines %llu; "
-@@ -10999,14 +11077,14 @@ static int present_now(const tex_t *t, double period, uint64_t frame, uint64_t t
+@@ -10999,14 +11079,14 @@ static int present_now(const tex_t *t, double period, uint64_t frame, uint64_t t
  // Swapchain texture return: before AcquireTexture gets a texture it waits for the ticket of that texture's previous present to be processed (mtl_present_wait), after which the commands the game draws into it
  // are necessarily ordered after that blit on the GPU queue.
  #define PQ 8
@@ -544,7 +589,7 @@ index 8e032ea..5892b7c 100644
  static double g_link_vperiod, g_link_vhalf;   // virtual ticks (link_range): seconds per counted tick (0 = every callback is a tick) and half a refresh of the screen
  
  @interface NvMetalDisplayLinkDelegate : NSObject <CAMetalDisplayLinkDelegate>
-@@ -11072,7 +11150,7 @@ __attribute__((weak)) uint64_t dm_focus_in_since(void) { return 0; }
+@@ -11072,7 +11152,7 @@ __attribute__((weak)) uint64_t dm_focus_in_since(void) { return 0; }
      pthread_mutex_unlock(&g_pq_mu);
      int submitted;
      ext_wait(it.ev_val); snap_commit_wait(it.snap_v);
@@ -553,7 +598,7 @@ index 8e032ea..5892b7c 100644
      g_link_hold_until = submitted && it.period > 0.025 ? update.targetPresentationTimestamp + it.period : 0;
      if (!submitted) {
          pthread_mutex_lock(&g_pq_mu);
-@@ -11192,7 +11270,7 @@ static void *present_main(void *arg) {
+@@ -11192,7 +11272,7 @@ static void *present_main(void *arg) {
          pthread_mutex_unlock(&g_pq_mu);
          int submitted;
          ext_wait(it.ev_val); snap_commit_wait(it.snap_v);
@@ -562,7 +607,7 @@ index 8e032ea..5892b7c 100644
          pthread_mutex_lock(&g_pq_mu); g_classic_busy = 0; pthread_cond_broadcast(&g_pq_cv); pthread_mutex_unlock(&g_pq_mu);
          if (!submitted) {
              pthread_mutex_lock(&g_pq_mu);
-@@ -11324,6 +11402,7 @@ static uint64_t snap_take(const tex_t *t) {
+@@ -11324,6 +11404,7 @@ static uint64_t snap_take(const tex_t *t) {
      return g_snap[k].serial;
  }
  static uint64_t present_enqueue(const tex_t *t, double period, const int crop[4], uint64_t ev_val) {
@@ -570,7 +615,7 @@ index 8e032ea..5892b7c 100644
      atomic_store(&dm_present_ns, now_ns());
      if (g_classic || atomic_load(&g_present_discard)) return 0;   // Ticket number 0 = no pending present; the swapchain texture acquire does not wait (g_classic: no Metal 4 queue to present on)
      if (t) { xv_check(t->serial, 0, 0, "present"); if (g_xv_npresent < 128) g_xv_present[g_xv_npresent++] = t->serial; }
-@@ -11343,7 +11422,7 @@ static uint64_t present_enqueue(const tex_t *t, double period, const int crop[4]
+@@ -11343,7 +11424,7 @@ static uint64_t present_enqueue(const tex_t *t, double period, const int crop[4]
      }
      pthread_mutex_lock(&g_pq_mu);
      while (g_pq_in - g_pq_done >= PQ) pthread_cond_wait(&g_pq_cv, &g_pq_mu);   // Wait only when the queue is full; normally AcquireTexture blocks first
@@ -901,6 +946,40 @@ index 36df678..d930651 100644
          int k8 = !i2f && (mf == MTLVertexFormatUCharNormalized || mf == MTLVertexFormatCharNormalized || mf == MTLVertexFormatUChar || mf == MTLVertexFormatChar || mf == MTLVertexFormatUChar2Normalized ||
                   mf == MTLVertexFormatChar2Normalized || mf == MTLVertexFormatUChar2 || mf == MTLVertexFormatChar2 || mf == MTLVertexFormatUChar3Normalized || mf == MTLVertexFormatChar3Normalized ||
                   mf == MTLVertexFormatUChar3 || mf == MTLVertexFormatChar3 || mf == MTLVertexFormatUChar4Normalized || mf == MTLVertexFormatChar4Normalized || mf == MTLVertexFormatUChar4 ||
+diff --git a/dm/gfx/tests/t_rt_range.m b/dm/gfx/tests/t_rt_range.m
+index 9ab1c80..3522552 100644
+--- a/dm/gfx/tests/t_rt_range.m
++++ b/dm/gfx/tests/t_rt_range.m
+@@ -42,10 +42,10 @@ int main(int argc,char **argv){@autoreleasepool{enabled=1;for(int i=1;i<argc;i++
+  uint8_t yellow[4]={255,255,0,0},green[4]={0,255,0,0}; // alpha is given 0 by the second draw's ONE/ ZERO; integer closed-form RGB yellow.
+  for(int m=0;m<2;m++){unsigned bc=0,bd=0,bs=0;for(int i=0;i<64;i++){bc+=memcmp((uint8_t *)buffers[m][0].contents+4*i,small_depth && (i%8>=4||i/8>=4)?green:yellow,4)!=0;bd+=((float *)buffers[m][1].contents)[i]!=.75f;bs+=((uint8_t *)buffers[m][2].contents)[i]!=0x2d;}E("each 64 texels hand-computed yellow",0,bc);E("depth .75 seed kept",0,bd);E("stencil 0x2d seed kept",0,bs);E("samples after Reset, 120 indices / 40 triangles",2560,q[m][0]);}
+  E("three planes original vs candidate byte for byte",0,memcmp(buffers[0][0].contents,buffers[1][0].contents,256)||memcmp(buffers[0][1].contents,buffers[1][1].contents,256)||memcmp(buffers[0][2].contents,buffers[1][2].contents,64));
+- E("original guard: two passes",2,passes[0]);E("candidate one pass / default two passes",enabled&&!small_depth&&!sample_attachment?1:2,passes[1]);{ // DontCare (not stored if this pass did not write it): both passes' depth state enables only test, not write, so each pass saves one depth-stencil store = 8×8×5 bytes (Depth32F_S8 attachment model, 5 B/pixel)
+-   const char *u=getenv("DM_NVN_UNWRITTEN_DC"); int udc=!(u&&!strcmp(u,"0")); unsigned dsb=udc&&!small_depth&&!sample_attachment?8*8*5:0;
+-   E(udc?"original attachment model 2048−2×320 (DontCare)":"original attachment model 2048",(small_depth?1152:2048)-2*dsb,bytes[0]);
+-   E(udc?"candidate attachment model 1024−320 (DontCare)":"candidate attachment model 1024 / default 2048",(small_depth?1152:enabled&&!sample_attachment?1024:2048)-(enabled&&!sample_attachment?1:2)*dsb,bytes[1]); }
++ E("original guard: two passes",2,passes[0]);E("candidate one pass / default two passes",enabled&&!small_depth&&!sample_attachment?1:2,passes[1]);{ // Unwritten loaded depth/stencil planes still require Store under Metal's contract.
++   E("original attachment model retains all stores",small_depth?1152:2048,bytes[0]);
++   E("candidate attachment model retains all stores",small_depth?1152:enabled&&!sample_attachment?1024:2048,bytes[1]); }
++
+  const char *dir=getenv("DM_GFX_FIXTURE_OUT");if(dir){char p[1024];for(int m=0;m<2;m++)for(int j=0;j<3;j++){snprintf(p,sizeof p,"%s/%s_%s.raw",dir,m?"candidate":"reference",j==0?"color":j==1?"depth":"stencil");FILE *f=fopen(p,"wb");if(!f||fwrite(buffers[m][j].contents,1,j==2?64:256,f)!=(j==2?64:256))abort();fclose(f);}}
+  mtl_pool_del(ix);free(ix);printf("RT_RANGE_GPU cases=%d failed=%d\n",cases,bad);return bad!=0;
+ }}
+diff --git a/dm/gfx/tests/t_unwritten_store.m b/dm/gfx/tests/t_unwritten_store.m
+index 6774838..1eb8b5d 100644
+--- a/dm/gfx/tests/t_unwritten_store.m
++++ b/dm/gfx/tests/t_unwritten_store.m
+@@ -92,8 +92,8 @@ int main(int argc,char **argv) { @autoreleasepool {
+         }
+         CHECK(good,"all 64 pixels match hand-computed color/depth/stencil");
+         CHECK(off.saved==0,"disabled control always stores");
+-        uint64_t want=(uint64_t)width*height*repeats*(mode==0?5:mode==1?1:mode==2?4:0);
+-        CHECK(on.saved==want,"only provably unchanged planes skip their store");
++        uint64_t want=0;
++        CHECK(on.saved==want,"loaded planes retain their required store, including unchanged planes");
+         printf("mode %d: saved %llu bytes, expected %llu\n",mode,(unsigned long long)on.saved,(unsigned long long)want);
+         if(bench) printf("BENCH trial %d off_gpu_ms %.6f on_gpu_ms %.6f off_wall_ms %.6f on_wall_ms %.6f saved_mb %.3f\n",case_id,off.gpu_ms,on.gpu_ms,off.wall_ms,on.wall_ms,on.saved/1e6);
+     }
 diff --git a/dm/gfx/tests/t_vbuf.m b/dm/gfx/tests/t_vbuf.m
 index 4f9e59c..c241424 100644
 --- a/dm/gfx/tests/t_vbuf.m
@@ -1438,7 +1517,7 @@ index 0000000..ebad9a6
 +    return fails != 0;
 +}
 diff --git a/dm/host/tests/t_odyssey_display_asset.c b/dm/host/tests/t_odyssey_display_asset.c
-index ba46ced..f514b29 100644
+index ba46ced..821d018 100644
 --- a/dm/host/tests/t_odyssey_display_asset.c
 +++ b/dm/host/tests/t_odyssey_display_asset.c
 @@ -2,6 +2,7 @@
@@ -1457,7 +1536,15 @@ index ba46ced..f514b29 100644
  #include <unistd.h>
  
  #define TEST_BUILD_ID "b424be150a8e7d78701cbe7a439d9ebf"
-@@ -252,6 +254,139 @@ static void assert_inactive(void) {
+@@ -20,6 +22,7 @@
+ static module_t fake_main;
+ module_t *g_mod = &fake_main;
+ int g_nmod = 1;
++uint64_t now_ns(void) { return 0; } // UI adapter remains disabled in these manifest/policy fixtures.
+ 
+ static const char *g_case;
+ static int g_missing_gate;
+@@ -252,6 +255,139 @@ static void assert_inactive(void) {
      test_pool_extra(0);
  }
  
@@ -1597,7 +1684,7 @@ index ba46ced..f514b29 100644
  int main(int argc, char **argv) {
      assert(argc == 2);
      g_case = argv[1];
-@@ -363,6 +498,7 @@ int main(int argc, char **argv) {
+@@ -363,6 +499,7 @@ int main(int argc, char **argv) {
      if (has_manifest) write_manifest(root);
      const int bad_hash = !strcmp(g_case, "bad-hash") || !strcmp(g_case, "high-bad-hash");
      if (has_asset) write_selected_asset(root, g_selected_aspect, g_selected_preset, bad_hash ? "abd" : "abc");
@@ -2204,7 +2291,7 @@ index 0000000..8512506
 +if __name__ == '__main__':
 +    unittest.main()
 diff --git a/docs/agents/symptoms.md b/docs/agents/symptoms.md
-index b643b5f..2f77eb9 100644
+index b643b5f..38d8ec4 100644
 --- a/docs/agents/symptoms.md
 +++ b/docs/agents/symptoms.md
 @@ -11,6 +11,8 @@ One line per symptom in the [subsystem references](../reference/): what you see
@@ -2249,6 +2336,15 @@ index b643b5f..2f77eb9 100644
  - scenes and characters black, only foliage, light shafts and the HUD drawn; pass dumps full of `Z … draw skipped: no program bound`. → [Programs bound per stage](../reference/rendering.md#programs-bound-per-stage)
  - `[RED] failed to create render pipeline (vertex 790573a52b9c5053_b fragment f39fb42850f50ecd_b): Fragment input(s) user(locn0),user(locn1) … not written by vertex shader`, once on entering the first investigation; `texture type mismatch: shader declares a cube, texture is 2D` (a pixel shader run with another pair's bindings). → [Composite program taken again after a replay state restore](../reference/rendering.md#composite-program-taken-again-after-a-replay-state-restore)
  - `no program bound before the draw`, `program has no vertex shader` (a draw after a dispatch is dropped); `the dispatched program has no compute shader` (a dispatch after a graphics bind). → [Compute programs bound apart from graphics programs](../reference/rendering.md#compute-programs-bound-apart-from-graphics-programs)
+@@ -449,7 +456,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+ - the NSP script took the game for an OpenGL one (`main imports EGL and names glShaderSource`), the GL shader capture found no shader, and the capture boot stopped with `[nvn-mtl] FATAL cannot read the shader map` from `h_nvnQueueSubmitCommands` called in an NRO (`nro8+0xc10d0`). → [NVN in NROs under an SDL main that names GL](../reference/rendering.md#nvn-in-nros-under-an-sdl-main-that-names-gl)
+ - a jump to address 0 right after `glGetFloatv(0xb12)` (`lr=main+0x2d58c4`). → [Which GL functions a game calls](../reference/rendering.md#which-gl-functions-a-game-calls)
+ - in a capture run every program links with no uniforms; the game's first `Shader:send` raises a Lua error and, on the Switch, its error handler quits (Any Lua error quits a LÖVE game). → [GL shaders put together at run time and captured](../reference/rendering.md#gl-shaders-put-together-at-run-time-and-captured)
+-- read-only depth/stencil attachments are written back after every pass, and the periodic unwritten-store savings counter remains zero with the default configuration. → [Unwritten attachment stores without lookahead](../reference/rendering.md#unwritten-attachment-stores-without-lookahead)
++- a later pass can read undefined color/depth/stencil contents after a loaded but unchanged attachment was discarded. Source follow-up to periodic bright-light flashes in Odyssey identified this contract violation; the specific visible flash cause is not yet confirmed on device. → [Unwritten attachment stores without lookahead](../reference/rendering.md#unwritten-attachment-stores-without-lookahead)
+ - array-layer PNGs differ, but their `DM_NVN_SNAPRAW` files contain layer zero or overwrite one another. → [Raw render-target snapshots read the wrong array layer](../reference/rendering.md#raw-render-target-snapshots-read-the-wrong-array-layer)
+ - raw HDR capture has an undersized row or buffer for formats such as RG32Float and RGBA16Unorm; narrow formats also carry unnecessary padding. → [Raw snapshots guessed four bytes for wider pixel formats](../reference/rendering.md#raw-snapshots-guessed-four-bytes-for-wider-pixel-formats)
+ - writable storage bindings of size zero set the submission-wide unknown-write flag, refusing partial uniform shadows even in a different pool and ending their render passes. → [A size-zero storage write needlessly invalidates every partial uniform shadow](../reference/rendering.md#a-size-zero-storage-write-needlessly-invalidates-every-partial-uniform-shadow)
 diff --git a/docs/reference/nvn-objects.md b/docs/reference/nvn-objects.md
 index b0ab96f..f341ffd 100644
 --- a/docs/reference/nvn-objects.md
@@ -2307,7 +2403,7 @@ index 03669d3..c726be0 100644
  
  ### NSZ decompression rejects `--keys`
 diff --git a/docs/reference/rendering.md b/docs/reference/rendering.md
-index 77b2067..f464fa0 100644
+index 77b2067..ffe8100 100644
 --- a/docs/reference/rendering.md
 +++ b/docs/reference/rendering.md
 @@ -505,6 +505,21 @@ The replay on Metal (`dm/gfx/nvn/nvn_mtl.m`) and the Vulkan and OpenGL layers. E
@@ -2332,6 +2428,24 @@ index 77b2067..f464fa0 100644
  ### Programs bound per stage
  
  - **Symptom:** scenes and characters black, only foliage, light shafts and the HUD drawn; pass dumps full of `Z … draw skipped: no program bound`.
+@@ -927,11 +942,12 @@ Digimon Story Cyber Sleuth: Complete Edition (Media.Vision's MVGL engine, SDK 6.
+ 
+ ### Unwritten attachment stores without lookahead
+ 
+-- **Symptom:** read-only depth/stencil attachments are written back after every pass, and the periodic unwritten-store savings counter remains zero with the default configuration.
+-- **Cause:** `udc_note_draw` and `sd_finish` returned early when `DM_NVN_TBDR` was off. This also disabled the local unwritten-attachment proof, although it does not depend on future sampled-texture readers. The broader lookahead remains disabled because it does not understand bindless readers.
+-- **Fix:** collect per-pass write facts independently of the lookahead switch and omit only stores of attachments that were loaded and provably unchanged. Clears, depth writes, stencil writes and possible writable image/atomic/storage aliases retain their stores. Lookahead, pass merging and cross-submission invalidation remain disabled. `DM_NVN_UNWRITTEN_DC=0` restores store-all behavior.
+-- **Check:** `make -C dm/gfx/tests GAME=<id> check_t_unwritten_store` performs real GPU readback against a store-all control and literal color/depth/stencil values, with lookahead disabled. It covers read-only depth/stencil, depth writes, stencil writes, pending clears, and writable images (including native image atomics) and both storage-buffer binding forms. `t_unwritten_store --bench` runs a synthetic 32-pass 1080p workload with balanced on/off order; it is not a game FPS measurement.
+-- **Found on:** [NieR:Automata US 1.0.3](../../dm/games/010056B015FE8000/README.md#factory-combat-capture-and-9s-texture-follow-up), during iPhone factory-combat performance investigation. The change passes the GPU proof and rendering regressions on Mac; iPhone gameplay benefit remains to be measured.
++- **Symptom:** a later pass can read undefined color/depth/stencil contents after a loaded but unchanged attachment was discarded. Source follow-up to periodic bright-light flashes in Odyssey identified this contract violation; the specific visible flash cause is not yet confirmed on device.
++- **Cause:** the former local proof assumed that a loaded attachment not written in this pass still had valid backing after a DontCare store. Metal explicitly allows DontCare to replace attachment contents with arbitrary data, even if earlier device readbacks happened to preserve them. Absence of writes does not prove absence of later readers.
++- **Fix:** `sd_finish` retains Store unless an independent lifetime decision marks the contents dead. Write tracking and its diagnostic override remain, but cannot by themselves discard an attachment. The broader optional lookahead/cross-submission policy is unchanged and remains off in the default Odyssey configuration. No bloom clamp, shader change or timing delay is used.
++- **Check:** `run_attachment_store_native.py` executes the production store decision with a conforming encoder model that poisons discarded data, checking later reads of color, depth and stencil. The former decision is a failing negative control; independently dead attachments may still discard. This is a specification model, not GPU/device rendering evidence. `t_unwritten_store` retains real-GPU readback/clear/write/alias cases with corrected store expectations; it is not executed by Windows or software-only CI.
++- **Contract:** [Apple MTLStoreAction.dontCare](https://developer.apple.com/documentation/metal/mtlstoreaction/dontcare) and [load/store actions](https://developer.apple.com/documentation/metal/setting-load-and-store-actions) require preserving contents when they are needed after the pass. Additional stores can increase GPU bandwidth; device frame time and power require acceptance.
++- **History:** the removed optimization was introduced during [NieR:Automata US 1.0.3](../../dm/games/010056B015FE8000/README.md#factory-combat-capture-and-9s-texture-follow-up) performance work. Those measured readbacks did not establish portable preservation semantics. Contract correction found during [Super Mario Odyssey](../../dm/games/0100000000010000/README.md) investigation.
+ 
+ 
+ ### Raw render-target snapshots read the wrong array layer
 diff --git a/docs/reference/services.md b/docs/reference/services.md
 index 434f69d..cce9aca 100644
 --- a/docs/reference/services.md
@@ -2366,7 +2480,7 @@ diff --git a/dm/host/dm_odyssey_ui.h b/dm/host/dm_odyssey_ui.h
 new file mode 100644
 --- /dev/null
 +++ b/dm/host/dm_odyssey_ui.h
-@@ -0,0 +1,204 @@
+@@ -0,0 +1,228 @@
 +// Exact Odyssey 1.4.1 primary-layout adapter. Included by hle_odyssey_display.c.
 +// No guest executable, shader, animation or serialized layout is changed.
 +typedef void (*od_ui_calc_fn)(void *, void *, int);
@@ -2379,6 +2493,25 @@ new file mode 100644
 +static int od_ui_enabled;
 +static _Atomic unsigned od_ui_seen;
 +static _Atomic int od_ui_menu = 1;
++static _Atomic float od_ui_visual_aspect = 16.0f/9.0f;
++static atomic_flag od_ui_transition_lock = ATOMIC_FLAG_INIT;
++typedef struct { float from, to; uint64_t began; } od_ui_transition;
++static od_ui_transition od_ui_motion = {16.0f/9.0f,16.0f/9.0f,0};
++#define OD_UI_TRANSITION_NS UINT64_C(220000000)
++static float od_ui_transition_sample(const od_ui_transition *t, uint64_t now) {
++    if (t->from == t->to) return t->to;
++    if (now <= t->began) return t->from;
++    uint64_t elapsed = now - t->began;
++    if (elapsed >= OD_UI_TRANSITION_NS) return t->to;
++    double x = (double)elapsed / OD_UI_TRANSITION_NS;
++    double eased = x*x*x*(x*(x*6-15)+10); // zero speed and acceleration at both ends
++    return (float)(t->from + (t->to-t->from)*eased);
++}
++static float od_ui_transition_advance(od_ui_transition *t, float target, uint64_t now) {
++    float value = od_ui_transition_sample(t,now);
++    if (target != t->to) *t = (od_ui_transition){value,target,now};
++    return value;
++}
 +static _Thread_local unsigned od_ui_depth;
 +enum { OD_UI_STAGE = 1, OD_UI_MENU = 2, OD_UI_PANES = 512, OD_UI_EDITS = 16 };
 +
@@ -2420,17 +2553,22 @@ new file mode 100644
 +    return 0;
 +}
 +static float od_ui_aspect(void) {
-+    return od_ui_enabled && atomic_load_explicit(&od_ui_menu,memory_order_acquire) ?
-+        16.0f/9.0f : dm_odyssey_display_aspect();
++    return od_ui_enabled ? atomic_load_explicit(&od_ui_visual_aspect,memory_order_acquire) :
++        dm_odyssey_display_aspect();
 +}
 +// The returned aspect belongs to the image just recorded. Classify the next
 +// frame only afterwards; camera, layout and queued presentation share a latch.
 +float dm_odyssey_display_present_aspect(void) {
 +    if (!od_ui_enabled) return 0;
++    while (atomic_flag_test_and_set_explicit(&od_ui_transition_lock,memory_order_acquire)) { }
 +    float aspect = od_ui_aspect();
 +    unsigned seen = atomic_exchange_explicit(&od_ui_seen,0,memory_order_acq_rel);
 +    int menu = (seen & OD_UI_MENU) || !(seen & OD_UI_STAGE);
 +    int previous = atomic_exchange_explicit(&od_ui_menu,menu,memory_order_acq_rel);
++    float target = menu ? 16.0f/9.0f : dm_odyssey_display_aspect();
++    float next = od_ui_transition_advance(&od_ui_motion,target,now_ns());
++    atomic_store_explicit(&od_ui_visual_aspect,next,memory_order_release);
++    atomic_flag_clear_explicit(&od_ui_transition_lock,memory_order_release);
 +    if (previous != menu) LOG("Odyssey UI composition: %s (next frame)", menu ? "16:9 menu" : "4:3 gameplay");
 +    return aspect;
 +}
@@ -3002,6 +3140,102 @@ new file mode 100644
 +    stats->listing_ms += (NSProcessInfo.processInfo.systemUptime - start) * 1000;
 +    return sources;
 +}
+diff --git a/dm/tools/tests/run_attachment_store_native.py b/dm/tools/tests/run_attachment_store_native.py
+new file mode 100644
+--- /dev/null
++++ b/dm/tools/tests/run_attachment_store_native.py
+@@ -0,0 +1,91 @@
++#!/usr/bin/env python3
++"""Exercise the actual store-decision body under Metal's legal discard contract.
++
++The encoder model invalidates discarded contents, even when the pass did not
++write them. This is a specification regression, not physical GPU evidence.
++"""
++from pathlib import Path
++import subprocess, tempfile
++ROOT=Path(__file__).resolve().parents[3]
++PRE=r'''
++#import <Foundation/Foundation.h>
++#include <assert.h>
++#include <stdint.h>
++#include <string.h>
++typedef enum { MTLStoreActionDontCare=0, MTLStoreActionStore=1 } MTLStoreAction;
++@interface Encoder:NSObject { @public MTLStoreAction action[10]; }
++-(void)setColorStoreAction:(MTLStoreAction)s atIndex:(NSUInteger)i;
++-(void)setDepthStoreAction:(MTLStoreAction)s;
++-(void)setStencilStoreAction:(MTLStoreAction)s;
++@end
++@implementation Encoder
++-(void)setColorStoreAction:(MTLStoreAction)s atIndex:(NSUInteger)i { action[i]=s; }
++-(void)setDepthStoreAction:(MTLStoreAction)s { action[8]=s; }
++-(void)setStencilStoreAction:(MTLStoreAction)s { action[9]=s; }
++@end
++static Encoder *g_enc;
++typedef struct { uint64_t serial; } tex_t;
++static struct { struct { int n; tex_t *color[8]; } rt; } R;
++static uint64_t g_sd_n_all,g_sd_n_dead,g_sd_dead_bytes,g_bw_store,g_udc_saved_bytes,g_xv_dc;
++static int lookahead,next_state,enabled;
++static int tbdr_on(void) { return lookahead; }
++static int udc_on(void) { return enabled; }
++static int sdx_decide(uint8_t st[9]) { for(int i=0;i<9;i++)st[i]=next_state;return 1; }
++static int xv_on(void) { return 0; }
++static int xv_present(uint64_t s) { (void)s;return 0; }
++static int xv_first_good(uint64_t s,uint32_t l,uint32_t a) { (void)s;(void)l;(void)a;return 0; }
++static int xv_disabled(uint64_t s) { (void)s;return 0; }
++static uint64_t xv_tag_pass(tex_t *t,uint32_t l,int i,const void *r) { (void)t;(void)l;(void)i;(void)r;return 0; }
++static int xv_trial_get(uint64_t s,int i) { (void)s;(void)i;return 0; }
++static void xv_set(uint64_t s,uint32_t l,uint32_t a,int i,uint64_t t) { (void)s;(void)l;(void)a;(void)i;(void)t; }
++enum { XV_TRIAL=3,XV_PROBE=1,XV_INVALID=2 };
++#define PD(...) ((void)0)
++'''
++TEST=r'''
++int main(void) { @autoreleasepool {
++    g_enc=[Encoder new];
++    for(enabled=0;enabled<2;enabled++) for(int load=0;load<2;load++) for(int wrote=0;wrote<2;wrote++) {
++        lookahead=0;g_nsd=3;memset(g_sd,0,sizeof g_sd);g_bw_store=24;
++        uint8_t backing[3][8],expected[3][8];
++        for(int i=0;i<3;i++) {
++            g_sd[i]=(sd_att){.ser=(uint64_t)i+1,.bytes=8,.idx=0,.depth=(uint8_t)i,.load=(uint8_t)load,.wrote=(uint8_t)wrote};
++            memset(backing[i],0x35+i,8);memcpy(expected[i],backing[i],8);
++        }
++        sd_finish();
++        MTLStoreAction actions[]={g_enc->action[0],g_enc->action[8],g_enc->action[9]};
++        for(int i=0;i<3;i++) {
++            // A conforming GPU may replace DontCare attachments with arbitrary data.
++            if(actions[i]==MTLStoreActionDontCare) memset(backing[i],0xef,8);
++            assert(!memcmp(backing[i],expected[i],8)); // next pass samples the preserved plane
++            assert(actions[i]==MTLStoreActionStore);
++        }
++        assert(g_bw_store==24 && g_udc_saved_bytes==0 && g_nsd==0);
++    }
++    // An independent next-use full-clear proof still permits dead-store removal.
++    for(int needed=0;needed<2;needed++) {
++        lookahead=1;next_state=needed?4:2;g_nsd=1;g_sd[0]=(sd_att){.bytes=8,.idx=0,.load=1};g_bw_store=8;
++        sd_finish();assert(g_enc->action[0]==(needed?MTLStoreActionStore:MTLStoreActionDontCare));
++        assert(g_bw_store==(needed?8u:0u));
++    }
++    puts("PASS: production store decision preserves color/depth/stencil with legal discard poisoning; independent dead-store proof retained");
++} }
++'''
++def body(text):
++    declaration=text[text.index('typedef struct { uint64_t ser, bytes;'):text.index('static int g_udc_ab =')]
++    need=text[text.index('static void sd_need('):text.index('static int sdx_decide(uint8_t st[9]);')]
++    start=text.index('static void sd_finish(void) {');end=text.index('\n// Continue scanning in real replay order:',start)
++    return PRE+declaration+need+text[start:end]+TEST
++def main():
++    text=(ROOT/'dm/gfx/nvn/nvn_mtl.m').read_text(encoding='utf-8')
++    original='int dead = t->state == 2 || xvdead;'
++    assert original in text
++    negative=text.replace(original,'int dead = t->state == 2 || (udc_on() && t->load && !t->wrote) || xvdead;',1)
++    with tempfile.TemporaryDirectory(prefix='store-contract-') as td:
++        td=Path(td)
++        for name,src in [('old-decision-negative',negative),('fixed',text)]:
++            path=td/(name+'.m');exe=td/name;path.write_text(body(src),encoding='utf-8')
++            subprocess.run(['clang','-fobjc-arc','-O1','-UNDEBUG','-Wall','-Wextra','-Werror','-Wno-unused-function','-framework','Foundation',str(path),'-o',str(exe)],check=True,timeout=60)
++            result=subprocess.run([str(exe)],capture_output=True,text=True,timeout=20)
++            assert (result.returncode==0)==(name=='fixed'),result.stdout+result.stderr
++            print(name,result.returncode,result.stdout.strip(),result.stderr[-350:].strip())
++if __name__=='__main__':main()
 diff --git a/dm/tools/tests/run_command_memory_native.py b/dm/tools/tests/run_command_memory_native.py
 new file mode 100644
 --- /dev/null
@@ -3589,7 +3823,7 @@ diff --git a/dm/tools/tests/run_odyssey_ui_native.py b/dm/tools/tests/run_odysse
 new file mode 100644
 --- /dev/null
 +++ b/dm/tools/tests/run_odyssey_ui_native.py
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,127 @@
 +#!/usr/bin/env python3
 +"""Run the production layout adapter on synthetic ABI objects; no game assets."""
 +from pathlib import Path
@@ -3615,6 +3849,8 @@ new file mode 100644
 +static int fixture_access(const char *s,int mode) { (void)s;(void)mode;return old_assets?0:-1; }
 +#define access fixture_access
 +static float raster=4.0f/3.0f;
++static uint64_t fixture_time=1;
++static uint64_t now_ns(void) { return fixture_time; }
 +static float dm_odyssey_display_aspect(void) { return raster; }
 +'''
 +TEST = r'''
@@ -3635,7 +3871,22 @@ new file mode 100644
 +    ptr(anchor,0x28,(uintptr_t)anchor+0x20);strcpy((char *)anchor+0xb8,child);
 +    val(anchor,0x48,1);val(anchor,0x4c,1);val(anchor,0x50,24);val(anchor,0x54,24);
 +}
++static float tick(unsigned seen,uint64_t dt) { fixture_time+=dt;atomic_store(&od_ui_seen,seen);return dm_odyssey_display_present_aspect(); }
++static void settle(unsigned seen) { (void)tick(seen,0);(void)tick(seen,OD_UI_TRANSITION_NS); }
 +int main(void) {
++    // Time-based motion: same duration at 30/60/120 Hz, bounded and monotonic.
++    for(int hz=30;hz<=120;hz*=2) {
++        od_ui_transition t={4.0f/3,16.0f/9,1000};float last=t.from;
++        for(uint64_t n=1000;n<1000+OD_UI_TRANSITION_NS;n+=1000000000u/hz) {
++            float x=od_ui_transition_sample(&t,n);assert(isfinite(x) && x>=last && x<=t.to);last=x;
++        }
++        assert(od_ui_transition_sample(&t,1000+OD_UI_TRANSITION_NS)==t.to);
++        assert(od_ui_transition_sample(&t,0)==t.from);
++        uint64_t half=1000+OD_UI_TRANSITION_NS/2;float mid=od_ui_transition_sample(&t,half);
++        assert(fabsf(mid-14.0f/9)<1e-6f);
++        assert(od_ui_transition_advance(&t,4.0f/3,half)==mid && od_ui_transition_sample(&t,half)==mid);
++        assert(od_ui_transition_sample(&t,half+OD_UI_TRANSITION_NS)==4.0f/3);
++    }
 +    module.size=0x1360000;module.base=calloc(1,module.size);assert(module.base);strcpy(module.name,"main");strcpy(module.build_id,DM_ODYSSEY_MAIN_BUILD);
 +    assert(!od_ui_install("none")); // absent ABI must never modify memory
 +    uint8_t *b=module.base;uintptr_t base=(uintptr_t)b;
@@ -3650,7 +3901,7 @@ new file mode 100644
 +    old_assets=1;assert(!od_ui_install("old"));old_assets=0;
 +    assert(od_ui_install("original"));od_ui_calc_original=calc;od_ui_draw_original=draw;
 +    assert(fabsf(od_ui_aspect()-16.0f/9)<1e-6f);
-+    atomic_store(&od_ui_seen,OD_UI_STAGE);float queued=dm_odyssey_display_present_aspect();assert(queued>1.77f && od_ui_aspect()<1.34f);
++    atomic_store(&od_ui_seen,OD_UI_STAGE);float queued=dm_odyssey_display_present_aspect();assert(queued>1.77f && od_ui_aspect()>1.77f);settle(OD_UI_STAGE);assert(od_ui_aspect()<1.34f);
 +    const char *owners[]={"CounterCoin","CounterCollectCoin","CounterLife","CounterLifeKids","CounterLifeUp","CounterShine","MapMini"};
 +    for(unsigned i=0;i<sizeof owners/sizeof *owners;i++) {
 +        init(owners[i],"All");od_ui_calc(layout,NULL,1);
@@ -3662,7 +3913,7 @@ new file mode 100644
 +            assert(fabsf(24*sx-24*sy*baked_scale)<.001f);
 +        }
 +    }
-+    raster=2732.0f/2048;init("CounterCoin","All");od_ui_calc(layout,NULL,1);assert(fabsf(baked_scale-raster*9/16)<1e-6f);raster=4.0f/3;
++    raster=2732.0f/2048;atomic_store(&od_ui_visual_aspect,raster);init("CounterCoin","All");od_ui_calc(layout,NULL,1);assert(fabsf(baked_scale-raster*9/16)<1e-6f);raster=4.0f/3;atomic_store(&od_ui_visual_aspect,raster);
 +    init("SaveMessage","All");od_ui_calc(layout,NULL,1);assert(baked_y==-90);
 +    // Animation values are relative, baked once, then restored without drift.
 +    init("CounterLife","All");val(root,0x4c,.8f);val(root,0x34,12);
@@ -3672,17 +3923,20 @@ new file mode 100644
 +    init("CounterLife","All");val(root,0x4c,NAN);plan=(od_ui_plan){0};assert(!od_ui_make(layout,&plan));
 +    for(int i=0;i<250;i++) {
 +        init("Menu","All");root[0x58]=0;od_ui_draw(layout,NULL,NULL);atomic_fetch_or(&od_ui_seen,OD_UI_STAGE);
-+        (void)dm_odyssey_display_present_aspect();assert(od_ui_aspect()<1.34f);
++        settle(OD_UI_STAGE);assert(od_ui_aspect()<1.34f);
 +        root[0x58]=0x81;od_ui_draw(layout,NULL,NULL);atomic_fetch_or(&od_ui_seen,OD_UI_STAGE);
-+        float game=dm_odyssey_display_present_aspect();assert(game<1.34f && od_ui_aspect()>1.77f);
++        float game=dm_odyssey_display_present_aspect();assert(game<1.34f && od_ui_aspect()<1.34f);
++        (void)tick(OD_UI_STAGE|OD_UI_MENU,OD_UI_TRANSITION_NS/2);
++        od_ui_calc(layout,NULL,1);assert(fabsf(baked_scale-.875f)<1e-5f);
++        float old_queued=tick(OD_UI_STAGE|OD_UI_MENU,OD_UI_TRANSITION_NS/2);assert(old_queued>1.55f && old_queued<1.56f && od_ui_aspect()>1.77f);
 +        od_ui_calc(layout,NULL,1);assert(baked_scale==1 && baked_y==0);
 +        init("PlayGuideMenu","PicCaptureUse");od_ui_draw(layout,NULL,NULL);atomic_fetch_or(&od_ui_seen,OD_UI_STAGE);
-+        float menu=dm_odyssey_display_present_aspect();assert(menu>1.77f && od_ui_aspect()<1.34f);
++        float menu=dm_odyssey_display_present_aspect();assert(menu>1.77f);settle(OD_UI_STAGE);assert(od_ui_aspect()<1.34f);
 +        assert(game<1.34f); // already queued frames cannot inherit the new aspect
 +    }
-+    (void)dm_odyssey_display_present_aspect();assert(od_ui_aspect()>1.77f); // no stage: title/loading/menu
++    settle(0);assert(od_ui_aspect()>1.77f); // no stage: title/loading/menu
 +    od_ui_enabled=0;assert(dm_odyssey_display_present_aspect()==0);
-+    free(b);puts("PASS: production HUD proportions, animation restoration, malformed trees, ABI guards and 250 menu transitions");
++    free(b);puts("PASS: production HUD proportions, animation restoration, malformed trees, ABI guards and 250 eased menu transitions (30/60/120 Hz, reversals, queued aspect and intermediate HUD)");
 +}
 +'''
 +def main():
