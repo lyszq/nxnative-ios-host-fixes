@@ -1100,10 +1100,19 @@ index 0000000..9068e2d
 +if __name__ == "__main__":
 +    raise SystemExit(main())
 diff --git a/dm/gfx/tests/t_feedback.m b/dm/gfx/tests/t_feedback.m
-index 0a6ab49..cc58225 100644
+index 0a6ab49..c2a573d 100644
 --- a/dm/gfx/tests/t_feedback.m
 +++ b/dm/gfx/tests/t_feedback.m
-@@ -8,16 +8,17 @@ uint64_t now_ns(void) { return bp_now(); }
+@@ -1,6 +1,8 @@
+ // Feedback snapshots and their per-draw argument substitution include separate texture slots.
+ #include "../nvn/nvn_mtl.m"
+ void *front_metal_layer(void) { return NULL; }
++// This offscreen fixture has no host display composition state.
++float dm_odyssey_display_present_aspect(void) { return 0; }
+ module_t *module_of(const void *p) { (void)p; return NULL; }
+ module_t *g_mod; int g_nmod;
+ void svc_thread_dump(void) {}
+@@ -8,16 +10,17 @@ uint64_t now_ns(void) { return bp_now(); }
  static int checks, failed;
  #define CHECK(c, label) do { checks++; if (!(c)) { failed++; fprintf(stderr, "FAIL: %s\n", label); } } while (0)
  
@@ -1123,7 +1132,7 @@ index 0a6ab49..cc58225 100644
  static void clear(MTLClearColor color) {
      R.clear_c[0] = 1; R.cc[0] = color;
      CHECK(rp_begin() != nil, "production render pass opens");
-@@ -80,9 +81,31 @@ static void slot_case(NvProg *pr, id<MTLRenderPipelineState> pipeline, int slot,
+@@ -80,9 +83,31 @@ static void slot_case(NvProg *pr, id<MTLRenderPipelineState> pipeline, int slot,
      printf("feedback slot %d: %s\n", slot, before == failed ? "PASS" : "FAIL");
      mtl_tex_release(&source); mtl_tex_release(&output);
  }
@@ -1156,7 +1165,7 @@ index 0a6ab49..cc58225 100644
      mtl_init(); NSError *error = nil;
      id<MTLLibrary> lib = [g_dev newLibraryWithSource:@"#include <metal_stdlib>\nusing namespace metal;\n"
          "vertex float4 v(uint i[[vertex_id]]) { return float4(i == 1 ? 3.0 : -1.0, i == 2 ? 3.0 : -1.0, 0, 1); }\n"
-@@ -103,6 +126,7 @@ int main(void) { @autoreleasepool {
+@@ -103,6 +128,7 @@ int main(void) { @autoreleasepool {
      if (!pipeline) { fprintf(stderr, "%s\n", error.localizedDescription.UTF8String); return 1; }
      const int slots[] = {0, 128, 255};
      for (int i = 0; i < 3; i++) slot_case(pr, pipeline, slots[i], i);
