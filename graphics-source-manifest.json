@@ -2,11 +2,11 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "62fb4be7697474d7bee8e33e7f61138abbe9fdc30b1ff7a1e56e1c2c794a90b6",
+  "patch_sha256": "dd791f44f3663503489bdafdee25128a3b7fa58d6dafab87c5c12698fd87da3b",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
-      "normalized_sha256": "9a5b1eaccf6801781cb2eeefc7449a7ba069cc4b61d0434ade9eba94bd2bde8a"
+      "normalized_sha256": "fd90ccf137886fdf80812ea52fdc4c16f16d3ee8fa27f306a6e76147442029cd"
     },
     {
       "path": "dm/gfx/nvn/dm_shell_msl.h",
@@ -26,7 +26,7 @@
     },
     {
       "path": "dm/gfx/nvn/nvn_mtl.m",
-      "normalized_sha256": "b26bad6c532e4a1f7bed4caf51c4f8ff05f96d872a125ed7f3c25b25d032b385"
+      "normalized_sha256": "bca897f790c829cb2e6f02f8da9a9262a7b00779d3d60cf351844e2ed61ebd3e"
     },
     {
       "path": "dm/gfx/tests/run_nvn_resource_rebind_native.py",
@@ -69,8 +69,20 @@
       "normalized_sha256": "45ad1cc77c582b3b0c71b6c90d9d7937dad41dac4970050d499c13fa94c7748b"
     },
     {
+      "path": "dm/host/dm_overlay_assets.h",
+      "normalized_sha256": "7331e8d2546bf6941a4c2587cae44412089fc42a7ce852096556e139c0306f40"
+    },
+    {
+      "path": "dm/host/hle_odyssey_display.c",
+      "normalized_sha256": "6278db667bc9919ba60637e5eac02b6ede168dcc84a2186cfd6902be084ae5e1"
+    },
+    {
       "path": "dm/host/hle_sdk16.c",
       "normalized_sha256": "d973e9c20030b6ba3ab6482d0f8685135a77ce75fa152cb7578aa883356306f2"
+    },
+    {
+      "path": "dm/host/main.c",
+      "normalized_sha256": "431f4f25a14990ffe2a6b17d8df60d466a49278715ebf348b49cd205d4a82b14"
     },
     {
       "path": "dm/host/tests/Makefile",
@@ -81,8 +93,20 @@
       "normalized_sha256": "eee3cbd5312c3dd182d078a3bbc7041e55b2c74e4c4d218f9a1df75af98d6d8b"
     },
     {
+      "path": "dm/host/tests/t_odyssey_display_asset.c",
+      "normalized_sha256": "6c51742354b91fa18f757462a37e14cddc2a3929c642aa711aef768a673a05d3"
+    },
+    {
       "path": "dm/ios/Sources/dm_external_shaders.h",
-      "normalized_sha256": "1858eb805192f745f5f2f5947913add896685d05ad1568c5f7bd73b4fb8b87e1"
+      "normalized_sha256": "a3ce53c95c3015fdb0539cc4ebb8daa8fb102d4d18fba1a7af2efc82670a1471"
+    },
+    {
+      "path": "dm/ios/Sources/dm_flicker_diagnostics.h",
+      "normalized_sha256": "697389791b7fef5b9e20f068fca177321af45d9e6e49c49b08263cd67e79e872"
+    },
+    {
+      "path": "dm/ios/Sources/dm_shader_inventory.h",
+      "normalized_sha256": "cb735760fefe8ad4ce8602fdefbf360ab8874af7d2629d2a5d807a8c1f24d327"
     },
     {
       "path": "dm/ios/Sources/dm_shader_learn.h",
@@ -90,15 +114,15 @@
     },
     {
       "path": "dm/ios/Sources/dm_shader_prep.m",
-      "normalized_sha256": "97ce5d18f81c1f8ed4c4539cbe16bf4c08d6ae4069ba4b8f4b119428958d89dc"
+      "normalized_sha256": "d0cc20ea113993b8c310e82ebde2886f4644b5827184083218ce0004405d88ef"
     },
     {
       "path": "dm/ios/Sources/front_ios.m",
-      "normalized_sha256": "e783449a082b3ad14c211f31fd51908078e658127fa80244da19f351f419434a"
+      "normalized_sha256": "0a1c53cefde490579c23d616e6fbd93c09c023d62bb89af9a3cbc79d8f11448d"
     },
     {
       "path": "dm/ios/Sources/main.m",
-      "normalized_sha256": "4cebb1d03869197c136d8f8618841b9bbfa5afa1151c17030b944f57d51812cf"
+      "normalized_sha256": "b777dc71513e4455c9282b8af66d2a52bda9794b9bb0eba3de138ecd9206f5ce"
     },
     {
       "path": "dm/ios/tools/ios_metal.py",
@@ -106,7 +130,11 @@
     },
     {
       "path": "dm/tools/tests/run_external_shaders_native.py",
-      "normalized_sha256": "ec4843b5292e4f926f94eddbe02d0be7784b82db9610d81f3660ba0a9eddd1d4"
+      "normalized_sha256": "3ceb3f796c596ece7a2d3391c35b995d67579667afaa320a22a3a6cf8604a9b2"
+    },
+    {
+      "path": "dm/tools/tests/run_flicker_diagnostics_native.py",
+      "normalized_sha256": "201ac29f3c34eea3e1714f3cffb0eef01b65283929cca2f9cb8ad5cbd163bffe"
     },
     {
       "path": "dm/tools/tests/run_language_native.py",
@@ -130,11 +158,11 @@
     },
     {
       "path": "docs/agents/symptoms.md",
-      "normalized_sha256": "b8198fb4f7b30d428f70c7c81fdf755bcf0a045f78156dc2a8ff75bfcc34359d"
+      "normalized_sha256": "f00b71b6eac2073ef0ec5c475768ec7897d5a6ad905fd01a558c9b22c58033ce"
     },
     {
       "path": "docs/reference/packing.md",
-      "normalized_sha256": "c6f24e2adc9dee3f7cc52498518a089ef3c5a2d139897249221dc5e14be9b401"
+      "normalized_sha256": "7610035f3886205fdb3a2067ed0adc43309973994305a86417f56eacc18a1079"
     },
     {
       "path": "docs/reference/rendering.md",
@@ -149,6 +177,6 @@
       "normalized_sha256": "4bff7b4ece816fde90f5cd73a6a0924b965197e2a093b70079519ef5e20f3d9c"
     }
   ],
-  "scope": "Game-free F5 host/compiler/tests/docs plus external shader delivery; no game resources, generated shaders, keys or device logs",
+  "scope": "Game-free F5 baseline plus F6 compiled-pack startup, timing, bounded diagnostics and HUD validation; no game resources, generated shaders, keys or device logs",
   "device_validated": false
 }

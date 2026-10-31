@@ -1,18 +1,37 @@
 diff --git a/dm/games/0100000000010000/README.md b/dm/games/0100000000010000/README.md
-index bf60f53..e14e6de 100644
+index bf60f53..81357fa 100644
 --- a/dm/games/0100000000010000/README.md
 +++ b/dm/games/0100000000010000/README.md
-@@ -22,7 +22,8 @@ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in
- - **Resolved: hard-edged dark boxes behind the HUD's layout panes** (the coin counters' solid white cards, a dark box behind the "Look Around" hint; layout captures, as in Breath of the Wild). The game creates each capture with its per-format default mapping (an R8 capture reads (R, 0, 0, 1)), rebuilds it on the same storage with the capture's own mapping, (1, 1, 1, R), and replaces the registered descriptor only if `nvnTextureCompare` reports a difference (`main+0x982320`). The host compared everything but the mapping, so the captures kept alpha 1. Fixed by the general [`nvnTextureCompare` compares the channel mapping](../../../docs/reference/rendering.md#nvntexturecompare-compares-the-channel-mapping). The profile's earlier workaround, `alpha_from_red` (all 26 layout pixel shaders, `main`'s BNSH at 0x132c000, read such targets as (R, 0, 0, R)), is gone with its host code. Checked on the Mac from the "Look Around" hint with a probe host on the comparison: 40 rebuilds in the first 11,700 frames change only the mapping, R8 captures (640×80, 400×120, 390×80, 378×80, 300×40, 250×50, 128×128, 64×64, 48×57) from (R, 0, 0, 1) to (1, 1, 1, R) and a 320×180 RGBA one from (R, G, B, 1) to (R, G, B, A). Ignoring the mapping again brings back a dark box behind the hint (about 12,800 pixels from frame 4,200 on); with the old list the workaround converted the 378×80 capture and the frames matched the fixed host's; with the fix, the list converted nothing and changed nothing (the frames 4,200 to 6,600 equal to the pixel but for the hint video's corner). The comparison and the views run the same on the iPhone (no platform branch), so the rebuilt captures leave no (R, 0, 0, 1) target for the list to find there either.
- - **Resolved: the Cap Kingdom fog never parted around Mario (reported on an iPhone; fix checked on the Mac).** The fog's shading reads velocity fields that a small fluid simulation updates every frame: two 256×256 and two 128×128 RG16F targets, with a two-pass blur and a blended composite. Its only input is a point-sprite splat per mover, drawn with `alPointSpriteShader`: one vertex per mover, its size in the vertex data (Mario's main splat about 18 px, others 3–5 px) and a soft disc in the fragment shader (`clamp(1 - 4r², 0, 1)` × velocity). The vertex shader writes `gl_PointSize = min(size, c0[0x610])`, and the host had nothing at that offset of the driver segment, so every splat had size 0 and the fields stayed exactly zero (raw dumps with `DM_NVN_TEXDUMP` + `DM_NVN_SNAPRAW`). The host now writes the largest point size, 2047, at `c0 + 0x610` for the graphics stages. Writing the `SetPointSize` value instead (always 1 here) left one-pixel splats whose disc weight came out 0 (the fields held `-0.0`). After the fix the fields hold velocities up to ±44 and the fog clears around Mario.
- - **Resolved: the Cap Kingdom ground showed 32×32 blocks of a stale image on every fourth frame (Mac).** Presents 4k were brighter and blocky, 4k+1 and 4k+2 clean, 4k+3 partly blocked, repeating to the decimal across runs; only with the ground's material (`b6384a85afd3ef94`) drawn. In some frames the game first draws a depth pre-pass (`alRenderDepthOnly`) for objects its occlusion queries report visible (the queries rotate through three slots, hence the cycle), then the G-buffer with other vertex shaders and depth test less-or-equal, without clearing the colour targets. Metal compiled the two vertex shaders' identical position math to slightly different depths, the G-buffer fragments failed the test and kept the previous content. Every Metal compile now uses `-fpreserve-invariance`. Ruled out on the way: the TBDR optimizations, same-pass feedback, the present path; evaluating the game's conditional rendering on the CPU from earlier frames' results made it worse (the condition belongs to the same frame on the GPU), so the host still ignores the condition here and draws (no `render_cond`).
+@@ -8,21 +8,22 @@ Update 1.4.1 (v393216) over the base game, SDK 7.3.2. Nintendo EPD's sead / agl
+ |---|---|---|
+ | `pad_layout full` | `game.tsv` | the 3D gamepad layout |
+ | 4 GB layout: `mem_reserve 0x100000000`, `mem_alias 0x10000000`, `mem_stack 0x10000000`, `app_pool 0xCD500000` | `game.tsv` | from the NSP script's provisional profile |
+-| Node area cut and 32 MB alignment of large regions | `dm/tools/sdk_patches.py`, `sdk` build `fcf93a41…` | registered for DRAGON QUEST XI S on the same build; Odyssey has no virtual address memory and never allocates an address region |
++| Node area cut and 32 MB alignment of large regions | `dm/tools/sdk_patches.py`, `sdk` build `fcf93a41â€¦` | registered for DRAGON QUEST XI S on the same build; Odyssey has no virtual address memory and never allocates an address region |
+ 
+ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in its default docked mode.
+ 
+ ## Input
+ 
+ - **Resolved: buttons and menus worked, the sticks did nothing in play** (its first hint, "Look Around", waited forever). The game reads all 16 entries of the controller history (`GetNpadStates`) and ignores the returned count; the host filled only the newest. It polls every controller slot each frame, which moves the shared sampling number on by about 16, so the stick samples it combined were mostly empty, while buttons and the stick's direction bits (which menus use) still came through. The host now fills every requested entry with the current state under consecutive sampling numbers.
+-- **Resolved: motion moves never happened; shaking did nothing** (cap throws by shaking). The host handed out six-axis handles but reported no sensor; it now reports one per connected controller. The game reads the six-axis history the same way (16 entries per sensor, the count ignored, `main+0x93fd84`). Its motion analyzer (`main+0x5d5590`) turns the newest acceleration, seen against the controller's pose, into a swing value per hand and sets the swing flags above 0.2. A still controller gives 0, and the host's shake (±3 G side to side) gives up to 1.5, so a `Shake` sets the left, right and any-swing flags for its length. To find the swing detector, probe the accelerometer value it reads (`DM_PROBE=main:626248@x8+10` in 1.4.1). On the iPhone, shake the phone (a sharp flick); on the Mac, Space.
++- **Resolved: motion moves never happened; shaking did nothing** (cap throws by shaking). The host handed out six-axis handles but reported no sensor; it now reports one per connected controller. The game reads the six-axis history the same way (16 entries per sensor, the count ignored, `main+0x93fd84`). Its motion analyzer (`main+0x5d5590`) turns the newest acceleration, seen against the controller's pose, into a swing value per hand and sets the swing flags above 0.2. A still controller gives 0, and the host's shake (Â±3 G side to side) gives up to 1.5, so a `Shake` sets the left, right and any-swing flags for its length. To find the swing detector, probe the accelerometer value it reads (`DM_PROBE=main:626248@x8+10` in 1.4.1). On the iPhone, shake the phone (a sharp flick); on the Mac, Space.
+ 
+ ## Rendering
+ 
+-- **Resolved: hard-edged dark boxes behind the HUD's layout panes** (the coin counters' solid white cards, a dark box behind the "Look Around" hint; layout captures, as in Breath of the Wild). The game creates each capture with its per-format default mapping (an R8 capture reads (R, 0, 0, 1)), rebuilds it on the same storage with the capture's own mapping, (1, 1, 1, R), and replaces the registered descriptor only if `nvnTextureCompare` reports a difference (`main+0x982320`). The host compared everything but the mapping, so the captures kept alpha 1. Fixed by the general [`nvnTextureCompare` compares the channel mapping](../../../docs/reference/rendering.md#nvntexturecompare-compares-the-channel-mapping). The profile's earlier workaround, `alpha_from_red` (all 26 layout pixel shaders, `main`'s BNSH at 0x132c000, read such targets as (R, 0, 0, R)), is gone with its host code. Checked on the Mac from the "Look Around" hint with a probe host on the comparison: 40 rebuilds in the first 11,700 frames change only the mapping, R8 captures (640×80, 400×120, 390×80, 378×80, 300×40, 250×50, 128×128, 64×64, 48×57) from (R, 0, 0, 1) to (1, 1, 1, R) and a 320×180 RGBA one from (R, G, B, 1) to (R, G, B, A). Ignoring the mapping again brings back a dark box behind the hint (about 12,800 pixels from frame 4,200 on); with the old list the workaround converted the 378×80 capture and the frames matched the fixed host's; with the fix, the list converted nothing and changed nothing (the frames 4,200 to 6,600 equal to the pixel but for the hint video's corner). The comparison and the views run the same on the iPhone (no platform branch), so the rebuilt captures leave no (R, 0, 0, 1) target for the list to find there either.
+-- **Resolved: the Cap Kingdom fog never parted around Mario (reported on an iPhone; fix checked on the Mac).** The fog's shading reads velocity fields that a small fluid simulation updates every frame: two 256×256 and two 128×128 RG16F targets, with a two-pass blur and a blended composite. Its only input is a point-sprite splat per mover, drawn with `alPointSpriteShader`: one vertex per mover, its size in the vertex data (Mario's main splat about 18 px, others 3–5 px) and a soft disc in the fragment shader (`clamp(1 - 4r², 0, 1)` × velocity). The vertex shader writes `gl_PointSize = min(size, c0[0x610])`, and the host had nothing at that offset of the driver segment, so every splat had size 0 and the fields stayed exactly zero (raw dumps with `DM_NVN_TEXDUMP` + `DM_NVN_SNAPRAW`). The host now writes the largest point size, 2047, at `c0 + 0x610` for the graphics stages. Writing the `SetPointSize` value instead (always 1 here) left one-pixel splats whose disc weight came out 0 (the fields held `-0.0`). After the fix the fields hold velocities up to ±44 and the fog clears around Mario.
+-- **Resolved: the Cap Kingdom ground showed 32×32 blocks of a stale image on every fourth frame (Mac).** Presents 4k were brighter and blocky, 4k+1 and 4k+2 clean, 4k+3 partly blocked, repeating to the decimal across runs; only with the ground's material (`b6384a85afd3ef94`) drawn. In some frames the game first draws a depth pre-pass (`alRenderDepthOnly`) for objects its occlusion queries report visible (the queries rotate through three slots, hence the cycle), then the G-buffer with other vertex shaders and depth test less-or-equal, without clearing the colour targets. Metal compiled the two vertex shaders' identical position math to slightly different depths, the G-buffer fragments failed the test and kept the previous content. Every Metal compile now uses `-fpreserve-invariance`. Ruled out on the way: the TBDR optimizations, same-pass feedback, the present path; evaluating the game's conditional rendering on the CPU from earlier frames' results made it worse (the condition belongs to the same frame on the GPU), so the host still ignores the condition here and draws (no `render_cond`).
 -- Its three geometry shaders (a thunder effect) do not translate.
++- **Resolved: hard-edged dark boxes behind the HUD's layout panes** (the coin counters' solid white cards, a dark box behind the "Look Around" hint; layout captures, as in Breath of the Wild). The game creates each capture with its per-format default mapping (an R8 capture reads (R, 0, 0, 1)), rebuilds it on the same storage with the capture's own mapping, (1, 1, 1, R), and replaces the registered descriptor only if `nvnTextureCompare` reports a difference (`main+0x982320`). The host compared everything but the mapping, so the captures kept alpha 1. Fixed by the general [`nvnTextureCompare` compares the channel mapping](../../../docs/reference/rendering.md#nvntexturecompare-compares-the-channel-mapping). The profile's earlier workaround, `alpha_from_red` (all 26 layout pixel shaders, `main`'s BNSH at 0x132c000, read such targets as (R, 0, 0, R)), is gone with its host code. Checked on the Mac from the "Look Around" hint with a probe host on the comparison: 40 rebuilds in the first 11,700 frames change only the mapping, R8 captures (640Ã—80, 400Ã—120, 390Ã—80, 378Ã—80, 300Ã—40, 250Ã—50, 128Ã—128, 64Ã—64, 48Ã—57) from (R, 0, 0, 1) to (1, 1, 1, R) and a 320Ã—180 RGBA one from (R, G, B, 1) to (R, G, B, A). Ignoring the mapping again brings back a dark box behind the hint (about 12,800 pixels from frame 4,200 on); with the old list the workaround converted the 378Ã—80 capture and the frames matched the fixed host's; with the fix, the list converted nothing and changed nothing (the frames 4,200 to 6,600 equal to the pixel but for the hint video's corner). The comparison and the views run the same on the iPhone (no platform branch), so the rebuilt captures leave no (R, 0, 0, 1) target for the list to find there either.
++- **Resolved: the Cap Kingdom fog never parted around Mario (reported on an iPhone; fix checked on the Mac).** The fog's shading reads velocity fields that a small fluid simulation updates every frame: two 256Ã—256 and two 128Ã—128 RG16F targets, with a two-pass blur and a blended composite. Its only input is a point-sprite splat per mover, drawn with `alPointSpriteShader`: one vertex per mover, its size in the vertex data (Mario's main splat about 18 px, others 3â€“5 px) and a soft disc in the fragment shader (`clamp(1 - 4rÂ², 0, 1)` Ã— velocity). The vertex shader writes `gl_PointSize = min(size, c0[0x610])`, and the host had nothing at that offset of the driver segment, so every splat had size 0 and the fields stayed exactly zero (raw dumps with `DM_NVN_TEXDUMP` + `DM_NVN_SNAPRAW`). The host now writes the largest point size, 2047, at `c0 + 0x610` for the graphics stages. Writing the `SetPointSize` value instead (always 1 here) left one-pixel splats whose disc weight came out 0 (the fields held `-0.0`). After the fix the fields hold velocities up to Â±44 and the fog clears around Mario.
++- **Resolved: the Cap Kingdom ground showed 32Ã—32 blocks of a stale image on every fourth frame (Mac).** Presents 4k were brighter and blocky, 4k+1 and 4k+2 clean, 4k+3 partly blocked, repeating to the decimal across runs; only with the ground's material (`b6384a85afd3ef94`) drawn. In some frames the game first draws a depth pre-pass (`alRenderDepthOnly`) for objects its occlusion queries report visible (the queries rotate through three slots, hence the cycle), then the G-buffer with other vertex shaders and depth test less-or-equal, without clearing the colour targets. Metal compiled the two vertex shaders' identical position math to slightly different depths, the G-buffer fragments failed the test and kept the previous content. Every Metal compile now uses `-fpreserve-invariance`. Ruled out on the way: the TBDR optimizations, same-pass feedback, the present path; evaluating the game's conditional rendering on the CPU from earlier frames' results made it worse (the condition belongs to the same frame on the GPU), so the host still ignores the condition here and draws (no `render_cond`).
 +- **Host fix ported, iPad validation pending:** the Cascade Kingdom waterfall mist can composite twice when a nine-vertex draw reads beyond its three-vertex stream. See [Vertex fetches past a stream's bound size](../../../docs/reference/rendering.md#vertex-fetches-past-a-streams-bound-size). This does not establish a fix for every bloom or lighting flash.
 +- The accepted F4.1 package contains compute-based translations for all three thunder geometry shaders, including their geometry topology libraries. Their presence is not a device validation of the effect.
  
  ## Movies
  
-@@ -30,6 +31,7 @@ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in
+@@ -30,14 +31,15 @@ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in
  
  ## Services
  
@@ -20,6 +39,16 @@ index bf60f53..e14e6de 100644
  - Start-up calls no game before it made, each answered by the host: the aborting `account::OpenPreselectedUser` and `GetLastOpenedUser` (a null read), news delivery (`bcat`: the delivery storage does not mount, which the game treats as "nothing delivered"), HOME-button blocking, the parental 3D-mode setting, `vi::SetLayerScalingMode`, `time::ToPosixTimeFromUtc`, the debug pad, and the SDK 7 names of two audio-device calls (`audio::AcquireAudioDeviceSwitchNotification` aborted). Each aborted with no message in the SDK's IPC; frames resolved with `sdis.py --sym`.
  - Command memory: it hands out many 512-byte command memory grants before recording; with no recording to reclaim them by, 256 KB host segments each reached the cap entering the Wooded Kingdom, so an empty-pool grant of at most 4 KB outside a recording gets a 4 KB segment (`hostseg_size`). The `GetCommandMemoryUsed` count from the last `AddCommandMemory` (found on Three Houses) left it unchanged.
  - Shared fonts: SDK 7, so the address is the plain TTF. Focus handling mode 3 (no focus notifications; the system suspends the game out of focus).
+-- Its SDK 7 driver's GPU code range (1.5–1.14, `nvnDeviceGetInteger` 0x2E–0x31) was measured here; the host now reports newer versions for newer SDKs.
++- Its SDK 7 driver's GPU code range (1.5â€“1.14, `nvnDeviceGetInteger` 0x2Eâ€“0x31) was measured here; the host now reports newer versions for newer SDKs.
+ 
+ ## Audio
+ 
+-- It is silent for its first minute with either audio renderer update lock: the old SDK 16 offset and the one `update_lock` now reads off the SDK's own `Update` (`MutexType` at +0x1d8 on SDK 6.4–8.2) ([The renderer's update lock](../../../docs/reference/audio.md#the-renderers-update-lock-update_lock)).
++- It is silent for its first minute with either audio renderer update lock: the old SDK 16 offset and the one `update_lock` now reads off the SDK's own `Update` (`MutexType` at +0x1d8 on SDK 6.4â€“8.2) ([The renderer's update lock](../../../docs/reference/audio.md#the-renderers-update-lock-update_lock)).
+ 
+ ## Files and shaders
+ 
 @@ -58,6 +60,7 @@ No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in
  
  General host and tool changes first needed here; each applies to every game:
@@ -37,6 +66,12 @@ index bf60f53..e14e6de 100644
  - The three thunder geometry shaders do not translate.
  - The silent first minute of sound.
  - development.md calls SDK 7.3.2 "the oldest so far"; Mario Kart 8 Deluxe (SDK 4.4.0) is older now.
+@@ -102,3 +107,5 @@ An explicit stock/off selection leaves the register frame and existing overlays
+ **F3 device observation, 2026-10-29:** the user reports working resolution switching and smooth native 2732x2048 gameplay on an 8 GB iPad Air M2, with high RAM use and little perceived improvement over 1080p. The 4:3 world view is reported correct; text and main-menu proportions remain distorted. Bloom/lighting flashes and short first-encounter hitches remain. These are user observations, not controlled frame-time, memory, or visual A/B measurements.
+ 
+ **F4 default:** 1080p is recommended for memory efficiency and is the default for an unset supported display selection. Saved native, 1440p and stock values and explicit environment overrides retain precedence. When the launcher is skipped, the host adopts 1080p only for the exact docked build with complete display gates and validated assets; the standalone policy parser still treats an absent choice as stock. The 4:3 option stays off by default. A 4:3 1080p target is 1440x1080; wide 1080p is 1920x1080. No F4 device result is claimed.
++
++- **F6 startup:** the user reports the long wait occurs after Play on repeated launches. [Precompiled preparation inventory](../../../docs/reference/packing.md#precompiled-shader-preparation-inventory) removes bulk binary header discovery for validated external compiled packs, preserves legacy/GL/Vulkan preparation and adds stage timings. Source implementation only until native CI and device validation.
 diff --git a/dm/gfx/nvn/dm_shell_msl.h b/dm/gfx/nvn/dm_shell_msl.h
 index 87a5ff2..21e8c9a 100644
 --- a/dm/gfx/nvn/dm_shell_msl.h
@@ -128,7 +163,7 @@ index dd159ac..42773e2 100644
      vconv_bind(re, j->vs, 1, &j->vertex_range, NULL);
      args_dirty_all(); encode_args(re, j->vs, 0, 1); enc_r_vbuf(re, 13, j->capture_info);
 diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
-index 8e032ea..09d68d9 100644
+index 8e032ea..b1aedd4 100644
 --- a/dm/gfx/nvn/nvn_mtl.m
 +++ b/dm/gfx/nvn/nvn_mtl.m
 @@ -1635,7 +1635,7 @@ void mtl_drain(void) { present_drop_for_suspend(); mtl_present_flush(); snap_dra
@@ -388,6 +423,14 @@ index 8e032ea..09d68d9 100644
      // Parameter binding captures the actual resources under the registry lock; if the version changed between the eligibility check and the binding, split and retry before any GPU draw.
      if (g_rt_range_active && (g_pass.reg_gen != g_reg_gen || g_pass.ser_gen != g_ser_gen || g_pass.range_dirty != nvn_dirty_now())) { rp_end(); draw(dw, di); return; }
      int prim = dw ? dw->prim : di->prim;
+@@ -10876,6 +10938,7 @@ static double g_link_it_tin;   // Enqueue time of the frame the display-link cal
+ static int present_now(const tex_t *t, double period, uint64_t frame, uint64_t ticket, const int crop[4], id<CAMetalDrawable> supplied, double target_ts) {
+     if (g_present_stall_ns) { struct timespec ts = {0, (long)g_present_stall_ns}; nanosleep(&ts, NULL); }
+     g_present_n++;
++    if (g_present_n == 1) LOG("boot timing: first_present_submitted process_elapsed_ms=%.3f (content not classified)", (now_ns() - g_t0_ns) / 1e6);
+     if (bootprof() && (g_present_n == 1 || g_present_n % 120 == 0)) {
+         if (g_present_n == 1) g_bp_first_present = bp_now() - g_bp_t0;
+         MLOG("[bootprof] t=%.3f s present #%llu: metallibs loaded %llu / %.1f ms; pipelines created %llu / %.1f ms (all synchronous on the submit thread); prewarmed and used: shaders %llu / render pipelines %llu / compute pipelines %llu; "
 diff --git a/dm/gfx/tests/run_nvn_resource_rebind_native.py b/dm/gfx/tests/run_nvn_resource_rebind_native.py
 new file mode 100644
 index 0000000..487c36a
@@ -972,6 +1015,54 @@ index 0000000..8eea879
 +
 +if __name__ == '__main__':
 +    main()
+diff --git a/dm/host/hle_odyssey_display.c b/dm/host/hle_odyssey_display.c
+index bb27cfc..de92ab1 100644
+--- a/dm/host/hle_odyssey_display.c
++++ b/dm/host/hle_odyssey_display.c
+@@ -3,6 +3,7 @@
+ #include "dm_obs_frame.h"
+ #include "dm_odyssey_display.h"
+ #include "dm_vertical_fov.h"
++#include "dm_overlay_assets.h"
+ 
+ #include <CommonCrypto/CommonDigest.h>
+ #include <errno.h>
+@@ -22,6 +23,7 @@
+ #define DM_ODYSSEY_PROFILE_HEADER "#odyssey-display-v1"
+ #define DM_ODYSSEY_MANIFEST_MAX 8192u
+ #define DM_ODYSSEY_ASSET_MAX 65536u
++#define DM_ODYSSEY_HUD_ASSET_MAX 113146u
+ #define DM_ROMFS_OVERLAY_MAX 4095u
+ #define DM_ODYSSEY_MIB (1024u * 1024u)
+ #define DM_ODYSSEY_BASE_RT_POOL_MIB 100u
+@@ -193,6 +195,16 @@ static int aspect_index(dm_odyssey_aspect aspect) {
+     return aspect == DM_ODYSSEY_ASPECT_16X9 ? 0 : 1;
+ }
+ 
++// Exact 1.4.1 private layout overlays; hashes/lengths are metadata only. The
++// generic validator is parameterized so fixtures use synthetic, game-free data.
++static const dm_overlay_asset_record odyssey_hud_assets[] = {
++    {"LayoutData/CounterCoin.szs", 43306u, "b779beb5294c1bebe5f9f77faa049986d5ad60bf47d5a31793b04b99b9961ded"},
++    {"LayoutData/CounterCollectCoin.szs", 34810u, "cc29e288079a81168ae77ac0ff4c171d705c71e855d92eff41c99e6fd7c04abf"},
++    {"LayoutData/CounterLife.szs", 104218u, "d0904da25a49d770205fde9f516aa7fbeeede86371c88e80acc2563ec98c3d9e"},
++    {"LayoutData/CounterLifeKids.szs", 112570u, "9f518be64231f6c22ca9c46ce1f15821f5bd1a8b04b889ae502ffd9d5f2c403a"},
++    {"LayoutData/CounterLifeUp.szs", 113146u, "26d4e02148d5aa94159977536135b6569b9da2b431a891f4577f99ea96ac00c2"},
++};
++
+ static int validate_manifest(const char *root,
+                              const dm_odyssey_display_config *config,
+                              char *selected_sha, size_t selected_sha_size,
+@@ -314,6 +326,10 @@ int dm_odyssey_display_validate_asset(const char *root,
+     if (n < 0 || (size_t)n >= sizeof asset_path)
+         return fail(error, error_size, "selected display asset path is too long");
+     if (!hash_asset(asset_path, expected_bytes, expected_sha, error, error_size)) return 0;
++    if (config->preset == DM_ODYSSEY_PRESET_1080P && config->aspect == DM_ODYSSEY_ASPECT_4X3 &&
++        !dm_overlay_validate_optional_set(profile_root, odyssey_hud_assets,
++             sizeof odyssey_hud_assets / sizeof odyssey_hud_assets[0],
++             DM_ODYSSEY_HUD_ASSET_MAX, error, error_size)) return 0;
+     if ((size_t)snprintf(overlay_root, overlay_root_size, "%s", profile_root) >= overlay_root_size)
+         return fail(error, error_size, "selected display overlay root output is too small");
+     return 1;
 diff --git a/dm/host/hle_sdk16.c b/dm/host/hle_sdk16.c
 index e8f8af5..d181e8a 100644
 --- a/dm/host/hle_sdk16.c
@@ -1010,6 +1101,36 @@ index e8f8af5..d181e8a 100644
  }
  HLE_FORCE("_ZN2nn8settings12LanguageCode4MakeENS0_8LanguageE", "language enum → language code (8 bytes returned by value)", uint64_t, h_set_LangMake, int lang) {
      char code[8] = {0};
+diff --git a/dm/host/main.c b/dm/host/main.c
+index 8b5bdb3..257c142 100644
+--- a/dm/host/main.c
++++ b/dm/host/main.c
+@@ -60,6 +60,7 @@ static pthread_key_t g_race_keys[512];
+ static unsigned g_race_n, g_race_want;
+ static void *keyrace_thread(void *unused);
+ static void host_preload(int argc, char **argv) {
++    uint64_t preload_start = now_ns();
+     g_t0_ns = proc_start_mono_ns();
+     flags_init();
+     if (argc < 2) die("usage: dmhost <dir> [mod...] [-- game arguments...]");
+@@ -107,6 +108,7 @@ static void host_preload(int argc, char **argv) {
+     if (g_flag.bootprof) LOG("① breakdown (after loading): probes / keys %.1f ms, stub report %.1f ms", (tb - ta) / 1e6, (now_ns() - tb) / 1e6);
+     { void loader_hash_log(void); loader_hash_log(); }   // DM_LOADHASH=1: address-independent hash of the load result (loader.c)
+     { void dm_ue_malloc_install(void); dm_ue_malloc_install(); }   // Unreal's allocator on a host malloc zone, for the builds whose constructor call is cut (hle_uemalloc.c)
++    LOG("boot timing: host_preload_ms=%.3f", (now_ns() - preload_start) / 1e6);
+ }
+ static struct { int argc; char **argv; pthread_t th; _Atomic int started; } g_pre;
+ static void *preload_thread(void *a) { (void)a; host_preload(g_pre.argc, g_pre.argv); return NULL; }
+@@ -129,7 +131,9 @@ int main(int argc, char **argv) {
+     { int mtl_pso_prebuild_tool(void); if (mtl_pso_prebuild_tool()) return 0; }   // DM_PSO_PREBUILD=tool: the pipeline archive's prebuild alone, no game (nvn_mtl.m)
+     if (getenv("DM_PRELOAD")) dm_host_preload_start(argc, argv);   // Exercise the early-start path on Mac (on iOS it is called from the App's main())
+     if (atomic_load(&g_pre.started)) {
++        uint64_t join_start = now_ns();
+         pthread_join(g_pre.th, NULL);
++        LOG("boot timing: host_preload_join_wait_ms=%.3f", (now_ns() - join_start) / 1e6);
+         int same = argc == g_pre.argc; for (int i = 0; same && i < argc; i++) same = !strcmp(argv[i], g_pre.argv[i]);
+         if (!same) die("[RED] dm_host_preload_start arguments differ from main's");
+         void crash_thread_init(void); crash_thread_init();   // The signal alternate stack is per thread: loading installed it on another thread, so add it for this thread
 diff --git a/dm/host/tests/Makefile b/dm/host/tests/Makefile
 index 6ef8e91..1293cf6 100644
 --- a/dm/host/tests/Makefile
@@ -1117,6 +1238,174 @@ index 0000000..ebad9a6
 +    printf("language: %d checks, %d failed\n", checks, fails);
 +    return fails != 0;
 +}
+diff --git a/dm/host/tests/t_odyssey_display_asset.c b/dm/host/tests/t_odyssey_display_asset.c
+index ba46ced..f514b29 100644
+--- a/dm/host/tests/t_odyssey_display_asset.c
++++ b/dm/host/tests/t_odyssey_display_asset.c
+@@ -2,6 +2,7 @@
+ #include "dm_obs_frame.h"
+ #include "dm_odyssey_display.h"
+ #include "dm_vertical_fov.h"
++#include "dm_overlay_assets.h"
+ 
+ #include <CommonCrypto/CommonDigest.h>
+ #include <assert.h>
+@@ -13,6 +14,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <sys/stat.h>
++#include <sys/wait.h>
+ #include <unistd.h>
+ 
+ #define TEST_BUILD_ID "b424be150a8e7d78701cbe7a439d9ebf"
+@@ -252,6 +254,139 @@ static void assert_inactive(void) {
+     test_pool_extra(0);
+ }
+ 
++static void write_fixture_file(const char *path, const void *bytes, size_t size) {
++    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
++    assert(fd >= 0);
++    write_all(fd, bytes, size);
++    assert(close(fd) == 0);
++}
++
++static void test_optional_hud_assets(const char *root) {
++    // Exercise the production header with synthetic bytes, not proprietary SZS.
++    char synthetic[PATH_MAX], layout[PATH_MAX], paths[5][PATH_MAX], error[256];
++    assert(snprintf(synthetic, sizeof synthetic, "%s/synthetic", root) < (int)sizeof synthetic);
++    assert(snprintf(layout, sizeof layout, "%s/LayoutData", synthetic) < (int)sizeof layout);
++    make_dir(synthetic); make_dir(layout);
++    char small_hash[65], large_hash[65];
++    sha256_hex("abc", 3, small_hash);
++    const size_t large_size = 113146;
++    char *large = malloc(large_size);
++    assert(large); memset(large, 'L', large_size);
++    sha256_hex(large, large_size, large_hash);
++    dm_overlay_asset_record records[] = {
++        {"LayoutData/A.szs", 3, small_hash}, {"LayoutData/B.szs", 3, small_hash},
++        {"LayoutData/C.szs", 3, small_hash}, {"LayoutData/D.szs", 3, small_hash},
++        {"LayoutData/E.szs", 113146, large_hash},
++    };
++    for (size_t i = 0; i < 5; i++)
++        assert(dm_overlay_asset_join(paths[i], sizeof paths[i], synthetic, records[i].path));
++#define SET_OK() dm_overlay_validate_optional_set(synthetic, records, 5, 113146, error, sizeof error)
++    assert(SET_OK()); // All absent is the backwards-compatible F5 case.
++    write_fixture_file(paths[0], "abc", 3);
++    assert(!SET_OK() && strstr(error, "incomplete"));
++    for (size_t i = 1; i < 4; i++) write_fixture_file(paths[i], "abc", 3);
++    write_fixture_file(paths[4], large, large_size);
++    assert(SET_OK() && !error[0]); // Includes a real file above the old 64 KiB limit.
++    assert(!dm_overlay_validate_optional_set(synthetic, records, 5, 65536, error, sizeof error));
++    write_fixture_file(paths[0], "abd", 3);
++    assert(!SET_OK() && strstr(error, "SHA-256"));
++    write_fixture_file(paths[0], "ab", 2);
++    assert(!SET_OK() && strstr(error, "bounded regular"));
++    write_fixture_file(paths[0], "abcd", 4);
++    assert(!SET_OK());
++    write_fixture_file(paths[0], "abc", 3);
++    assert(unlink(paths[4]) == 0);
++    assert(!SET_OK() && strstr(error, "incomplete"));
++    write_fixture_file(paths[4], large, large_size);
++    assert(unlink(paths[0]) == 0);
++    assert(symlink(paths[1], paths[0]) == 0);
++    assert(!SET_OK() && strstr(error, "not a regular"));
++    assert(unlink(paths[0]) == 0);
++    assert(symlink("missing-target", paths[0]) == 0);
++    assert(!SET_OK()); // A dangling link is not an absent old-bundle asset.
++    assert(unlink(paths[0]) == 0);
++    make_dir(paths[0]); assert(!SET_OK()); assert(rmdir(paths[0]) == 0);
++    assert(mkfifo(paths[0], 0600) == 0);
++    assert(!SET_OK()); // Must not block opening a FIFO.
++    assert(unlink(paths[0]) == 0);
++    write_fixture_file(paths[0], "abc", 3);
++    dm_overlay_asset_record bad = {"../escape.szs", 3, small_hash};
++    assert(!dm_overlay_validate_optional_set(synthetic, &bad, 1, 113146, error, sizeof error));
++    bad = records[0]; bad.sha256 = "bad";
++    assert(!dm_overlay_validate_optional_set(synthetic, &bad, 1, 113146, error, sizeof error));
++    dm_overlay_asset_record duplicate[] = {records[0], records[0]};
++    assert(!dm_overlay_validate_optional_set(synthetic, duplicate, 2, 113146, error, sizeof error));
++    char long_root[PATH_MAX + 1]; memset(long_root, 'x', sizeof long_root - 1); long_root[sizeof long_root - 1] = 0;
++    assert(!dm_overlay_validate_optional_set(long_root, records, 5, 113146, error, sizeof error));
++    // fd 0 is a legitimate opened asset; preserve/restore the caller's stdin.
++    int saved_stdin = dup(STDIN_FILENO);
++    close(STDIN_FILENO);
++    assert(SET_OK());
++    if (saved_stdin >= 0) { assert(dup2(saved_stdin, STDIN_FILENO) == STDIN_FILENO); close(saved_stdin); }
++    for (size_t i = 0; i < 5; i++) assert(unlink(paths[i]) == 0);
++    assert(rmdir(layout) == 0); assert(rmdir(synthetic) == 0); free(large);
++#undef SET_OK
++
++    // Exercise the actual public validator's trusted table and profile routing.
++    // It must reject even a single one of the five known filenames; output is
++    // not published on failure. No test-only production-table override is used.
++    char profile[PATH_MAX], hud_layout[PATH_MAX], file[PATH_MAX], output[PATH_MAX];
++    assert(snprintf(profile, sizeof profile, "%s/4x3/1080p", root) < (int)sizeof profile);
++    assert(snprintf(hud_layout, sizeof hud_layout, "%s/LayoutData", profile) < (int)sizeof hud_layout);
++    make_dir(hud_layout);
++    dm_odyssey_display_config config;
++    assert(dm_odyssey_display_policy_parse("1080p", "1", &config));
++    assert(dm_odyssey_display_validate_asset(root, &config, output, sizeof output, error, sizeof error));
++    const char *names[] = {"CounterCoin", "CounterCollectCoin", "CounterLife", "CounterLifeKids", "CounterLifeUp"};
++    for (size_t i = 0; i < 5; i++) {
++        assert(snprintf(file, sizeof file, "%s/%s.szs", hud_layout, names[i]) < (int)sizeof file);
++        write_fixture_file(file, "abc", 3);
++        strcpy(output, "unpublished");
++        assert(!dm_odyssey_display_validate_asset(root, &config, output, sizeof output, error, sizeof error));
++        assert(strstr(error, "incomplete") && !strcmp(output, "unpublished"));
++        assert(unlink(file) == 0);
++    }
++    for (size_t i = 0; i < 5; i++) {
++        assert(snprintf(file, sizeof file, "%s/%s.szs", hud_layout, names[i]) < (int)sizeof file);
++        write_fixture_file(file, "abc", 3);
++    }
++    assert(!dm_odyssey_display_validate_asset(root, &config, output, sizeof output, error, sizeof error));
++    assert(strstr(error, "bounded regular")); // All names present, wrong trusted lengths.
++    // Existing initializer rejection path leaves callbacks/viewport/overlays
++    // untouched, including the original high-profile global heap restoration.
++    for (int high = 0; high <= 1; high++) {
++        pid_t child = fork(); assert(child >= 0);
++        if (!child) {
++            g_highres_profile = high;
++            dm_odyssey_display_init();
++            assert_inactive();
++            assert(g_gate_set_count == high);
++            if (high) test_memory_callback(OBS_ODYSSEY_GLOBAL_HEAP, 0, UINT32_C(0xc3000000));
++            _exit(0);
++        }
++        int status; assert(waitpid(child, &status, 0) == child);
++        assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
++    }
++    // A 16:9 selected root is independent even if the 4:3 HUD set is invalid.
++    write_selected_asset(root, "16x9", "1080p", "abc");
++    assert(dm_odyssey_display_policy_parse("1080p", "0", &config));
++    assert(dm_odyssey_display_validate_asset(root, &config, output, sizeof output, error, sizeof error));
++    assert(strstr(output, "/16x9/1080p"));
++    char wide_system[PATH_MAX], wide_profile[PATH_MAX], wide_aspect[PATH_MAX];
++    assert(snprintf(wide_aspect, sizeof wide_aspect, "%s/16x9", root) < (int)sizeof wide_aspect);
++    assert(snprintf(wide_profile, sizeof wide_profile, "%s/1080p", wide_aspect) < (int)sizeof wide_profile);
++    assert(snprintf(wide_system, sizeof wide_system, "%s/SystemData", wide_profile) < (int)sizeof wide_system);
++    assert(snprintf(file, sizeof file, "%s/ProjectGraphicsQuality.szs", wide_system) < (int)sizeof file);
++    assert(unlink(file) == 0); assert(rmdir(wide_system) == 0);
++    assert(rmdir(wide_profile) == 0); assert(rmdir(wide_aspect) == 0);
++    for (size_t i = 0; i < 5; i++) {
++        assert(snprintf(file, sizeof file, "%s/%s.szs", hud_layout, names[i]) < (int)sizeof file);
++        assert(unlink(file) == 0);
++    }
++    assert(rmdir(hud_layout) == 0);
++    puts("PASS: optional HUD synthetic set validation and initializer rejection");
++}
++
+ int main(int argc, char **argv) {
+     assert(argc == 2);
+     g_case = argv[1];
+@@ -363,6 +498,7 @@ int main(int argc, char **argv) {
+     if (has_manifest) write_manifest(root);
+     const int bad_hash = !strcmp(g_case, "bad-hash") || !strcmp(g_case, "high-bad-hash");
+     if (has_asset) write_selected_asset(root, g_selected_aspect, g_selected_preset, bad_hash ? "abd" : "abc");
++    if (!strcmp(g_case, "default-1080p-4x3")) test_optional_hud_assets(root);
+ 
+     char guard_path[PATH_MAX];
+     int original_stdin = -1;
 diff --git a/dm/ios/Sources/dm_shader_learn.h b/dm/ios/Sources/dm_shader_learn.h
 index 6b9b359..7bbd782 100644
 --- a/dm/ios/Sources/dm_shader_learn.h
@@ -1135,10 +1424,17 @@ index 6b9b359..7bbd782 100644
  // The source with the chosen colour outputs declared unsigned/signed, and every value written to them converted.
  // mask: bits 0-7 = colour slots that must be unsigned, bits 8-15 = slots that must be signed.
 diff --git a/dm/ios/Sources/dm_shader_prep.m b/dm/ios/Sources/dm_shader_prep.m
-index f924276..bd33760 100644
+index f924276..fed0426 100644
 --- a/dm/ios/Sources/dm_shader_prep.m
 +++ b/dm/ios/Sources/dm_shader_prep.m
-@@ -23,7 +23,10 @@
+@@ -19,40 +19,24 @@
+ #include <string.h>
+ #include "dm_shader_learn.h"
+ #include "dm_shell_msl.h"
++#include "dm_shader_inventory.h"
++extern NSString *dm_ios_selected_shader_directory(void);
++extern NSString *dm_ios_precompiled_shader_directory(void);
+ 
  static void pl(NSString *s) { fprintf(stderr, "[dm] %s\n", s.UTF8String); }
  static int lg(void) { NSString *l = NSLocale.preferredLanguages.firstObject; return [l hasPrefix:@"zh"] ? 1 : [l hasPrefix:@"es"] ? 2 : 0; }   // 系统首选语言：1 中文 / 2 西语 / 0 其余英文 | System preferred language: 1 Chinese / 2 Spanish / 0 English otherwise
  #define L3(zh, en, es) (lg() == 1 ? (zh) : lg() == 2 ? (es) : (en))
@@ -1148,13 +1444,67 @@ index f924276..bd33760 100644
 +    return root && *root ? [NSString stringWithUTF8String:root] : [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"msl"];
 +}
  static NSString *libdir(void) {   // <包>/msl/b-<链版本>：壳里只有一个版本目录 | <package>/msl/b-<chain version>: the shell has only one version directory
++    NSString *selected = dm_ios_selected_shader_directory();
++    if (selected) return selected;
      NSString *msl = msldir();
      for (NSString *d in [NSFileManager.defaultManager contentsOfDirectoryAtPath:msl error:nil] ?: @[]) if ([d hasPrefix:@"b-"]) return [msl stringByAppendingPathComponent:d];
+     return nil;
+ }
+-// 编好的库以 MTLB 开头；不是的就是源码 | a compiled library starts with MTLB; anything else is source
+-static BOOL is_source(NSString *path) {
+-    FILE *f = fopen(path.fileSystemRepresentation, "rb"); if (!f) return NO; char h[4] = {0}; size_t n = fread(h, 1, 4, f); fclose(f);
+-    return n == 4 && memcmp(h, "MTLB", 4) != 0;
+-}
+-// 以源码形式放进包的着色器：NVN 的是 b-<链版本> 下的 *.metallib（还是源码，不是 MTLB），GL 的是 msl/gl/src 下的 *.metal
+-// （打包的电脑上没有苹果的编译器时，gl_shaders.py 只写这两样：PC 上能装 glslang 和 spirv-cross，装不了 xcrun metal）
+-// The shaders a package holds as source: NVN's are the *.metallib that are not MTLB under b-<chain version>, GL's the
+-// *.metal under msl/gl/src (what gl_shaders.py writes when the packing computer has no Apple compiler).
+-static NSArray<NSString *> *shader_sources(void) {
+-    NSMutableArray<NSString *> *a = [NSMutableArray array];
+-    NSString *d = libdir();
+-    for (NSString *f in [[NSFileManager.defaultManager contentsOfDirectoryAtPath:d error:nil] sortedArrayUsingSelector:@selector(compare:)] ?: @[]) {
+-        NSString *p = [d stringByAppendingPathComponent:f];
+-        if ([f hasSuffix:@".metallib"] && is_source(p)) [a addObject:p];
+-    }
+-    NSString *gs = [msldir() stringByAppendingPathComponent:@"gl/src"];
+-    for (NSString *f in [[NSFileManager.defaultManager contentsOfDirectoryAtPath:gs error:nil] sortedArrayUsingSelector:@selector(compare:)] ?: @[])
+-        if ([f hasSuffix:@".metal"]) [a addObject:[gs stringByAppendingPathComponent:f]];
+-    NSString *vs = [msldir() stringByAppendingPathComponent:@"vk/src"];
+-    for (NSString *f in [[NSFileManager.defaultManager contentsOfDirectoryAtPath:vs error:nil] sortedArrayUsingSelector:@selector(compare:)] ?: @[])
+-        if ([f hasSuffix:@".metal"]) [a addObject:[vs stringByAppendingPathComponent:f]];
+-    return a;
+-}
+ static NSString *marker(NSArray<NSString *> *src, NSString *dir) {
+     // The key has to name this package's shaders, not just the source tree: the chain version (b-<V>) follows the source tree
+     // and is the same for every game, so a marker keyed by it alone says "done" for a different game's package, or for a
+@@ -79,7 +63,13 @@ static NSString *marker(NSArray<NSString *> *src, NSString *dir) {
+ int dm_shader_prep_begin(void (^done)(void)) {
+     NSString *dir = libdir();   // NVN 的版本目录；GL 包没有，源码在 msl/gl/src | the chain version's directory; a GL package has none, its sources are in msl/gl/src
+     NSString *policy = dir ? DM_SHELL_NVN_MSL_EPOCH : @"default";
+-    NSMutableArray<NSString *> *src = [shader_sources() mutableCopy];
++    double scanStart = NSProcessInfo.processInfo.systemUptime;
++    dm_shader_inventory_stats stats;
++    NSMutableArray<NSString *> *src = [dm_shader_inventory(msldir(), dir,
++        dm_ios_precompiled_shader_directory(), &stats) mutableCopy];
++    pl([NSString stringWithFormat:@"shader inventory: precompiled=%d header_probes=%lu listing_ms=%.3f probing_ms=%.3f total_ms=%.3f",
++        stats.precompiled, (unsigned long)stats.header_probes, stats.listing_ms, stats.probing_ms,
++        (NSProcessInfo.processInfo.systemUptime - scanStart) * 1000]);
+     if (!src.count) {
+         pl([NSString stringWithFormat:@"shader prep status: policy=%@ sources=0 marker=not-applicable action=skip", policy]);
+         return 0;
 diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
-index 5718ba3..4829e1c 100644
+index 5718ba3..130ffc0 100644
 --- a/dm/ios/Sources/front_ios.m
 +++ b/dm/ios/Sources/front_ios.m
-@@ -61,7 +61,7 @@ static void launcher_done(void) { [g_root startGame]; }
+@@ -13,6 +13,7 @@
+ UIView *dm_gamepad_view(CGRect frame);
+ void dm_gamepad_reset(void);
+ void front_ios_boot(void);
++void dm_ios_boot_stage(const char *stage);
+ int front_ios_boot_ok(void);
+ const char *front_ios_boot_message(void);   // main.m: why a build that keeps the game files off the IPA found none usable (NULL = the generic hint)
+ bool dm_show_launcher(void *view_controller, void (*done)(void));   // Launcher.swift: false = no launcher (no dm/launcher.json, or DM_LAUNCHER=0)
+@@ -61,7 +62,7 @@ static void launcher_done(void) { [g_root startGame]; }
          lb.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
          lb.numberOfLines = 0; lb.textAlignment = NSTextAlignmentCenter; lb.textColor = UIColor.whiteColor;
          const char *why = front_ios_boot_message();
@@ -1163,19 +1513,54 @@ index 5718ba3..4829e1c 100644
          [self.view addSubview:lb]; return;
      }
      front_ios_audio_watch();
+@@ -103,6 +104,7 @@ static void launcher_done(void) { [g_root startGame]; }
+         [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+         [self presentViewController:a animated:YES completion:nil];
+     }
++    dm_ios_boot_stage("launcher-visible");
+     if (self.launched || !front_ios_boot_ok()) return;
+     self.launched = YES; g_root = self;
+     if (!dm_show_launcher((__bridge void *)self, launcher_done)) [self startGame];   // the settings screen first (Launcher.swift), when the app has one
 diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
-index 5a76083..81c8ec6 100644
+index 5a76083..522b1e8 100644
 --- a/dm/ios/Sources/main.m
 +++ b/dm/ios/Sources/main.m
-@@ -13,6 +13,7 @@
+@@ -13,6 +13,13 @@
  #include "romfs_image.h"
  #include "romfs_identity.h"
  #include "player_env.h"
 +#include "dm_external_shaders.h"
++// This F6 host exposes only bounded, explicit diagnostic profiles. With no
++// DM_FLICKER_PROFILE it leaves every renderer setting unchanged.
++#ifndef DM_FLICKER_DIAGNOSTICS
++#define DM_FLICKER_DIAGNOSTICS 1
++#endif
++#include "dm_flicker_diagnostics.h"
  #ifdef DM_SHELL
  #include "dm_shell_identity.h"
  #endif
-@@ -99,7 +100,7 @@ static int boot_env(void) {
+@@ -30,6 +37,14 @@ int dm_shader_prep_begin(void (^done)(void));      // dm_shader_prep.m: compile
+ UIViewController *front_ios_root(void);
+ void front_ios_focus_event(int ev);
+ 
++static NSString *g_selected_shader_directory, *g_precompiled_shader_directory;
++NSString *dm_ios_selected_shader_directory(void) { return g_selected_shader_directory; }
++NSString *dm_ios_precompiled_shader_directory(void) { return g_precompiled_shader_directory; }
++static double g_boot_begin;
++void dm_ios_boot_stage(const char *stage) {
++    fprintf(stderr, "boot timing: %s elapsed_ms=%.3f\n", stage,
++            (NSProcessInfo.processInfo.systemUptime - g_boot_begin) * 1000);
++}
+ static char *g_argv[16]; static int g_argc;   // 2 fixed + the Guest library's module names (a shell has no module list compiled in)
+ 
+ // Documents/romfs.img, one RomFS image file (dm/tools/romfs_image.py, scripts/push_romfs.sh): only a complete one counts. Its index is written last and ends the file, so a copy cut off partway is skipped
+@@ -94,12 +109,13 @@ static void romfs_identity_report(NSString *doc) {
+ }
+ 
+ static int boot_env(void) {
++    g_boot_begin = NSProcessInfo.processInfo.systemUptime;
+     NSFileManager *fm = NSFileManager.defaultManager;
+     NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
      NSString *res = NSBundle.mainBundle.resourcePath;
      for (NSString *d in @[@"save", @"temp"]) [fm createDirectoryAtPath:[doc stringByAppendingPathComponent:d] withIntermediateDirectories:YES attributes:nil error:nil];
      // Keep game files and scratch data out of device backups (Documents is backed up by default; a RomFS placed there is many GB). Saves, logs and the pipeline list stay in the backup
@@ -1184,13 +1569,41 @@ index 5a76083..81c8ec6 100644
          NSURL *u = [NSURL fileURLWithPath:[doc stringByAppendingPathComponent:d]]; NSError *e = nil;
          if ([fm fileExistsAtPath:u.path] && ![u setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:&e]) fprintf(stderr, "boot: %s could not be excluded from backup: %s\n", d.UTF8String, e.localizedDescription.UTF8String);
      }
-@@ -174,7 +175,16 @@ static int boot_env(void) {
+@@ -134,6 +150,13 @@ static int boot_env(void) {
+             if (!getenv(k.UTF8String)) { setenv(k.UTF8String, v.UTF8String, 0); [from_file addObject:k]; fprintf(stderr, "boot: env %s=%s (%s)\n", k.UTF8String, v.UTF8String, ef.lastPathComponent.UTF8String); }
+         }
+     }
++    fprintf(stderr, "boot: bounded flicker diagnostics available=%d profile=%s\n",
++            DM_FLICKER_DIAGNOSTICS, getenv("DM_FLICKER_PROFILE") ?: "absent");
++    if (dm_flicker_diagnostics_boot(stderr) < 0) {
++        snprintf(g_boot_message, sizeof g_boot_message,
++                 "The flicker diagnostic profile is invalid or conflicts with another diagnostic. Remove DM_FLICKER_PROFILE from env.txt and reopen the app. See log.txt.");
++        return 0;
++    }
+     setenv("DM_ENV_FILE_KEYS", [from_file componentsJoinedByString:@" "].UTF8String, 1);   // the launcher keeps what an env file set (LauncherSettings.swift)
+     setenv("DM_ENV_LAUNCH_KEYS", [from_launch componentsJoinedByString:@" "].UTF8String, 1);   // and what the launch environment set (docs/frontends.md, Saved choices)
+     // Native Odyssey output is limited to the exact 2732x2048 M2 iPad panel
+@@ -146,7 +169,7 @@ static int boot_env(void) {
+       fprintf(stderr, "boot: Odyssey native panel %s (native bounds %.0fx%.0f)\n",
+               supported ? "supported" : "unsupported", native.width, native.height); }
+     front_hud_env();   // before the early loading below can make a device
+-    // Game language (nn::oe::GetDesiredLanguage, hle_oe.c): the one the IPA was packed with (the NSP script's LANGUAGE / --language → DMLanguage in Info.plist), unless an env file sets DM_LANG
++    // Game language (nn::oe::GetDesiredLanguage, hle_oe.c): the one the IPA was packed with (the NSP script's LANGUAGE / --language â†’ DMLanguage in Info.plist), unless an env file sets DM_LANG
+     // (or the launcher, which replaces this default before the game starts)
+     NSString *lang = [NSBundle.mainBundle objectForInfoDictionaryKey:@"DMLanguage"];
+     if (!getenv("DM_LANG") && [lang isKindOfClass:NSString.class] && lang.length) setenv("DM_LANG", lang.UTF8String, 0);
+@@ -174,7 +197,21 @@ static int boot_env(void) {
      NSString *odysseyDisplay = [dm stringByAppendingPathComponent:@"odyssey-display"];
      setenv("DM_ODYSSEY_DISPLAY_ROOT", odysseyDisplay.fileSystemRepresentation, 1);
      setenv("DM_NVN_SHMAP", [dm stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);
 -    setenv("DM_MSL_DIR", [res stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 0);
 +    NSString *shaderReason = nil;
-+    NSString *shaderRoot = dm_ios_shader_root(res, doc, &shaderReason);
++    double packStart = NSProcessInfo.processInfo.systemUptime;
++    NSString *selected = nil, *precompiled = nil;
++    NSString *shaderRoot = dm_ios_shader_root_checked(res, doc, &shaderReason, &selected, &precompiled);
++    g_selected_shader_directory = selected; g_precompiled_shader_directory = precompiled;
++    fprintf(stderr, "boot timing: shader_pack_validation_ms=%.3f precompiled=%d\n",
++            (NSProcessInfo.processInfo.systemUptime - packStart) * 1000, precompiled != nil);
 +    if (!shaderRoot) {
 +        snprintf(g_boot_message, sizeof g_boot_message, "%s", shaderReason.UTF8String);
 +        fprintf(stderr, "[RED] boot: %s\n", g_boot_message);
@@ -1202,6 +1615,30 @@ index 5a76083..81c8ec6 100644
      setenv("DM_FONT_DIR", [dm stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
      NSString *aoc = [res stringByAppendingPathComponent:@"aoc"];   // add-on content: build_ipa.sh puts the RomFS extracted from the player's DLC NSPs at <App>/aoc/<index>/
      if ([fm fileExistsAtPath:aoc]) setenv("DM_AOC_DIR", aoc.fileSystemRepresentation, 0);
+@@ -189,6 +226,7 @@ static int boot_env(void) {
+       for (int k = 0; k < nm && g_argc < 16; k++) { g_argv[g_argc++] = strdup(mods[k]); fprintf(stderr, "boot: module '%s' (from the Guest library)\n", mods[k]); } }
+ #endif
+     dm_host_preload_start(g_argc, g_argv);   // Module tables / relocation / takeover run early in the background, in parallel with UIKit startup (and the launcher: the settings it sets are read when the game starts)
++    dm_ios_boot_stage("environment-ready-preload-dispatched");
+     return 1;
+ }
+ static int g_boot_ok;
+@@ -196,6 +234,7 @@ static int g_boot_ok;
+ static void *boot_thread(void *p) {
+     (void)p;
+     static char alt[65536]; stack_t ss = {.ss_sp = alt, .ss_size = sizeof alt}; sigaltstack(&ss, 0);   // crash printing must work on the host thread too
++    dm_ios_boot_stage("host-main-enter");
+     int rc = dm_main(g_argc, g_argv);
+     fprintf(stderr, "boot: dm_main returned %d\n", rc);
+     return NULL;
+@@ -206,6 +245,7 @@ static void boot_start(void) {
+ }
+ void front_ios_boot(void) {   // Called by front_ios.m once the window and Metal view exist
+     static int once; if (once++ || !g_boot_ok) return;
++    dm_ios_boot_stage("play");
+     void front_ios_audio_session(void); front_ios_audio_session();   // set a short I/O buffer before the game opens audio output (front_ios.m)
+ #ifdef DM_SHELL
+     // Shaders can be in the package as source when the computer that packed it had no Apple shader compiler: compile them all once
 diff --git a/dm/ios/tools/ios_metal.py b/dm/ios/tools/ios_metal.py
 index f270b18..3071fad 100644
 --- a/dm/ios/tools/ios_metal.py
@@ -1568,18 +2005,19 @@ index 0000000..8512506
 +if __name__ == '__main__':
 +    unittest.main()
 diff --git a/docs/agents/symptoms.md b/docs/agents/symptoms.md
-index b643b5f..d2ca6c1 100644
+index b643b5f..b6eb281 100644
 --- a/docs/agents/symptoms.md
 +++ b/docs/agents/symptoms.md
-@@ -11,6 +11,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+@@ -11,6 +11,8 @@ One line per symptom in the [subsystem references](../reference/): what you see
  - reducing the iPhone transfer to one image still creates thousands of resource files on the Mac, and build scanners require the expanded folder. → [Building creates a full RomFS tree before packing its image](../reference/packing.md#building-creates-a-full-romfs-tree-before-packing-its-image)
  - the NSP script stops at the shader split of a registered profile with `[RED] 13744 file(s) could not be read, their shaders are left out (first: AI/FileEntry/FileEntry.Product.100.byml.zs: CalledProcessError: Command ['zstd', '-d', '-c', '-q', '…/extract/v0/RomFS.img/AI/…'] returned non-zero exit status 1.)`. → [The zstd command given a path inside the image](../reference/packing.md#the-zstd-command-given-a-path-inside-the-image)
  - starting a Mac app through a front end with unchanged settings enables the encode thread, and can disable Metal 4 pipelines and the pipeline archive; starting the same app from Finder keeps the host's defaults. → [A Mac front end's default settings change Metal execution paths](../reference/packing.md#a-mac-front-ends-default-settings-change-metal-execution-paths)
 +- a shader-heavy IPA is too large or contains too many resources for a player's sideload workflow. → [Separate iOS shader delivery](../reference/packing.md#separate-ios-shader-delivery)
++- Play waits again on every launch even though the selected pack contains compiled Metal libraries. → [Precompiled shader preparation inventory](../reference/packing.md#precompiled-shader-preparation-inventory)
  - `decompress NSZ` stops immediately with `nsz: error: unrecognized arguments: --keys …`. → [NSZ decompression rejects `--keys`](../reference/packing.md#nsz-decompression-rejects---keys)
  - the extraction of a game whose base is an XCI that also carries its update (a "1G+1U" dump) stops with `[RED] nx_extract exit code -6`. `extract_v<version>.log` lists the update's build IDs even for the base game alone, then ends in an unhandled exception from the RomFS (`ResultFsNonRealDataVerificationFailed (2002-4604): Hash error!` from `RomFsFileSystem..ctor`, or `ArgumentException` / `InvalidOperationException` from the patch layers). → [A cartridge dump with its update on it extracts the update as the base game](../reference/packing.md#a-cartridge-dump-with-its-update-on-it-extracts-the-update-as-the-base-game)
  - a build on exFAT or FAT finishes its Metal libraries, then `c1_guard.py` stops with a UTF-8 decoding error; Metal cache prefill may reject an otherwise valid folder. → [AppleDouble files are not shader build outputs](../reference/packing.md#appledouble-files-are-not-shader-build-outputs)
-@@ -182,6 +183,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+@@ -182,6 +184,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
  - the boot sits at a black loading screen for good, CPU nearly idle, every thread waiting, about 1 boot in 6 (3 in 4 with four Mac hosts at once); the title movie is never opened, and the save files are never probed. → [Network requests stay on hold before they settle](../reference/services.md#network-requests-stay-on-hold-before-they-settle)
  - one thread at 100% CPU from boot, with one SVC in 99 s (`NexusRevolution Socket`, `main+0x92c7c4`, the game's network thread). → [Socket `Poll` and `Select` with nothing to wait on](../reference/services.md#socket-poll-and-select-with-nothing-to-wait-on)
  - the first comparison in `nnMain` aborted in `sm`. → [Language codes](../reference/services.md#language-codes)
@@ -1587,7 +2025,7 @@ index b643b5f..d2ca6c1 100644
  - abort in `sm::Initialize` under `nn::settings::GetAvailableLanguageCodes` (early in `nnMain`, `main+0x327888`); abort in `sm::Initialize` under `nn::settings::GetAvailableLanguageCodeCount()` (`main+0x117590`). → [Available language codes and their count](../reference/services.md#available-language-codes-and-their-count)
  - the font engine runs on garbage; crash after the shared fonts load, looking up the "?" glyph (`main+0x6c73c0`, a font cache lookup returning null), with SDK 10's `ScalableFontEngine::LoadFont` failing with error 403 and `SetFont` with 301 on both stand-in fonts; or Japanese, Korean or Chinese text draws nothing in a Unity game while Latin text is fine (Patrick's Parabox's language menu showed three blank lines). → [Shared font address: BFTTF header or bare TTF](../reference/services.md#shared-font-address-bfttf-header-or-bare-ttf)
  - abort in `nn::sm::Initialize` under `nn::pl::sharedresource::GetPlatformSharedResourceManager` (first thing in `nnMain`). → [Shared fonts requested all at once](../reference/services.md#shared-fonts-requested-all-at-once)
-@@ -408,6 +410,8 @@ One line per symptom in the [subsystem references](../reference/): what you see
+@@ -408,6 +411,8 @@ One line per symptom in the [subsystem references](../reference/): what you see
  - `vertex attribute format … not mapped` (printed once). → [Vertex formats Metal lacks](../reference/rendering.md#vertex-formats-metal-lacks)
  - the assertion `buffer index (31) must be < 31`. → [Vertex streams 14 and 15 at Metal slots 14 and 15](../reference/rendering.md#vertex-streams-14-and-15-at-metal-slots-14-and-15)
  - Scaleform fills come out as solid white or light grey sheets over the whole screen, hard-edged triangles and bands, and the menu text is missing (a language list or a title screen that is all white behind its button prompt). → [Vertex streams at addresses that are not 4-byte aligned](../reference/rendering.md#vertex-streams-at-addresses-that-are-not-4-byte-aligned)
@@ -1597,10 +2035,10 @@ index b643b5f..d2ca6c1 100644
  - `[RED] failed to create render pipeline (vertex 790573a52b9c5053_b fragment f39fb42850f50ecd_b): Fragment input(s) user(locn0),user(locn1) … not written by vertex shader`, once on entering the first investigation; `texture type mismatch: shader declares a cube, texture is 2D` (a pixel shader run with another pair's bindings). → [Composite program taken again after a replay state restore](../reference/rendering.md#composite-program-taken-again-after-a-replay-state-restore)
  - `no program bound before the draw`, `program has no vertex shader` (a draw after a dispatch is dropped); `the dispatched program has no compute shader` (a dispatch after a graphics bind). → [Compute programs bound apart from graphics programs](../reference/rendering.md#compute-programs-bound-apart-from-graphics-programs)
 diff --git a/docs/reference/packing.md b/docs/reference/packing.md
-index 03669d3..ae2ac83 100644
+index 03669d3..c726be0 100644
 --- a/docs/reference/packing.md
 +++ b/docs/reference/packing.md
-@@ -57,6 +57,13 @@
+@@ -57,6 +57,20 @@
  - **Fix:** a setting's default may be `<ios>|<mac>`, selected before resolving a profile macro or build variable. Metal 4 uses `DM_GAME_PSO_MTL4|1`, the encode thread `1|0`. The generator validates the platform and the pair. Tests cover a profile with Metal 4 on and one with it off, and both platforms; the host and shader chain are unchanged.
  - **Found on:** synthetic metadata generation for [Super Mario Bros. Wonder](../../dm/games/010015100B514000/README.md) while reviewing [PR #352](https://github.com/seedds/nxnative/pull/352); checked against the native defaults, without a gameplay run.
  
@@ -1610,6 +2048,13 @@ index 03669d3..ae2ac83 100644
 +- **Cause:** both compiled Metal libraries and matching fragment learning sources are inside the signed app bundle. Removing them alone leaves the loader looking in the bundle.
 +- **Fix:** an opt-in bundle manifest, `dm/external-shaders.json`, selects `Documents/msl`. The separate ZIP contains `msl/pack.json` with identical manifest bytes and `msl/b-<chain>/` with the original resources. The bundle retains only that chain's small `inputs.tsv`. Before host preload, the shell checks manifest identity, input stamp and directory-entry count; a missing, wrong or incomplete pack shows a Files installation hint and does not start the game. Preparation and runtime loading use the same selected root. These are identity/completeness checks, not a per-member cryptographic integrity scan. Existing bundled builds keep their original path, and saves, RomFS and shader caches are preserved. Native Foundation fixtures exercise the production locator; physical-device installation remains untested.
 +- **Found on:** [Super Mario Odyssey](../../dm/games/0100000000010000/README.md), splitting the F5 package after a user-reported sideload failure.
++
++### Precompiled shader preparation inventory
++
++- **Symptom:** Play waits again on every launch even though the selected pack contains compiled Metal libraries.
++- **Cause:** source discovery sorted the NVN directory and opened every `.metallib` header before deciding there were no source-form libraries. Preparation also selected the first external `b-` directory independently of the pack locator.
++- **Fix:** after matching the app-owned schema-1 manifest bytes, bundled input stamp, resource count and declared binary/fragment filename counts, retain the selected directory in process memory. Preparation uses that exact directory and skips NVN listing/header probes only for this compiled-pack contract. Legacy manifests retain content-based discovery. GL/Vulkan preparation and on-demand fragment learning sidecars stay independent. This is an installation identity/inventory contract, not a guarantee against same-count content corruption; Metal validates libraries on actual load. No user environment boolean enables the fast path. Monotonic logs separate pack validation, preparation listing/probes, preload/join and first present submission (which does not classify image content).
++- **Found on:** [Super Mario Odyssey](../../dm/games/0100000000010000/README.md), F6 continuation after the user reported repeatable waits after Play. Device timings and acceptance remain open; the shader chain and external ZIP are unchanged.
 +
  ## Compressed inputs
  
@@ -1670,16 +2115,171 @@ index d5a49be..bf968bd 100644
  - **Found on:** listed among the mechanisms first met in [Super Mario Bros. Wonder](../../dm/games/010015100B514000/README.md); the source gives the 8,337 of 12,809 count without naming the game.
  
  ### Front end at -O1: Apple's control-flow lowering
+diff --git a/dm/host/dm_overlay_assets.h b/dm/host/dm_overlay_assets.h
+new file mode 100644
+--- /dev/null
++++ b/dm/host/dm_overlay_assets.h
+@@ -0,0 +1,143 @@
++#ifndef DM_OVERLAY_ASSETS_H
++#define DM_OVERLAY_ASSETS_H
++
++// Optional, all-or-nothing asset sets. Records are trusted caller data, never
++// paths or hashes read from an untrusted overlay's own manifest.
++#include <CommonCrypto/CommonDigest.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <limits.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/stat.h>
++#include <unistd.h>
++
++typedef struct {
++    const char *path;
++    uint32_t bytes;
++    const char *sha256;
++} dm_overlay_asset_record;
++
++static inline int dm_overlay_asset_fail(char *error, size_t size, const char *message) {
++    if (error && size) snprintf(error, size, "%s", message);
++    return 0;
++}
++
++static inline int dm_overlay_asset_path_ok(const char *path) {
++    if (!path || !*path || *path == '/' || strchr(path, '\\') || strchr(path, ':')) return 0;
++    const char *part = path;
++    for (const char *p = path;; p++) {
++        if (*p && *p != '/') continue;
++        size_t n = (size_t)(p - part);
++        if (!n || (n == 1 && part[0] == '.') || (n == 2 && part[0] == '.' && part[1] == '.')) return 0;
++        if (!*p) return 1;
++        part = p + 1;
++    }
++}
++
++static inline int dm_overlay_asset_hash_ok(const char *hash) {
++    if (!hash || strlen(hash) != 64) return 0;
++    for (const char *p = hash; *p; p++)
++        if (!((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f'))) return 0;
++    return 1;
++}
++
++static inline int dm_overlay_asset_join(char *out, size_t size, const char *root, const char *relative) {
++    int n = snprintf(out, size, "%s/%s", root, relative);
++    return n >= 0 && (size_t)n < size;
++}
++
++static inline int dm_overlay_asset_hash_file(const char *path,
++        const dm_overlay_asset_record *record, uint32_t max_bytes, char *error, size_t error_size) {
++    int flags = O_RDONLY | O_NONBLOCK;
++#ifdef O_CLOEXEC
++    flags |= O_CLOEXEC;
++#endif
++#ifdef O_NOFOLLOW
++    flags |= O_NOFOLLOW;
++#endif
++    int fd = open(path, flags);
++    if (fd < 0) return dm_overlay_asset_fail(error, error_size, "cannot open optional overlay asset");
++    struct stat st;
++    if (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size < 0 ||
++        (uint64_t)st.st_size > max_bytes || (uint64_t)st.st_size != record->bytes) {
++        close(fd);
++        return dm_overlay_asset_fail(error, error_size, "optional overlay asset is not an exact bounded regular file");
++    }
++    // Heap allocation keeps the larger asset bound off the guest's small stack.
++    uint8_t *bytes = malloc(record->bytes);
++    if (!bytes) {
++        close(fd);
++        return dm_overlay_asset_fail(error, error_size, "cannot allocate optional overlay asset buffer");
++    }
++    size_t used = 0;
++    while (used < record->bytes) {
++        ssize_t n = read(fd, bytes + used, record->bytes - used);
++        if (n < 0 && errno == EINTR) continue;
++        if (n <= 0) break;
++        used += (size_t)n;
++    }
++    uint8_t extra;
++    ssize_t tail;
++    do { tail = read(fd, &extra, 1); } while (tail < 0 && errno == EINTR);
++    close(fd);
++    if (used != record->bytes || tail != 0) {
++        free(bytes);
++        return dm_overlay_asset_fail(error, error_size, "cannot read exact optional overlay asset length");
++    }
++    uint8_t digest[CC_SHA256_DIGEST_LENGTH];
++    int hashed = CC_SHA256(bytes, (CC_LONG)record->bytes, digest) != NULL;
++    free(bytes);
++    if (!hashed) return dm_overlay_asset_fail(error, error_size, "cannot hash optional overlay asset");
++    char actual[65];
++    static const char hex[] = "0123456789abcdef";
++    for (size_t i = 0; i < sizeof digest; i++) {
++        actual[2 * i] = hex[digest[i] >> 4];
++        actual[2 * i + 1] = hex[digest[i] & 15];
++    }
++    actual[64] = 0;
++    if (strcmp(actual, record->sha256))
++        return dm_overlay_asset_fail(error, error_size, "optional overlay asset SHA-256 mismatch");
++    return 1;
++}
++
++static inline int dm_overlay_validate_optional_set(const char *root,
++        const dm_overlay_asset_record *records, size_t count, uint32_t max_bytes,
++        char *error, size_t error_size) {
++    if (error && error_size) error[0] = 0;
++    if (!root || !*root || !records || !count || count > 64 || !max_bytes || max_bytes > 16u * 1024u * 1024u)
++        return dm_overlay_asset_fail(error, error_size, "invalid optional overlay set request");
++    char path[PATH_MAX];
++    size_t present = 0;
++    for (size_t i = 0; i < count; i++) {
++        const dm_overlay_asset_record *r = &records[i];
++        if (!dm_overlay_asset_path_ok(r->path) || !r->bytes || r->bytes > max_bytes || !dm_overlay_asset_hash_ok(r->sha256))
++            return dm_overlay_asset_fail(error, error_size, "invalid trusted optional overlay record");
++        for (size_t j = 0; j < i; j++)
++            if (!strcmp(r->path, records[j].path))
++                return dm_overlay_asset_fail(error, error_size, "duplicate optional overlay record");
++        if (!dm_overlay_asset_join(path, sizeof path, root, r->path))
++            return dm_overlay_asset_fail(error, error_size, "optional overlay asset path is too long");
++        struct stat st;
++        if (!lstat(path, &st)) {
++            // lstat counts a dangling link as present, then rejects it. Neither
++            // FIFO/device opens nor symlink targets are read in this pass.
++            if (!S_ISREG(st.st_mode))
++                return dm_overlay_asset_fail(error, error_size, "optional overlay asset is not a regular file");
++            present++;
++        } else if (errno != ENOENT) {
++            return dm_overlay_asset_fail(error, error_size, "cannot inspect optional overlay asset");
++        }
++    }
++    if (!present) return 1; // Old bundles intentionally have none of the set.
++    if (present != count) return dm_overlay_asset_fail(error, error_size, "optional overlay asset set is incomplete");
++    for (size_t i = 0; i < count; i++) {
++        if (!dm_overlay_asset_join(path, sizeof path, root, records[i].path) ||
++            !dm_overlay_asset_hash_file(path, &records[i], max_bytes, error, error_size)) return 0;
++    }
++    return 1;
++}
++
++#endif
 diff --git a/dm/ios/Sources/dm_external_shaders.h b/dm/ios/Sources/dm_external_shaders.h
 new file mode 100644
 --- /dev/null
 +++ b/dm/ios/Sources/dm_external_shaders.h
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,85 @@
 +// Separate shader delivery: opt in with a bundled manifest, keep saves and old packs intact.
 +#pragma once
 +#import <Foundation/Foundation.h>
++#include <stdio.h>
 +
-+static inline NSString *dm_ios_shader_root(NSString *bundle, NSString *documents, NSString **reason) {
++// Outputs are process-owned evidence, never an environment-file opt-in. Schema 1's
++// bundled metallibs/fragment_sources counts describe binaries plus learning
++// sidecars. Older manifests without these fields retain header probing.
++static inline NSString *dm_ios_shader_root_checked(NSString *bundle, NSString *documents, NSString **reason,
++                                                  NSString **selected, NSString **precompiled) {
++    if (selected) *selected = nil;
++    if (precompiled) *precompiled = nil;
 +    if (reason) *reason = nil;
 +    NSFileManager *fm = NSFileManager.defaultManager;
 +    NSString *bundled = [bundle stringByAppendingPathComponent:@"msl"];
@@ -1709,19 +2309,248 @@ new file mode 100644
 +        return nil;
 +    }
 +    // One directory listing, no per-file hash/CRC scan. This catches an interrupted copy.
++    double listingStart = NSProcessInfo.processInfo.systemUptime;
 +    NSArray<NSString *> *names = [fm contentsOfDirectoryAtPath:directory error:nil];
 +    if (names.count != [count unsignedIntegerValue]) {
 +        if (reason) *reason = @"The shader folder is incomplete. Finish copying the matching msl folder in Files, then fully close and reopen the app.";
 +        return nil;
 +    }
++    double inventoryStart = NSProcessInfo.processInfo.systemUptime;
++    id libraries = meta[@"metallibs"], fragments = meta[@"fragment_sources"];
++    BOOL declaredCompiled = libraries != nil || fragments != nil;
++    BOOL compiled = [libraries isKindOfClass:NSNumber.class] &&
++        [fragments isKindOfClass:NSNumber.class] && [libraries doubleValue] > 0 && [libraries doubleValue] <= names.count &&
++        [fragments doubleValue] >= 0 && [fragments doubleValue] <= names.count &&
++        [libraries doubleValue] == [libraries unsignedIntegerValue] &&
++        [fragments doubleValue] == [fragments unsignedIntegerValue];
++    if (declaredCompiled && !compiled) {
++        if (reason) *reason = @"The app's compiled shader inventory is invalid. Install the matching IPA again.";
++        return nil;
++    }
++    NSUInteger libraryCount = 0, fragmentCount = 0;
++    if (compiled) {
++        for (NSString *name in names) {
++            if ([name hasSuffix:@".metallib"]) libraryCount++;
++            if ([name hasSuffix:@".metal"]) fragmentCount++;
++        }
++        if (libraryCount != [libraries unsignedIntegerValue] || fragmentCount != [fragments unsignedIntegerValue]) {
++            if (reason) *reason = @"The shader folder inventory does not match this app. Finish copying the matching msl folder.";
++            return nil;
++        }
++    }
++    // Identity/listing detect wrong or unfinished installs, not same-count content
++    // corruption. Metal still validates each binary when it is actually loaded.
++    fprintf(stderr, "boot timing: shader_pack_listing_ms=%.3f inventory_ms=%.3f resources=%lu\n",
++            (inventoryStart - listingStart) * 1000,
++            (NSProcessInfo.processInfo.systemUptime - inventoryStart) * 1000,
++            (unsigned long)names.count);
++    if (selected) *selected = directory;
++    if (compiled && precompiled) *precompiled = directory;
 +    [[NSURL fileURLWithPath:root] setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
 +    return root;
++}
++
++static inline NSString *dm_ios_shader_root(NSString *bundle, NSString *documents, NSString **reason) {
++    return dm_ios_shader_root_checked(bundle, documents, reason, NULL, NULL);
++}
+diff --git a/dm/ios/Sources/dm_flicker_diagnostics.h b/dm/ios/Sources/dm_flicker_diagnostics.h
+new file mode 100644
+--- /dev/null
++++ b/dm/ios/Sources/dm_flicker_diagnostics.h
+@@ -0,0 +1,137 @@
++// Optional, bounded renderer diagnostics. No shader or rendering fix is implied.
++// Include/call from boot_env AFTER env-file filtering, BEFORE any renderer use.
++// F6 may enable this capability in its one host; no profile means no changes.
++// Other hosts default to compiled out; a build override of 0 remains supported.
++#ifndef DM_FLICKER_DIAGNOSTICS_H
++#define DM_FLICKER_DIAGNOSTICS_H
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#ifndef DM_FLICKER_DIAGNOSTICS
++#define DM_FLICKER_DIAGNOSTICS 0
++#endif
++#ifndef DM_FLICKER_GETENV
++#define DM_FLICKER_GETENV getenv
++#define DM_FLICKER_SETENV setenv
++#define DM_FLICKER_UNSETENV unsetenv
++#endif
++
++typedef struct {
++    const char *name;
++    unsigned long first, last;
++    int unwritten, predict;
++} dm_flicker_profile;
++
++static inline int dm_flicker_number(const char **cursor, unsigned long *value) {
++    const char *p = *cursor;
++    unsigned long n = 0;
++    if (*p < '0' || *p > '9') return 0;
++    do {
++        unsigned long digit = (unsigned long)(*p++ - '0');
++        if (n > (1000000000UL - digit) / 10) return 0;
++        n = n * 10 + digit;
++    } while (*p >= '0' && *p <= '9');
++    *cursor = p; *value = n; return 1;
++}
++
++// Exact grammar: trace|unwritten-off|predict-off : first-renderer-frame : count.
++// Decimal numbers only, count 1..3, last <= 1e9. No arbitrary env assignments.
++// Parse failure leaves the caller's profile unchanged.
++static inline int dm_flicker_profile_parse(const char *spec, dm_flicker_profile *out) {
++    dm_flicker_profile p = {0};
++    const char *colon, *q;
++    unsigned long count;
++    size_t length = 0;
++    if (!spec || !out) return 0;
++    while (length <= 80 && spec[length]) length++;
++    if (length > 80 || !(colon = strchr(spec, ':'))) return 0;
++    p.unwritten = p.predict = 1;
++    if (colon - spec == 5 && !memcmp(spec, "trace", 5)) p.name = "trace";
++    else if (colon - spec == 13 && !memcmp(spec, "unwritten-off", 13)) { p.name = "unwritten-off"; p.unwritten = 0; }
++    else if (colon - spec == 11 && !memcmp(spec, "predict-off", 11)) { p.name = "predict-off"; p.predict = 0; }
++    else return 0;
++    q = colon + 1;
++    if (!dm_flicker_number(&q, &p.first) || *q++ != ':' ||
++        !dm_flicker_number(&q, &count) || *q || count < 1 || count > 3 ||
++        p.first > 1000000000UL - (count - 1)) return 0;
++    p.last = p.first + count - 1; *out = p; return 1;
++}
++
++// Returns 1 applied, 0 absent/compiled out, -1 invalid/conflicting/failed.
++// On -1 the caller must stop boot; never proceed with a partially applied plan.
++// The DM_NVN_* settings are intentionally applied directly after the player
++// filter, which still rejects arbitrary saved diagnostics. No launcher key,
++// profile path, cache identity or asset is changed here.
++static inline int dm_flicker_diagnostics_boot(FILE *log) {
++#if DM_FLICKER_DIAGNOSTICS
++    const char *spec = DM_FLICKER_GETENV("DM_FLICKER_PROFILE");
++    dm_flicker_profile p;
++    static const char *const conflicts[] = {
++        "DM_AB", "DM_NVN_UDC_AB", "DM_NVN_DEFER_AB", "DM_NVN_FB_SNAP",
++        "DM_NVN_HILITE", "DM_NVN_DEPTHOVR", "DM_NVN_SKIP_FS", "DM_NVN_SKIP_SMALL",
++        "DM_NVN_KEYDUMP", "DM_NVN_MAGSCAN", "DM_NVN_SHOT", "DM_NVN_SHOT_UI",
++        "DM_NVN_TEXDUMP", "DM_NVN_TEXSNAP", "DM_NVN_SNAPRAW", "DM_NVN_TEXRAW",
++        "DM_NVN_CBDUMP", "DM_NVN_VSDUMP", "DM_NVN_GPUPROF", "DM_NVN_RT_SURVEY",
++        "DM_NVN_REGLUM", "DM_NVN_T2T_TRACE", "DM_NVN_TSV", "DM_GPU_CAPTURE",
++        "MTL_CAPTURE_ENABLED", "MTL_DEBUG_LAYER", "MTL_SHADER_VALIDATION"
++    };
++    static const char *const keys[] = {
++        "DM_NVN_TBDR", "DM_NVN_UNWRITTEN_DC", "DM_NVN_PREDICT",
++        "DM_NVN_PASSDUMP", "DM_NVN_PASSDUMP_ALL"
++    };
++    const char *values[5]; char range[48]; char *old[5] = {0};
++    unsigned i;
++    if (!spec || !*spec) return 0;
++    if (!log) log = stderr;
++    if (!dm_flicker_profile_parse(spec, &p)) {
++        fprintf(log, "[RED] boot: flicker diagnostic rejected: expected profile:first:count (count 1..3, last <= 1000000000)\n");
++        return -1;
++    }
++    // These switches can create unbounded logging/readback or contaminate A/B.
++    // Presence matters: several existing diagnostics treat even '=0' as on.
++    for (i = 0; i < sizeof conflicts / sizeof *conflicts; i++) {
++        if (DM_FLICKER_GETENV(conflicts[i])) {
++            fprintf(log, "[RED] boot: flicker diagnostic rejected: conflicting %s\n", conflicts[i]);
++            return -1;
++        }
++    }
++    snprintf(range, sizeof range, "%lu-%lu", p.first, p.last);
++    values[0] = "0"; values[1] = p.unwritten ? "1" : "0";
++    values[2] = p.predict ? "1" : "0"; values[3] = range; values[4] = "1";
++    for (i = 0; i < 5; i++) {
++        const char *v = DM_FLICKER_GETENV(keys[i]);
++        if (v) {
++            old[i] = (char *)malloc(strlen(v) + 1);
++            if (!old[i]) {
++                while (i) free(old[--i]);
++                fprintf(log, "[RED] boot: flicker diagnostic rejected: snapshot allocation failed\n");
++                return -1;
++            }
++            strcpy(old[i], v);
++        }
++    }
++    for (i = 0; i < 5; i++) {
++        if (DM_FLICKER_SETENV(keys[i], values[i], 1)) {
++            unsigned j;
++            int rollback_failed = 0;
++            for (j = 0; j < i; j++) {
++                int rc = old[j] ? DM_FLICKER_SETENV(keys[j], old[j], 1) : DM_FLICKER_UNSETENV(keys[j]);
++                if (rc) rollback_failed = 1;
++            }
++            for (j = 0; j < 5; j++) free(old[j]);
++            fprintf(log, "[RED] boot: flicker diagnostic failed setting %s; rollback=%s; stop boot\n", keys[i], rollback_failed ? "failed" : "ok");
++            return -1;
++        }
++    }
++    for (i = 0; i < 5; i++) free(old[i]);
++    fprintf(log, "boot: flicker diagnostic v1 applied profile=%s renderer_frames=%lu-%lu max_frames=3 readbacks=0 intervention_scope=process\n", p.name, p.first, p.last);
++    for (i = 0; i < 5; i++)
++        fprintf(log, "boot: flicker effective %s=%s\n", keys[i], DM_FLICKER_GETENV(keys[i]));
++    return 1;
++#else
++    (void)log;
++    return 0;
++#endif
++}
++#endif
+diff --git a/dm/ios/Sources/dm_shader_inventory.h b/dm/ios/Sources/dm_shader_inventory.h
+new file mode 100644
+--- /dev/null
++++ b/dm/ios/Sources/dm_shader_inventory.h
+@@ -0,0 +1,46 @@
++// Preparation inventory only. Runtime binary loading and learning sidecars are unchanged.
++#pragma once
++#import <Foundation/Foundation.h>
++#include <stdio.h>
++#include <string.h>
++
++typedef struct {
++    NSUInteger header_probes;
++    double listing_ms, probing_ms;
++    BOOL precompiled;
++} dm_shader_inventory_stats;
++
++static inline NSArray<NSString *> *dm_shader_inventory(NSString *root, NSString *directory,
++                                                       NSString *validatedBinaryDirectory,
++                                                       dm_shader_inventory_stats *stats) {
++    *stats = (dm_shader_inventory_stats){0};
++    NSMutableArray<NSString *> *sources = [NSMutableArray array];
++    stats->precompiled = directory && validatedBinaryDirectory &&
++                         [directory isEqualToString:validatedBinaryDirectory];
++    if (directory && !stats->precompiled) {
++        double start = NSProcessInfo.processInfo.systemUptime;
++        NSArray *names = [[NSFileManager.defaultManager contentsOfDirectoryAtPath:directory error:nil]
++                          sortedArrayUsingSelector:@selector(compare:)];
++        stats->listing_ms += (NSProcessInfo.processInfo.systemUptime - start) * 1000;
++        start = NSProcessInfo.processInfo.systemUptime;
++        for (NSString *name in names) if ([name hasSuffix:@".metallib"]) {
++            NSString *path = [directory stringByAppendingPathComponent:name];
++            stats->header_probes++;
++            FILE *file = fopen(path.fileSystemRepresentation, "rb");
++            if (!file) continue;
++            char header[4] = {0}; size_t size = fread(header, 1, sizeof header, file); fclose(file);
++            if (size == 4 && memcmp(header, "MTLB", 4)) [sources addObject:path];
++        }
++        stats->probing_ms = (NSProcessInfo.processInfo.systemUptime - start) * 1000;
++    }
++    // A binary NVN pack never bypasses independent GL/Vulkan source preparation.
++    double start = NSProcessInfo.processInfo.systemUptime;
++    for (NSString *api in @[@"gl/src", @"vk/src"]) {
++        NSString *path = [root stringByAppendingPathComponent:api];
++        for (NSString *name in [[NSFileManager.defaultManager contentsOfDirectoryAtPath:path error:nil]
++                                sortedArrayUsingSelector:@selector(compare:)])
++            if ([name hasSuffix:@".metal"]) [sources addObject:[path stringByAppendingPathComponent:name]];
++    }
++    stats->listing_ms += (NSProcessInfo.processInfo.systemUptime - start) * 1000;
++    return sources;
 +}
 diff --git a/dm/tools/tests/run_external_shaders_native.py b/dm/tools/tests/run_external_shaders_native.py
 new file mode 100644
 --- /dev/null
 +++ b/dm/tools/tests/run_external_shaders_native.py
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,110 @@
 +#!/usr/bin/env python3
 +"""Exercise the production external-shader locator with actual Foundation files."""
 +from pathlib import Path
@@ -1740,6 +2569,7 @@ new file mode 100644
 +#include <assert.h>
 +#include <stdio.h>
 +#include "dm_external_shaders.h"
++#include "dm_shader_inventory.h"
 +static void put(NSString *p, NSString *s) {
 +    [NSFileManager.defaultManager createDirectoryAtPath:p.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
 +    assert([s writeToFile:p atomically:YES encoding:NSUTF8StringEncoding error:nil]);
@@ -1771,11 +2601,53 @@ new file mode 100644
 +    put(lib,@"MTLB synthetic fixture");
 +    assert([dm_ios_shader_root(app,doc,&why) isEqual:external] && why == nil);
 +    assert([dm_ios_shader_root(app,doc,NULL) isEqual:external]);
++    // Compiled-only contract is app-owned and must also match the inventory.
++    NSString *selected = @"stale", *compiled = @"stale";
++    NSString *binaryMeta = @"{\"schema\":1,\"chain\":\"b-123456abcdef\",\"resources\":3,\"metallibs\":1,\"fragment_sources\":1}";
++    NSString *sidecar = [external stringByAppendingPathComponent:@"b-123456abcdef/key_b.metal"];
++    put(manifest,binaryMeta); put(pack,binaryMeta); put(sidecar,@"fragment learning source");
++    assert(dm_ios_shader_root_checked(app,doc,&why,&selected,&compiled) && [selected isEqual:compiled]);
++    dm_shader_inventory_stats stats;
++    assert(dm_shader_inventory(external,selected,compiled,&stats).count == 0 && stats.precompiled && stats.header_probes == 0);
++    // Learning sidecars remain readable; GL/VK still prepare independently.
++    assert([[NSString stringWithContentsOfFile:sidecar encoding:NSUTF8StringEncoding error:nil] hasPrefix:@"fragment"]);
++    put([external stringByAppendingPathComponent:@"gl/src/a.metal"],@"GL source");
++    put([external stringByAppendingPathComponent:@"vk/src/b.metal"],@"VK source");
++    assert(dm_shader_inventory(external,selected,compiled,&stats).count == 2 && stats.header_probes == 0);
++    // Legacy manifests have no binary proof; source-form .metallib stays selected.
++    put(manifest,@"{\"schema\":1,\"chain\":\"b-123456abcdef\",\"resources\":3}");
++    put(pack,[NSString stringWithContentsOfFile:manifest encoding:NSUTF8StringEncoding error:nil]);
++    assert(dm_ios_shader_root_checked(app,doc,&why,&selected,&compiled) && !compiled);
++    put(lib,@"#include <metal_stdlib>");
++    assert(dm_shader_inventory(external,selected,compiled,&stats).count == 3 && stats.header_probes == 1);
++    put(lib,@"MTLB synthetic fixture");
++    assert(dm_shader_inventory(external,selected,nil,&stats).count == 2 && stats.header_probes == 1);
++    assert(dm_shader_inventory(external,selected,[selected stringByAppendingString:@"-other"],&stats).count == 2 && !stats.precompiled && stats.header_probes == 1);
++    for (NSString *badMeta in @[
++        @"{\"schema\":1,\"chain\":\"b-123456abcdef\",\"resources\":3,\"metallibs\":1}",
++        @"{\"schema\":1,\"chain\":\"b-123456abcdef\",\"resources\":3,\"metallibs\":-1,\"fragment_sources\":1}",
++        @"{\"schema\":1,\"chain\":\"b-123456abcdef\",\"resources\":3,\"metallibs\":1.5,\"fragment_sources\":1}",
++        @"{\"schema\":1,\"chain\":\"b-123456abcdef\",\"resources\":3,\"metallibs\":1,\"fragment_sources\":\"1\"}"
++    ]) {
++        put(manifest,badMeta); put(pack,badMeta);
++        assert(!dm_ios_shader_root_checked(app,doc,&why,&selected,&compiled) && !selected && !compiled);
++    }
++    // Same-count wrong extension is rejected rather than selecting a fast path.
++    put(manifest,binaryMeta); put(pack,binaryMeta);
++    [NSFileManager.defaultManager moveItemAtPath:sidecar toPath:[sidecar stringByAppendingString:@".wrong"] error:nil];
++    assert(!dm_ios_shader_root_checked(app,doc,&why,&selected,&compiled) && !selected && !compiled);
++    [NSFileManager.defaultManager moveItemAtPath:[sidecar stringByAppendingString:@".wrong"] toPath:sidecar error:nil];
++    put(pack,@"{"); assert(!dm_ios_shader_root_checked(app,doc,&why,&selected,&compiled));
++    put(pack,binaryMeta); put(es,@"inputs"); assert(!dm_ios_shader_root_checked(app,doc,&why,&selected,&compiled));
++    put(es,@"inputs\tfixture\n");
++    // An unrelated old namespace never takes ownership of external preparation.
++    put([external stringByAppendingPathComponent:@"b-000000000000/old.metallib"],@"old source");
++    assert(dm_ios_shader_root_checked(app,doc,&why,&selected,&compiled) && [selected.lastPathComponent isEqual:@"b-123456abcdef"]);
 +    [NSFileManager.defaultManager removeItemAtPath:manifest error:nil];
 +    assert([dm_ios_shader_root(app,doc,&why) isEqual:bundled]);
 +    assert([NSFileManager.defaultManager fileExistsAtPath:lib]);
 +    [NSFileManager.defaultManager removeItemAtPath:root error:nil];
-+    puts("PASS: 13 external shader locator cases (bundled, malformed, wrong pack/stamp, incomplete, valid)");
++    puts("PASS: external locator plus production inventory (binary zero-probe, legacy, GL/VK, sidecar, malformed/truncated, extra namespace)");
 +} return 0; }
 +'''
 +    with tempfile.TemporaryDirectory(prefix='external-shaders-native-') as folder:
@@ -1789,3 +2661,210 @@ new file mode 100644
 +
 +if __name__ == '__main__':
 +    raise SystemExit(main())
+diff --git a/dm/tools/tests/run_flicker_diagnostics_native.py b/dm/tools/tests/run_flicker_diagnostics_native.py
+new file mode 100644
+--- /dev/null
++++ b/dm/tools/tests/run_flicker_diagnostics_native.py
+@@ -0,0 +1,202 @@
++"""Compile/run the real bounded profile header, including DM_PLAYER_BUILD=1.
++
++No Metal, game assets, network, or host edits. Supports cc/clang/gcc or zig cc.
++This verifies the boot adapter with a synthetic environment, not iOS rendering.
++"""
++from pathlib import Path
++import argparse
++import json
++import os
++import shlex
++import shutil
++import subprocess
++import tempfile
++
++ROOT = Path(__file__).resolve().parents[3]
++SOURCE = r'''
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++static unsigned checks;
++#define CHECK(x) do { checks++; if (!(x)) { fprintf(stderr, "line %d: %s\n", __LINE__, #x); exit(1); } } while (0)
++typedef struct { char key[64], value[512]; int used; } entry;
++static entry envs[64];
++static int writes, fail_at;
++static const char *get(const char *k) {
++    unsigned i; for (i=0; i<64; i++) if (envs[i].used && !strcmp(envs[i].key,k)) return envs[i].value;
++    return NULL;
++}
++static int put(const char *k, const char *v, int overwrite) {
++    unsigned i, slot=64;
++    if (++writes == fail_at) { fail_at=0; return -1; }
++    for (i=0; i<64; i++) {
++        if (!envs[i].used && slot==64) slot=i;
++        if (envs[i].used && !strcmp(envs[i].key,k)) { if (!overwrite) return 0; slot=i; break; }
++    }
++    CHECK(slot<64 && strlen(k)<64 && strlen(v)<512);
++    strcpy(envs[slot].key,k); strcpy(envs[slot].value,v); envs[slot].used=1; return 0;
++}
++static int drop(const char *k) {
++    unsigned i; for (i=0; i<64; i++) if (envs[i].used && !strcmp(envs[i].key,k)) memset(&envs[i],0,sizeof envs[i]);
++    return 0;
++}
++#define DM_FLICKER_GETENV get
++#define DM_FLICKER_SETENV put
++#define DM_FLICKER_UNSETENV drop
++#include "dm_flicker_diagnostics.h"
++#include "player_env.h"
++static FILE *logfile;
++static void log_contains(const char *needle) {
++    char text[32768]; size_t n;
++    CHECK(fflush(logfile)==0); CHECK(fseek(logfile,0,SEEK_SET)==0);
++    n=fread(text,1,sizeof text-1,logfile); text[n]=0;
++    CHECK(strstr(text,needle)!=NULL); CHECK(fseek(logfile,0,SEEK_END)==0);
++}
++static void reset(void) { memset(envs,0,sizeof envs); writes=fail_at=0; }
++static void file_line(const char *k,const char *v) {
++    if (!DM_PLAYER_BUILD || !dm_player_diagnostic_key(k)) CHECK(put(k,v,0)==0);
++}
++static void equal(const char *k,const char *v) { const char *actual=get(k); CHECK(actual && !strcmp(actual,v)); }
++static void common(void) {
++    equal("DM_NVN_TBDR","0"); equal("DM_NVN_PASSDUMP","4200-4202"); equal("DM_NVN_PASSDUMP_ALL","1");
++    equal("DM_NVN_SHMAP","bundle/shader_map.tsv"); equal("DM_MSL_DIR","Documents/msl");
++    equal("DM_NVN_ENC_THREAD","1"); equal("DM_SAVE","Documents/save");
++}
++static void required(void) {
++    CHECK(put("DM_NVN_SHMAP","bundle/shader_map.tsv",1)==0);
++    CHECK(put("DM_MSL_DIR","Documents/msl",1)==0);
++    CHECK(put("DM_NVN_ENC_THREAD","1",1)==0);
++    CHECK(put("DM_SAVE","Documents/save",1)==0);
++}
++int main(void) {
++    dm_flicker_profile p, before;
++    const char *bad[]={"", "trace", "trace:1", "trace:1:0", "trace:1:4", "trace:-1:3", "trace:+1:3",
++      "trace:1:-1", "trace:1:+1", "trace:1:1x", "trace:1:1\n", "trace:1:1:2", "trace:1:1 ",
++      "trace:1000000000:2", "trace:1000000001:1", "trace:999999999999999999999999:1",
++      "trace:1:999999999999999999999999", "trace:every:1", "trace:1:3;DM_NVN_FB_SNAP=all",
++      "unknown:1:3", " trace:1:3", "TRACE:1:3", "trace::3", "trace:1:",
++      "trace:000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000:1"};
++    unsigned i;
++    logfile=tmpfile(); CHECK(logfile!=NULL);
++    CHECK(!dm_flicker_profile_parse(NULL,&p)); CHECK(!dm_flicker_profile_parse("trace:1:3",NULL));
++    CHECK(dm_flicker_profile_parse("trace:0:3",&p) && p.first==0 && p.last==2);
++    CHECK(dm_flicker_profile_parse("trace:1000000000:1",&p) && p.last==1000000000UL);
++    CHECK(dm_flicker_profile_parse("trace:999999998:3",&p) && p.last==1000000000UL);
++    CHECK(dm_flicker_profile_parse("unwritten-off:12:1",&p) && !p.unwritten && p.predict && p.last==12);
++    CHECK(dm_flicker_profile_parse("predict-off:00012:2",&p) && p.unwritten && !p.predict && p.last==13);
++    before=p;
++    for (i=0;i<sizeof bad/sizeof *bad;i++) {
++        CHECK(!dm_flicker_profile_parse(bad[i],&p)); CHECK(!memcmp(&before,&p,sizeof p));
++    }
++    reset(); CHECK(dm_flicker_diagnostics_boot(logfile)==0 && writes==0);
++    file_line("DM_NVN_PASSDUMP","every:1");
++    CHECK((get("DM_NVN_PASSDUMP")==NULL)==(DM_PLAYER_BUILD!=0));
++    reset(); required(); file_line("DM_FLICKER_PROFILE","trace:4200:3");
++    equal("DM_FLICKER_PROFILE","trace:4200:3");
++#if DM_FLICKER_DIAGNOSTICS
++    CHECK(dm_flicker_diagnostics_boot(logfile)==1); common();
++    equal("DM_NVN_UNWRITTEN_DC","1"); equal("DM_NVN_PREDICT","1");
++    log_contains("applied profile=trace renderer_frames=4200-4202 max_frames=3 readbacks=0 intervention_scope=process");
++    log_contains("boot: flicker effective DM_NVN_TBDR=0\n");
++    log_contains("boot: flicker effective DM_NVN_UNWRITTEN_DC=1\n");
++    log_contains("boot: flicker effective DM_NVN_PREDICT=1\n");
++    log_contains("boot: flicker effective DM_NVN_PASSDUMP=4200-4202\n");
++    log_contains("boot: flicker effective DM_NVN_PASSDUMP_ALL=1\n");
++    CHECK(put("DM_FLICKER_PROFILE","unwritten-off:4200:3",1)==0);
++    CHECK(dm_flicker_diagnostics_boot(logfile)==1); common();
++    equal("DM_NVN_UNWRITTEN_DC","0"); equal("DM_NVN_PREDICT","1");
++    log_contains("boot: flicker effective DM_NVN_UNWRITTEN_DC=0\n");
++    CHECK(put("DM_FLICKER_PROFILE","predict-off:4200:3",1)==0);
++    CHECK(dm_flicker_diagnostics_boot(logfile)==1); common();
++    equal("DM_NVN_UNWRITTEN_DC","1"); equal("DM_NVN_PREDICT","0");
++    log_contains("boot: flicker effective DM_NVN_PREDICT=0\n");
++    for (i=0;i<sizeof bad/sizeof *bad;i++) {
++        reset(); required(); CHECK(put("DM_FLICKER_PROFILE",bad[i],1)==0); writes=0;
++        CHECK(dm_flicker_diagnostics_boot(logfile)==(*bad[i] ? -1 : 0)); CHECK(writes==0);
++    }
++    {
++        const char *conflicts[]={"DM_AB","DM_NVN_UDC_AB","DM_NVN_DEFER_AB","DM_NVN_FB_SNAP",
++          "DM_NVN_HILITE","DM_NVN_DEPTHOVR","DM_NVN_SKIP_FS","DM_NVN_SKIP_SMALL",
++          "DM_NVN_KEYDUMP","DM_NVN_MAGSCAN","DM_NVN_SHOT","DM_NVN_SHOT_UI","DM_NVN_TEXDUMP",
++          "DM_NVN_TEXSNAP","DM_NVN_SNAPRAW","DM_NVN_TEXRAW","DM_NVN_CBDUMP","DM_NVN_VSDUMP",
++          "DM_NVN_GPUPROF","DM_NVN_RT_SURVEY","DM_NVN_REGLUM","DM_NVN_T2T_TRACE","DM_NVN_TSV",
++          "DM_GPU_CAPTURE","MTL_CAPTURE_ENABLED","MTL_DEBUG_LAYER","MTL_SHADER_VALIDATION"};
++        for (i=0;i<sizeof conflicts/sizeof *conflicts;i++) {
++            reset(); CHECK(put("DM_FLICKER_PROFILE","trace:4200:3",1)==0);
++            CHECK(put(conflicts[i],"0",1)==0); writes=0;
++            CHECK(dm_flicker_diagnostics_boot(logfile)==-1 && writes==0);
++        }
++    }
++    // Exercise real adapter rollback at every mutation, with absent and existing values.
++    for (i=1;i<=5;i++) {
++        unsigned present;
++        for (present=0;present<2;present++) {
++            const char *keys[]={"DM_NVN_TBDR","DM_NVN_UNWRITTEN_DC","DM_NVN_PREDICT","DM_NVN_PASSDUMP","DM_NVN_PASSDUMP_ALL"};
++            unsigned j;
++            reset(); required(); CHECK(put("DM_FLICKER_PROFILE","trace:4200:3",1)==0);
++            if (present) for (j=0;j<5;j++) CHECK(put(keys[j],"original",1)==0);
++            writes=0; fail_at=(int)i;
++            CHECK(dm_flicker_diagnostics_boot(logfile)==-1);
++            for (j=0;j<5;j++) { if (present) equal(keys[j],"original"); else CHECK(!get(keys[j])); }
++            equal("DM_NVN_SHMAP","bundle/shader_map.tsv"); equal("DM_MSL_DIR","Documents/msl");
++        }
++    }
++#else
++    { int n=writes; CHECK(dm_flicker_diagnostics_boot(logfile)==0 && writes==n); }
++    CHECK(!get("DM_NVN_PASSDUMP"));
++    CHECK(put("DM_FLICKER_PROFILE","malformed",1)==0);
++    { int n=writes; CHECK(dm_flicker_diagnostics_boot(logfile)==0 && writes==n); }
++    // Keep helpers checked in every compilation, without enabling diagnostics.
++    CHECK(drop("DM_SAVE")==0); CHECK(!get("DM_SAVE"));
++    CHECK(ftell(logfile)==0); (void)common; (void)log_contains;
++#endif
++    fclose(logfile);
++    printf("PASS enabled=%d player=%d checks=%u\n",DM_FLICKER_DIAGNOSTICS,DM_PLAYER_BUILD,checks);
++    return 0;
++}
++'''
++
++
++def main():
++    ap = argparse.ArgumentParser(description=__doc__)
++    ap.add_argument("--cc", help="Compiler command, e.g. 'zig cc'")
++    ap.add_argument("--report", type=Path)
++    args = ap.parse_args()
++    command = args.cc or os.environ.get("CC")
++    if command:
++        cc = shlex.split(command, posix=os.name != "nt")
++    else:
++        compiler = next((shutil.which(n) for n in ("cc", "clang", "gcc", "zig") if shutil.which(n)), None)
++        if not compiler:
++            ap.error("No C compiler found; use --cc. No native result was obtained.")
++        cc = [compiler] + (["cc"] if Path(compiler).stem == "zig" else [])
++    results = []
++    with tempfile.TemporaryDirectory(prefix="f6-flicker-") as tmp:
++        tmp = Path(tmp)
++        source = tmp / "fixture.c"
++        source.write_text(SOURCE, encoding="utf-8")
++        env = dict(os.environ)
++        env["ZIG_LOCAL_CACHE_DIR"] = str(tmp / "zig-local")
++        env["ZIG_GLOBAL_CACHE_DIR"] = str(tmp / "zig-global")
++        if Path(cc[0]).stem.lower() == "zig":
++            # Some Windows launch environments cannot infer the installation
++            # root from the executable handle; use its existing library tree.
++            zig_exe = Path(shutil.which(cc[0]) or cc[0])
++            env.setdefault("ZIG_LIB_DIR", str(zig_exe.parent / "lib"))
++        for enabled in (0, 1):
++            for player in (0, 1):
++                exe = tmp / (f"fixture-{enabled}-{player}" + (".exe" if os.name == "nt" else ""))
++                cmd = cc + ["-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
++                            f"-DDM_FLICKER_DIAGNOSTICS={enabled}", f"-DDM_PLAYER_BUILD={player}",
++                            "-I", str(ROOT / "dm/ios/Sources"), str(source), "-o", str(exe)]
++                subprocess.run(cmd, check=True, env=env, timeout=120)
++                result = subprocess.run([str(exe)], check=True, capture_output=True, text=True, timeout=10)
++                print(result.stdout.strip())
++                results.append({"enabled": enabled, "player": player, "output": result.stdout.strip()})
++    if args.report:
++        args.report.write_text(json.dumps({"scope": "Real C header; synthetic environment; no iOS/GPU test",
++                                          "compiler": cc, "results": results}, indent=2) + "\n", encoding="utf-8")
++
++
++if __name__ == "__main__":
++    main()
