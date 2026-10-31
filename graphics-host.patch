@@ -4657,3 +4657,90 @@ new file mode 100644
 +        subprocess.run(cc+['-std=c11','-O1','-UNDEBUG','-Wall','-Wextra','-Werror','-Wno-unused-function',str(src),'-o',str(exe)],check=True,env=env,timeout=120)
 +        subprocess.run([str(exe)],check=True,timeout=20)
 +if __name__=='__main__':main()
+diff --git a/dm/tools/tests/run_sampler_mips_native.py b/dm/tools/tests/run_sampler_mips_native.py
+new file mode 100644
+--- /dev/null
++++ b/dm/tools/tests/run_sampler_mips_native.py
+@@ -0,0 +1,82 @@
++"""Probe actual Metal argument-buffer sampler clamps and mip views on a GPU.
++
++Synthetic textures/shaders only. Explicit SKIP if no Metal device is available.
++Compare documented encoder output with raw resource IDs used by the NVN host.
++"""
++from pathlib import Path
++import subprocess
++import tempfile
++
++SOURCE = r'''
++#import <Foundation/Foundation.h>
++#import <Metal/Metal.h>
++#include <assert.h>
++#include <math.h>
++#include <stdint.h>
++#include <string.h>
++static const char *msl =
++"#include <metal_stdlib>\nusing namespace metal;\n"
++"struct V {float4 p [[position]];float2 uv;};\n"
++"vertex V v(uint i [[vertex_id]]) {float2 p[3]={float2(-1,-1),float2(3,-1),float2(-1,3)};V o;o.p=float4(p[i],0,1);o.uv=(p[i]+1)*.5;return o;}\n"
++"struct A {texture2d<float> t [[id(0)]];sampler s [[id(1)]];};\n"
++"fragment float4 fa(V v [[stage_in]],constant A &a [[buffer(0)]]) {return a.t.sample(a.s,v.uv);}\n"
++"fragment float4 fd(V v [[stage_in]],texture2d<float> t [[texture(0)]],sampler s [[sampler(0)]]) {return t.sample(s,v.uv);}\n"
++"kernel void viewread(texture2d<float,access::read> t [[texture(0)]],device float4 *o [[buffer(0)]]) {o[0]=float4(t.get_width(),t.get_height(),0,0);o[1]=t.read(uint2(t.get_width()/2,t.get_height()/2));}\n";
++static id<MTLRenderPipelineState> pipeline(id<MTLDevice> d,id<MTLLibrary> l,NSString *name) {
++ NSError *e=nil;MTLRenderPipelineDescriptor *p=[MTLRenderPipelineDescriptor new];p.vertexFunction=[l newFunctionWithName:@"v"];p.fragmentFunction=[l newFunctionWithName:name];p.colorAttachments[0].pixelFormat=MTLPixelFormatRGBA32Float;
++ id<MTLRenderPipelineState> s=[d newRenderPipelineStateWithDescriptor:p error:&e];if(!s) fprintf(stderr,"pipeline: %s\n",e.description.UTF8String);assert(s);return s;
++}
++static float render(id<MTLCommandQueue> q,id<MTLRenderPipelineState> ps,id<MTLTexture> input,id<MTLSamplerState> sampler,id<MTLBuffer> args,int direct) {
++ id<MTLDevice> d=q.device;MTLTextureDescriptor *td=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA32Float width:8 height:8 mipmapped:NO];td.storageMode=MTLStorageModeShared;td.usage=MTLTextureUsageRenderTarget;
++ id<MTLTexture> out=[d newTextureWithDescriptor:td];assert(out);
++ MTLRenderPassDescriptor *rp=[MTLRenderPassDescriptor renderPassDescriptor];rp.colorAttachments[0].texture=out;rp.colorAttachments[0].loadAction=MTLLoadActionClear;rp.colorAttachments[0].storeAction=MTLStoreActionStore;
++ id<MTLCommandBuffer> cb=[q commandBuffer];id<MTLRenderCommandEncoder> en=[cb renderCommandEncoderWithDescriptor:rp];[en setRenderPipelineState:ps];[en setViewport:(MTLViewport){0,0,8,8,0,1}];
++ if(direct) {[en setFragmentTexture:input atIndex:0];[en setFragmentSamplerState:sampler atIndex:0];}
++ else {[en setFragmentBuffer:args offset:0 atIndex:0];[en useResource:input usage:MTLResourceUsageRead stages:MTLRenderStageFragment];}
++ [en drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];[en endEncoding];[cb commit];[cb waitUntilCompleted];assert(cb.status==MTLCommandBufferStatusCompleted);
++ float pixels[8*8*4];[out getBytes:pixels bytesPerRow:8*16 fromRegion:MTLRegionMake2D(0,0,8,8) mipmapLevel:0];
++ for(int i=0;i<64;i++) assert(fabsf(pixels[4*i]-pixels[0])<.001f);return pixels[0];
++}
++int main(void) {@autoreleasepool {
++ id<MTLDevice> d=MTLCreateSystemDefaultDevice();if(!d) {puts("SKIP: no Metal GPU for sampler/mip probe");return 0;}
++ printf("GPU: %s\n",d.name.UTF8String);NSError *e=nil;id<MTLLibrary> lib=[d newLibraryWithSource:@(msl) options:nil error:&e];if(!lib) fprintf(stderr,"MSL: %s\n",e.description.UTF8String);assert(lib);
++ id<MTLCommandQueue> q=[d newCommandQueue];assert(q);id<MTLRenderPipelineState> pa=pipeline(d,lib,@"fa"),pd=pipeline(d,lib,@"fd");
++ MTLTextureDescriptor *td=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA16Float width:64 height:64 mipmapped:YES];td.mipmapLevelCount=5;td.storageMode=MTLStorageModeShared;td.usage=MTLTextureUsageShaderRead|MTLTextureUsagePixelFormatView;
++ id<MTLTexture> tex=[d newTextureWithDescriptor:td];assert(tex);
++ const uint16_t half[5]={0x3c00,0x4000,0x4200,0x4400,0x4500};for(unsigned lv=0;lv<5;lv++) {unsigned n=64>>lv;uint16_t *v=calloc(n*n*4,sizeof(uint16_t));assert(v);for(unsigned i=0;i<n*n;i++) {v[4*i]=half[lv];v[4*i+3]=0x3c00;}[tex replaceRegion:MTLRegionMake2D(0,0,n,n) mipmapLevel:lv withBytes:v bytesPerRow:n*8];free(v);}
++ id<MTLFunction> fn=[lib newFunctionWithName:@"fa"];id<MTLArgumentEncoder> ae=[fn newArgumentEncoderWithBufferIndex:0];assert(ae);printf("argument bytes=%lu\n",(unsigned long)ae.encodedLength);
++ int differences=0;
++ for(unsigned lv=0;lv<5;lv++) {
++  MTLSamplerDescriptor *sd=[MTLSamplerDescriptor new];sd.minFilter=sd.magFilter=MTLSamplerMinMagFilterLinear;sd.mipFilter=MTLSamplerMipFilterLinear;sd.sAddressMode=sd.tAddressMode=MTLSamplerAddressModeClampToEdge;sd.lodMinClamp=lv;sd.lodMaxClamp=lv;sd.supportArgumentBuffers=YES;
++  id<MTLSamplerState> ss=[d newSamplerStateWithDescriptor:sd];assert(ss);
++  id<MTLBuffer> encoded=[d newBufferWithLength:ae.encodedLength options:MTLResourceStorageModeShared],raw=[d newBufferWithLength:ae.encodedLength options:MTLResourceStorageModeShared];assert(encoded&&raw&&ae.encodedLength>=16);
++  [ae setArgumentBuffer:encoded offset:0];[ae setTexture:tex atIndex:0];[ae setSamplerState:ss atIndex:1];
++  uint64_t *slots=raw.contents;slots[0]=tex.gpuResourceID._impl;slots[1]=ss.gpuResourceID._impl;
++  float direct=render(q,pd,tex,ss,nil,1),official=render(q,pa,tex,ss,encoded,0),native=render(q,pa,tex,ss,raw,0);
++  printf("mip %u expected %.0f direct %g encoded %g raw %g bytes_equal=%d\n",lv,(float)lv+1,direct,official,native,!memcmp(encoded.contents,raw.contents,ae.encodedLength));
++  assert(fabsf(direct-(lv+1))<.01f&&fabsf(official-direct)<.01f);differences+=fabsf(native-direct)>=.01f;
++  const uint64_t *words=encoded.contents;printf("encoded words");for(unsigned i=0;i<ae.encodedLength/8;i++)printf(" %016llx",(unsigned long long)words[i]);printf("\nraw words");for(unsigned i=0;i<ae.encodedLength/8;i++)printf(" %016llx",(unsigned long long)slots[i]);puts("");
++ }
++ id<MTLComputePipelineState> cp=[d newComputePipelineStateWithFunction:[lib newFunctionWithName:@"viewread"] error:&e];assert(cp);
++ for(unsigned lv=0;lv<5;lv++) {
++  id<MTLTexture> view=[tex newTextureViewWithPixelFormat:tex.pixelFormat textureType:MTLTextureType2D levels:NSMakeRange(lv,1) slices:NSMakeRange(0,1)];assert(view);
++  id<MTLBuffer> out=[d newBufferWithLength:32 options:MTLResourceStorageModeShared];id<MTLCommandBuffer> cb=[q commandBuffer];id<MTLComputeCommandEncoder> en=[cb computeCommandEncoder];[en setComputePipelineState:cp];[en setTexture:view atIndex:0];[en setBuffer:out offset:0 atIndex:0];[en dispatchThreadgroups:MTLSizeMake(1,1,1) threadsPerThreadgroup:MTLSizeMake(1,1,1)];[en endEncoding];[cb commit];[cb waitUntilCompleted];assert(cb.status==MTLCommandBufferStatusCompleted);float *v=out.contents;printf("view mip %u cpu=%lux%lu gpu=%gx%g value=%g\n",lv,(unsigned long)view.width,(unsigned long)view.height,v[0],v[1],v[4]);assert(v[0]==(64>>lv)&&v[1]==(64>>lv)&&fabsf(v[4]-(lv+1))<.01f);
++ }
++ printf("RESULT raw_sampler_mismatches=%d\n",differences);assert(!differences);puts("PASS: real GPU sampler clamp and single-mip view contract");
++}}
++'''
++
++
++def main():
++    with tempfile.TemporaryDirectory(prefix="sampler-mips-") as td:
++        p = Path(td)
++        src, exe = p/"probe.m", p/"probe"
++        src.write_text(SOURCE, encoding="utf-8")
++        subprocess.run(["xcrun", "clang", "-fobjc-arc", "-UNDEBUG", "-O1", str(src),
++                        "-framework", "Foundation", "-framework", "Metal", "-o", str(exe)],
++                       check=True, timeout=120)
++        subprocess.run([str(exe)], check=True, timeout=60)
++
++
++if __name__ == "__main__":
++    main()

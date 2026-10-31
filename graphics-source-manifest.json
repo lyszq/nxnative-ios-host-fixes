@@ -2,7 +2,7 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "1d0c11939a9e3916c3919e808c53f1617da814dedb1e4437babf6ec32732abd6",
+  "patch_sha256": "a8ddc03c7776f4dd9d45da1389702369f897b3da23a83c4441f31d7dd30e671c",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
@@ -203,6 +203,10 @@
     {
       "path": "dm/tools/tests/run_odyssey_ui_native.py",
       "normalized_sha256": "939874a0a2144861e958914d414fe096b25f5d83673ce9e19eab15cfc68c9621"
+    },
+    {
+      "path": "dm/tools/tests/run_sampler_mips_native.py",
+      "normalized_sha256": "56e02e62f26d67a324fdcada8126f6c10345941e30e5958e0f6152db4c206bf7"
     },
     {
       "path": "dm/tools/tests/run_shell_msl_native.py",
