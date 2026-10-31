@@ -2,11 +2,11 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "a8ddc03c7776f4dd9d45da1389702369f897b3da23a83c4441f31d7dd30e671c",
+  "patch_sha256": "9586d722d195a6ed568f985ef2d9bc0b770f0a281ca21cfb9394d983b55997ab",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
-      "normalized_sha256": "b06f6bf1bc71af34eb7aa0004c3aee2b7470ffe2361c72f2ca5a84106b34037a"
+      "normalized_sha256": "2e1f1b285af2554f11e00671315bb567828800a5265c762d34a8a70adb019958"
     },
     {
       "path": "dm/gfx/nvn/dm_chain_probe.h",
@@ -46,7 +46,7 @@
     },
     {
       "path": "dm/gfx/nvn/nvn_mtl.m",
-      "normalized_sha256": "879c19af4ff7ff883ddc1ca7d646517a5b31ca59b6be7d4eab08e72a4cedbf90"
+      "normalized_sha256": "c110b48302c6ad82a9a9af5ed7477fce42eb860be4a35e3db899a3b4ff938db9"
     },
     {
       "path": "dm/gfx/nvn/nvn_obj.h",
@@ -59,6 +59,10 @@
     {
       "path": "dm/gfx/tests/run_nvn_vbuf_bounds_native.py",
       "normalized_sha256": "25898ff06248f6ce5799f727834874c3ef5be94a06cf87c5d5dd3674376d168c"
+    },
+    {
+      "path": "dm/gfx/tests/t_feedback.m",
+      "normalized_sha256": "6799675586a4582356fd431540b2a07863a6277f979d297a16bebc17ebcd10de"
     },
     {
       "path": "dm/gfx/tests/t_pull.m",
@@ -142,7 +146,7 @@
     },
     {
       "path": "dm/ios/Sources/dm_flicker_diagnostics.h",
-      "normalized_sha256": "557e20493a74e9220017bc5a1574f4ed0b632f2fdf64b30f206a9f4550fe055e"
+      "normalized_sha256": "8f53842dcfbadc0e485f4e9473a7d95b3ecbeb610630324ba247214822aefde0"
     },
     {
       "path": "dm/ios/Sources/dm_shader_inventory.h",
@@ -185,12 +189,16 @@
       "normalized_sha256": "3ceb3f796c596ece7a2d3391c35b995d67579667afaa320a22a3a6cf8604a9b2"
     },
     {
+      "path": "dm/tools/tests/run_feedback_mips_native.py",
+      "normalized_sha256": "3f4e67918b3e2a6cad628cefb5784c0d4beb91de383846527ab402aa9ba7c18b"
+    },
+    {
       "path": "dm/tools/tests/run_fill_pattern_native.py",
       "normalized_sha256": "0b6c382cbf22edd7bb3771fcea66a4e8f412a52d44179b19b515936acfcee4a7"
     },
     {
       "path": "dm/tools/tests/run_flicker_diagnostics_native.py",
-      "normalized_sha256": "a417eaf90a97fbbb677c666e1b1e2ded58192d90044e08cb09136a803865b672"
+      "normalized_sha256": "72504d2da0250ee1d9866353cc40a2d82ec7724aad09ce70cc8004a3d4681859"
     },
     {
       "path": "dm/tools/tests/run_language_native.py",
@@ -226,7 +234,7 @@
     },
     {
       "path": "docs/agents/04-graphics.md",
-      "normalized_sha256": "0043b64778e08db26d2769925c331eca1bf7feba7589ca95a7eb28496b9db004"
+      "normalized_sha256": "40af1539cc88fd650a8de26a2b5f01f6d7d5ef3b4e7c8647a2ce018d7df6fca0"
     },
     {
       "path": "docs/agents/symptoms.md",
@@ -253,6 +261,6 @@
       "normalized_sha256": "4bff7b4ece816fde90f5cd73a6a0924b965197e2a093b70079519ef5e20f3d9c"
     }
   ],
-  "scope": "Game-free accepted F9 host baseline plus bounded F10/F11 light and per-mip chain observations, grounded constant snapshots and native/Metal compilation checks; no game resources, generated game shaders, keys, original captures or device logs",
+  "scope": "Game-free accepted F9 host baseline plus bounded light/per-mip observations, grounded constant snapshots and explicit optional multi-mip read-isolation candidate with native/GPU contract tests; no game resources, generated game shaders, keys, original captures or device logs",
   "device_validated": false
 }

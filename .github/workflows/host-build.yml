@@ -114,6 +114,7 @@ jobs:
           python3 dm/tools/tests/run_light_probe_native.py --cc clang
           python3 dm/tools/tests/run_chain_probe_native.py --cc clang
           python3 dm/tools/tests/run_sampler_mips_native.py
+          python3 dm/tools/tests/run_feedback_mips_native.py
           python3 dm/tools/tests/run_command_memory_native.py --cc clang
           python3 dm/tools/tests/run_odyssey_ui_native.py --cc clang
           python3 dm/tools/tests/run_fill_pattern_native.py
