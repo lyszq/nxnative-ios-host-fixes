@@ -4222,7 +4222,7 @@ diff --git a/dm/tools/tests/run_feedback_mips_native.py b/dm/tools/tests/run_fee
 new file mode 100644
 --- /dev/null
 +++ b/dm/tools/tests/run_feedback_mips_native.py
-@@ -0,0 +1,30 @@
+@@ -0,0 +1,33 @@
 +"""Run the actual NVN/Metal4 snapshot code with synthetic multi-mip textures."""
 +from pathlib import Path
 +import platform
@@ -4241,6 +4241,9 @@ new file mode 100644
 +    exe = ROOT/'dm/gfx/tests/t_feedback'
 +    env=dict(os.environ,MTL_DEBUG_LAYER='1')
 +    old = subprocess.run([str(exe), '--deny-mips'], cwd=ROOT, capture_output=True, text=True, timeout=60, env=env)
++    if 'has no Metal 4 (no Metal 4 GPU family)' in old.stderr:
++        print('SKIP: actual NVN/Metal4 fixture compiled, but this GPU has no Metal4 family; no production GPU execution claimed')
++        return
 +    assert old.returncode != 0 and 'multi-mip sampled view receives a snapshot' in old.stderr, old.stdout+old.stderr
 +    print('PASS negative control: legacy single-mip gate fails both multi-mip preservation cases')
 +    fixed = subprocess.run([str(exe)], cwd=ROOT, capture_output=True, text=True, timeout=60, env=env)
@@ -4849,7 +4852,7 @@ diff --git a/dm/tools/tests/run_sampler_mips_native.py b/dm/tools/tests/run_samp
 new file mode 100644
 --- /dev/null
 +++ b/dm/tools/tests/run_sampler_mips_native.py
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,101 @@
 +"""Probe actual Metal argument-buffer sampler clamps and mip views on a GPU.
 +
 +Synthetic textures/shaders only. Explicit SKIP if no Metal device is available.
@@ -4913,6 +4916,25 @@ new file mode 100644
 + for(unsigned lv=0;lv<5;lv++) {
 +  id<MTLTexture> view=[tex newTextureViewWithPixelFormat:tex.pixelFormat textureType:MTLTextureType2D levels:NSMakeRange(lv,1) slices:NSMakeRange(0,1)];assert(view);
 +  id<MTLBuffer> out=[d newBufferWithLength:32 options:MTLResourceStorageModeShared];id<MTLCommandBuffer> cb=[q commandBuffer];id<MTLComputeCommandEncoder> en=[cb computeCommandEncoder];[en setComputePipelineState:cp];[en setTexture:view atIndex:0];[en setBuffer:out offset:0 atIndex:0];[en dispatchThreadgroups:MTLSizeMake(1,1,1) threadsPerThreadgroup:MTLSizeMake(1,1,1)];[en endEncoding];[cb commit];[cb waitUntilCompleted];assert(cb.status==MTLCommandBufferStatusCompleted);float *v=out.contents;printf("view mip %u cpu=%lux%lu gpu=%gx%g value=%g\n",lv,(unsigned long)view.width,(unsigned long)view.height,v[0],v[1],v[4]);assert(v[0]==(64>>lv)&&v[1]==(64>>lv)&&fabsf(v[4]-(lv+1))<.01f);
++ }
++ // Independent classic-Metal control: snapshot every sampled mip, overwrite the
++ // original, then check the old values with GPU reads. This is not NVN/Metal4.
++ for(unsigned first=0;first<2;first++) {
++  unsigned levels=5-first;
++  MTLTextureDescriptor *sd=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:tex.pixelFormat width:64>>first height:64>>first mipmapped:YES];sd.mipmapLevelCount=levels;sd.storageMode=MTLStorageModePrivate;sd.usage=MTLTextureUsageShaderRead|MTLTextureUsagePixelFormatView;
++  id<MTLTexture> snap=[d newTextureWithDescriptor:sd];assert(snap);
++  id<MTLCommandBuffer> cb=[q commandBuffer];id<MTLBlitCommandEncoder> bl=[cb blitCommandEncoder];
++  for(unsigned m=0;m<levels;m++) [bl copyFromTexture:tex sourceSlice:0 sourceLevel:first+m sourceOrigin:MTLOriginMake(0,0,0) sourceSize:MTLSizeMake(64>>(first+m),64>>(first+m),1) toTexture:snap destinationSlice:0 destinationLevel:m destinationOrigin:MTLOriginMake(0,0,0)];
++  [bl endEncoding];[cb commit];[cb waitUntilCompleted];assert(cb.status==MTLCommandBufferStatusCompleted);
++  for(unsigned lv=0;lv<5;lv++) {unsigned n=64>>lv;uint16_t *v=calloc(n*n*4,sizeof(uint16_t));assert(v);[tex replaceRegion:MTLRegionMake2D(0,0,n,n) mipmapLevel:lv withBytes:v bytesPerRow:n*8];free(v);}
++  for(unsigned m=0;m<levels;m++) {
++   id<MTLTexture> view=[snap newTextureViewWithPixelFormat:snap.pixelFormat textureType:MTLTextureType2D levels:NSMakeRange(m,1) slices:NSMakeRange(0,1)];assert(view);id<MTLBuffer> out=[d newBufferWithLength:32 options:MTLResourceStorageModeShared];
++   cb=[q commandBuffer];id<MTLComputeCommandEncoder> en=[cb computeCommandEncoder];[en setComputePipelineState:cp];[en setTexture:view atIndex:0];[en setBuffer:out offset:0 atIndex:0];[en dispatchThreadgroups:MTLSizeMake(1,1,1) threadsPerThreadgroup:MTLSizeMake(1,1,1)];[en endEncoding];[cb commit];[cb waitUntilCompleted];assert(cb.status==MTLCommandBufferStatusCompleted);
++   float *v=out.contents;assert(v[0]==(64>>(first+m))&&v[1]==v[0]&&fabsf(v[4]-(first+m+1))<.01f);
++  }
++  // Restore source for the next independently rebased test.
++  for(unsigned lv=0;lv<5;lv++) {unsigned n=64>>lv;uint16_t *v=calloc(n*n*4,sizeof(uint16_t));assert(v);for(unsigned i=0;i<n*n;i++) {v[4*i]=half[lv];v[4*i+3]=0x3c00;}[tex replaceRegion:MTLRegionMake2D(0,0,n,n) mipmapLevel:lv withBytes:v bytesPerRow:n*8];free(v);}
++  printf("PASS classic-Metal full-mip snapshot first=%u levels=%u survives source overwrite\n",first,levels);
 + }
 + printf("RESULT raw_sampler_mismatches=%d\n",differences);assert(!differences);puts("PASS: real GPU sampler clamp and single-mip view contract");
 +}}

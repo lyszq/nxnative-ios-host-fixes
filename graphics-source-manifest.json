@@ -2,7 +2,7 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "8777ae1367b87eace359a885070f5ad5bf3e28fb80cd9f28a34a9645428c3008",
+  "patch_sha256": "6d127f35f2e4cb31e37ebe6a3d161508471bb7666828c032a695bf9b204ee236",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
@@ -190,7 +190,7 @@
     },
     {
       "path": "dm/tools/tests/run_feedback_mips_native.py",
-      "normalized_sha256": "3f4e67918b3e2a6cad628cefb5784c0d4beb91de383846527ab402aa9ba7c18b"
+      "normalized_sha256": "22e62b857937d0ff34875b18e0a2e58c5305f87b81a3166491919838aefecb25"
     },
     {
       "path": "dm/tools/tests/run_fill_pattern_native.py",
@@ -214,7 +214,7 @@
     },
     {
       "path": "dm/tools/tests/run_sampler_mips_native.py",
-      "normalized_sha256": "56e02e62f26d67a324fdcada8126f6c10345941e30e5958e0f6152db4c206bf7"
+      "normalized_sha256": "1af1c7396a353f594c2fedb4fc2e4cfd8d525b5f8f4311112917fe9707ee8b7a"
     },
     {
       "path": "dm/tools/tests/run_shell_msl_native.py",
