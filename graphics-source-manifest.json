@@ -2,11 +2,11 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "e2f2e115336fab976a6dee38b464ad32cc1b25fd6f6b1ad0282a86d1641d1265",
+  "patch_sha256": "c01942011374c45948aff5caf4055f02741492bdc180becbd2f88d2ffc3cab70",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
-      "normalized_sha256": "54ca9cf75f0d1e188f25b21d1f45bc9e9a5b795a17837247cdeb023d1183c23e"
+      "normalized_sha256": "a5e0e047b4bc0b8faeba5fef99343661934e4795181c4856a98ecbdb00979d65"
     },
     {
       "path": "dm/gfx/nvn/dm_shell_msl.h",
@@ -30,7 +30,7 @@
     },
     {
       "path": "dm/gfx/nvn/nvn_mtl.m",
-      "normalized_sha256": "bca897f790c829cb2e6f02f8da9a9262a7b00779d3d60cf351844e2ed61ebd3e"
+      "normalized_sha256": "4ce2e82279754c76862da1939763a70dde1f29f243a3dbdcbad55e15b16b7526"
     },
     {
       "path": "dm/gfx/nvn/nvn_obj.h",
@@ -77,12 +77,20 @@
       "normalized_sha256": "45ad1cc77c582b3b0c71b6c90d9d7937dad41dac4970050d499c13fa94c7748b"
     },
     {
+      "path": "dm/host/dm.h",
+      "normalized_sha256": "dc7faa1da4b5478db10cbb27c93519c641f05f8ace481aaed1a09d40849f02ce"
+    },
+    {
+      "path": "dm/host/dm_odyssey_ui.h",
+      "normalized_sha256": "d91fd724e93f2920d087bc73626fe3280301e0c57e3341f94ebca96a7dc9d043"
+    },
+    {
       "path": "dm/host/dm_overlay_assets.h",
       "normalized_sha256": "7331e8d2546bf6941a4c2587cae44412089fc42a7ce852096556e139c0306f40"
     },
     {
       "path": "dm/host/hle_odyssey_display.c",
-      "normalized_sha256": "6278db667bc9919ba60637e5eac02b6ede168dcc84a2186cfd6902be084ae5e1"
+      "normalized_sha256": "fc0a7350a2861e9114b8f557a54f4b9651fe4199096461004107dc7a5adf6ff5"
     },
     {
       "path": "dm/host/hle_sdk16.c",
@@ -145,12 +153,20 @@
       "normalized_sha256": "3ceb3f796c596ece7a2d3391c35b995d67579667afaa320a22a3a6cf8604a9b2"
     },
     {
+      "path": "dm/tools/tests/run_fill_pattern_native.py",
+      "normalized_sha256": "0b6c382cbf22edd7bb3771fcea66a4e8f412a52d44179b19b515936acfcee4a7"
+    },
+    {
       "path": "dm/tools/tests/run_flicker_diagnostics_native.py",
       "normalized_sha256": "201ac29f3c34eea3e1714f3cffb0eef01b65283929cca2f9cb8ad5cbd163bffe"
     },
     {
       "path": "dm/tools/tests/run_language_native.py",
       "normalized_sha256": "1ac48cb496c94d978f00cfed63458dfd75f10bd58961f2d66ab1bc2eef66aca1"
+    },
+    {
+      "path": "dm/tools/tests/run_odyssey_ui_native.py",
+      "normalized_sha256": "c43601fc35534ade2499426fcb1a617f71d290f903f8b9d0ce3423aa9de37005"
     },
     {
       "path": "dm/tools/tests/run_shell_msl_native.py",
@@ -170,11 +186,11 @@
     },
     {
       "path": "docs/agents/symptoms.md",
-      "normalized_sha256": "5fb36bc688cb50a28793acacfd189e0cd2cd42c6ed48b74023e2c01470092e11"
+      "normalized_sha256": "cb5f7bc88a7ebe681d4a747f8215a8fbd8d78d5a8bcd3fa72fbe983fcd8678da"
     },
     {
       "path": "docs/reference/nvn-objects.md",
-      "normalized_sha256": "1150fe4b1ce98fc7b811ed0ddad745edd086729f6070dd5758c723712697963a"
+      "normalized_sha256": "c266e8d9a45e2f7a4ff4dea102c365e4ee848841df8781df1815f23aa27d7fba"
     },
     {
       "path": "docs/reference/packing.md",
@@ -193,6 +209,6 @@
       "normalized_sha256": "4bff7b4ece816fde90f5cd73a6a0924b965197e2a093b70079519ef5e20f3d9c"
     }
   ],
-  "scope": "Game-free F5 baseline plus F6 compiled-pack startup, timing, bounded diagnostics, HUD validation and command/control-memory ownership; no game resources, generated shaders, keys or device logs",
+  "scope": "Game-free F5 baseline plus F6 compiled-pack startup, timing, bounded diagnostics, runtime HUD/menu composition, fill-pattern retirement and command/control-memory ownership; no game resources, generated shaders, keys or device logs",
   "device_validated": false
 }
