@@ -112,6 +112,7 @@ jobs:
           python3 dm/tools/tests/run_shell_identity_native.py
           python3 dm/tools/tests/run_external_shaders_native.py
           python3 dm/tools/tests/run_flicker_diagnostics_native.py --cc clang
+          python3 dm/tools/tests/run_command_memory_native.py --cc clang
           python3 -m unittest dm.tools.tests.test_launcher_settings dm.ios.tests.test_launcher_storage -v
           python3 dm/tools/tests/run_obs_frame_native.py
       - name: Actual display policy and CommonCrypto initialization fixtures

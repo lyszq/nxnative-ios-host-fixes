@@ -1,5 +1,5 @@
 diff --git a/dm/games/0100000000010000/README.md b/dm/games/0100000000010000/README.md
-index bf60f53..81357fa 100644
+index bf60f53..64c6f24 100644
 --- a/dm/games/0100000000010000/README.md
 +++ b/dm/games/0100000000010000/README.md
 @@ -8,21 +8,22 @@ Update 1.4.1 (v393216) over the base game, SDK 7.3.2. Nintendo EPD's sead / agl
@@ -66,12 +66,14 @@ index bf60f53..81357fa 100644
  - The three thunder geometry shaders do not translate.
  - The silent first minute of sound.
  - development.md calls SDK 7.3.2 "the oldest so far"; Mario Kart 8 Deluxe (SDK 4.4.0) is older now.
-@@ -102,3 +107,5 @@ An explicit stock/off selection leaves the register frame and existing overlays
+@@ -102,3 +107,7 @@ An explicit stock/off selection leaves the register frame and existing overlays
  **F3 device observation, 2026-10-29:** the user reports working resolution switching and smooth native 2732x2048 gameplay on an 8 GB iPad Air M2, with high RAM use and little perceived improvement over 1080p. The 4:3 world view is reported correct; text and main-menu proportions remain distorted. Bloom/lighting flashes and short first-encounter hitches remain. These are user observations, not controlled frame-time, memory, or visual A/B measurements.
  
  **F4 default:** 1080p is recommended for memory efficiency and is the default for an unset supported display selection. Saved native, 1440p and stock values and explicit environment overrides retain precedence. When the launcher is skipped, the host adopts 1080p only for the exact docked build with complete display gates and validated assets; the standalone policy parser still treats an absent choice as stock. The 4:3 option stays off by default. A 4:3 1080p target is 1440x1080; wide 1080p is 1920x1080. No F4 device result is claimed.
 +
 +- **F6 startup:** the user reports the long wait occurs after Play on repeated launches. [Precompiled preparation inventory](../../../docs/reference/packing.md#precompiled-shader-preparation-inventory) removes bulk binary header discovery for validated external compiled packs, preserves legacy/GL/Vulkan preparation and adds stage timings. Source implementation only until native CI and device validation.
++
++- **F7 command-memory continuation:** fresh F6 device logs demonstrate the host's own 1024 MiB command-segment fatal, with CPU-heavy camera directions and no matching sustained GPU overload. [Control-memory lifetime of host-only recordings](../../../docs/reference/nvn-objects.md#control-memory-lifetime-of-host-only-command-recordings) now anchors empty-pool segments to the game's control grants. The original fails and the fixed production helpers pass the synthetic lifetime regression. Full build and device acceptance remain separate. No shader-chain or camera change.
 diff --git a/dm/gfx/nvn/dm_shell_msl.h b/dm/gfx/nvn/dm_shell_msl.h
 index 87a5ff2..21e8c9a 100644
 --- a/dm/gfx/nvn/dm_shell_msl.h
@@ -116,6 +118,55 @@ index 8552c74..3058da9 100644
  // the host loads only <library dir>/b-<V>/. Run dmsh_chain.py --header after changing the chain's tools and commit this file with the change
 -#define DMSH_CHAIN "a78f966a7b38"
 +#define DMSH_CHAIN "2710ccf61c31"
+diff --git a/dm/gfx/nvn/hle_nvn.c b/dm/gfx/nvn/hle_nvn.c
+index 20c433a..6794e20 100644
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -786,7 +786,7 @@ static void cmd_new_segment(cmd_t *o, uint8_t *mem, size_t n) {
+ #define HOSTSEG_SMALL (4u << 10)
+ #define HOSTSEG_CAP (1u << 30)
+ uint64_t dm_nvn_frame_count(void);
+-typedef struct { uint8_t *mem; size_t n; uint64_t frame; int busy; uintptr_t org_lo, org_hi; } hostseg_t;   // org: the guest range of the recording it hangs off (0 = unknown, never reclaimed)
++typedef struct { uint8_t *mem; size_t n; uint64_t frame; int busy; uintptr_t org_lo, org_hi; } hostseg_t;   // org: guest command bytes, or control grant for host-only recordings (0 = unknown, never reclaimed)
+ static hostseg_t *g_hostseg; static int g_nhostseg, g_caphostseg; static uint64_t g_hostseg_bytes;
+ static pthread_mutex_t g_hostseg_mu = PTHREAD_MUTEX_INITIALIZER;
+ static size_t hostseg_size(const cmd_t *o, int empty_pool, size_t want) {
+@@ -801,6 +801,14 @@ static uint8_t *hostseg_take(const cmd_t *o, size_t n) {
+     int in_seg = 0;   // by the segment's end too: a small segment can end where another one starts
+     for (int i = 0; i < g_nhostseg && cur; i++) if (cur >= (uintptr_t)g_hostseg[i].mem && o->end == g_hostseg[i].mem + g_hostseg[i].n) { lo = g_hostseg[i].org_lo; hi = g_hostseg[i].org_hi; in_seg = 1; break; }
+     if (!in_seg && o && o->recording && o->cur) { lo = o->recording == 1 && o->begin && (uintptr_t)o->begin <= cur ? (uintptr_t)o->begin : cur; hi = cur + 16; }
++    // Empty command-pool recordings still belong to the game's control memory.
++    // It holds their native command handles and may outlive this command-buffer
++    // object. Reuse only when the game re-grants that range, never on a timer or
++    // Finalize. A fresh idle grant must not inherit the previous recording's owner.
++    if (o && o->control && o->control_size &&
++        (!o->recording || !lo) && (uintptr_t)o->control <= UINTPTR_MAX - o->control_size) {
++        lo = (uintptr_t)o->control; hi = lo + o->control_size;
++    }
+     for (int i = 0; i < g_nhostseg && !m; i++)
+         if (!g_hostseg[i].busy && g_hostseg[i].n == n) { g_hostseg[i] = (hostseg_t){ g_hostseg[i].mem, n, f, 1, lo, hi }; m = g_hostseg[i].mem; }
+     if (!m && g_hostseg_bytes + n <= HOSTSEG_CAP && (m = malloc(n))) {
+@@ -829,7 +837,19 @@ NVN(nvnCommandBufferAddCommandMemory, void, NVNcommandBuffer *c, const NVNmemory
+     cmd_new_segment(CB(c), pl->mem + off, n);
+     CB(c)->used = 0;   // GetCommandMemoryUsed counts from the start of the memory the game last added, across recordings (see there)
+ }
+-NVN(nvnCommandBufferAddControlMemory, void, NVNcommandBuffer *c, void *m, size_t n) { (void)c; (void)m; (void)n; }
++NVN(nvnCommandBufferAddControlMemory, void, NVNcommandBuffer *c, void *m, size_t n) {
++    cmd_t *o = CB(c);
++    // Re-granting control memory invalidates its previous native handles. This
++    // is the missing lifetime signal for host-only command recordings (Odyssey).
++    // Keep valid command-memory origins authoritative for ordinary overflows.
++    uintptr_t lo = (uintptr_t)m;
++    if (m && n && lo <= UINTPTR_MAX - n) {
++        hostseg_release(lo, lo + n);
++        o->control = m; o->control_size = n;
++    } else {
++        o->control = NULL; o->control_size = 0;
++    }
++}
+ // Get space for one record and keep `keep` bytes after it (OP_RESERVE, 0 for the END); if not enough, call back into the game per the NVN convention to add command memory
+ static uint8_t *cmd_alloc_keep(cmd_t *o, uint32_t size, uint32_t keep) {
+     size = (size + 7) & ~7u;
 diff --git a/dm/gfx/nvn/nvn_feedback.inc b/dm/gfx/nvn/nvn_feedback.inc
 index 287f1f6..34a23d5 100644
 --- a/dm/gfx/nvn/nvn_feedback.inc
@@ -431,6 +482,18 @@ index 8e032ea..b1aedd4 100644
      if (bootprof() && (g_present_n == 1 || g_present_n % 120 == 0)) {
          if (g_present_n == 1) g_bp_first_present = bp_now() - g_bp_t0;
          MLOG("[bootprof] t=%.3f s present #%llu: metallibs loaded %llu / %.1f ms; pipelines created %llu / %.1f ms (all synchronous on the submit thread); prewarmed and used: shaders %llu / render pipelines %llu / compute pipelines %llu; "
+diff --git a/dm/gfx/nvn/nvn_obj.h b/dm/gfx/nvn/nvn_obj.h
+index f7011f3..f992c86 100644
+--- a/dm/gfx/nvn/nvn_obj.h
++++ b/dm/gfx/nvn/nvn_obj.h
+@@ -77,6 +77,7 @@ typedef struct {
+     NVNdevice *dev;
+     uint64_t used;                       // Bytes written since the game last added command memory, across recordings and host segments, including segment-switch JUMPs (returned by GetCommandMemoryUsed)
+     int32_t tex_base, samp_base;         // Host-table bases of the texture / sampler pool this command buffer last bound (hle_nvn.c dpool_add; 0 = the first pool of its kind)
++    uint8_t *control; size_t control_size; // Last control-memory grant: fallback recordings inherit its lifetime when no guest command bytes exist.
+ } cmd_t;                                                                                   FITS(cmd_t, NVNcommandBuffer);
+ 
+ // ---------- State objects (defaults follow the NVN / GL defaults) ----------
 diff --git a/dm/gfx/tests/run_nvn_resource_rebind_native.py b/dm/gfx/tests/run_nvn_resource_rebind_native.py
 new file mode 100644
 index 0000000..487c36a
@@ -2005,7 +2068,7 @@ index 0000000..8512506
 +if __name__ == '__main__':
 +    unittest.main()
 diff --git a/docs/agents/symptoms.md b/docs/agents/symptoms.md
-index b643b5f..b6eb281 100644
+index b643b5f..7b2d1f1 100644
 --- a/docs/agents/symptoms.md
 +++ b/docs/agents/symptoms.md
 @@ -11,6 +11,8 @@ One line per symptom in the [subsystem references](../reference/): what you see
@@ -2025,7 +2088,15 @@ index b643b5f..b6eb281 100644
  - abort in `sm::Initialize` under `nn::settings::GetAvailableLanguageCodes` (early in `nnMain`, `main+0x327888`); abort in `sm::Initialize` under `nn::settings::GetAvailableLanguageCodeCount()` (`main+0x117590`). → [Available language codes and their count](../reference/services.md#available-language-codes-and-their-count)
  - the font engine runs on garbage; crash after the shared fonts load, looking up the "?" glyph (`main+0x6c73c0`, a font cache lookup returning null), with SDK 10's `ScalableFontEngine::LoadFont` failing with error 403 and `SetFont` with 301 on both stand-in fonts; or Japanese, Korean or Chinese text draws nothing in a Unity game while Latin text is fine (Patrick's Parabox's language menu showed three blank lines). → [Shared font address: BFTTF header or bare TTF](../reference/services.md#shared-font-address-bfttf-header-or-bare-ttf)
  - abort in `nn::sm::Initialize` under `nn::pl::sharedresource::GetPlatformSharedResourceManager` (first thing in `nnMain`). → [Shared fonts requested all at once](../reference/services.md#shared-fonts-requested-all-at-once)
-@@ -408,6 +411,8 @@ One line per symptom in the [subsystem references](../reference/): what you see
+@@ -308,6 +311,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+ - the memory line's `freed but alive` count only grows, while no host table holds those buffers; "GPU allocated" is far above resident memory (Ghost Trick: Phantom Detective, 125 to 146 buffers and 6.6 to 8.7 GB of GPU allocations against 2.2 GB resident). → [Finalized pool buffers kept by a guest thread's autorelease pool](../reference/nvn-objects.md#finalized-pool-buffers-kept-by-a-guest-threads-autorelease-pool)
+ - the serial table grows by about 10 entries a frame (276,000 after 25,000 frames). → [Dead texture serials kept in a ghost table](../reference/nvn-objects.md#dead-texture-serials-kept-in-a-ghost-table)
+ - `FATAL NVN command memory: the game's pool is empty…`. → [Host-lent command memory segments](../reference/nvn-objects.md#host-lent-command-memory-segments)
++- camera-dependent CPU frame times rise while GPU time stays around 12-15 ms, followed by `FATAL NVN command memory: ... host-lent segments reached 1024 MB ...`. → [Control-memory lifetime of host-only command recordings](../reference/nvn-objects.md#control-memory-lifetime-of-host-only-command-recordings)
+ - frames stop after about 15 s; a game thread spins in its command-memory callback (a ring allocator at `main+0x9cc120` waiting for fences that have all signalled). → [What `GetCommandMemoryUsed` counts](../reference/nvn-objects.md#what-getcommandmemoryused-counts)
+ - `CRASH sig=10` in `mtl_exec` after minutes of play, the fault address equal to `x19` and shaped like `0x1000000003`. → [Prerecorded lists in slots of their measured size](../reference/nvn-objects.md#prerecorded-lists-in-slots-of-their-measured-size)
+ - the title showed one stretched 64×64 icon over the 3D scene, a new game a white screen; post-process passes with stale texture handles; `[RED] bind record … overwritten after recording`. → [Recorded commands patched in place by the game (`OP_BIND_TEX1`)](../reference/nvn-objects.md#recorded-commands-patched-in-place-by-the-game-op_bind_tex1)
+@@ -408,6 +412,8 @@ One line per symptom in the [subsystem references](../reference/): what you see
  - `vertex attribute format … not mapped` (printed once). → [Vertex formats Metal lacks](../reference/rendering.md#vertex-formats-metal-lacks)
  - the assertion `buffer index (31) must be < 31`. → [Vertex streams 14 and 15 at Metal slots 14 and 15](../reference/rendering.md#vertex-streams-14-and-15-at-metal-slots-14-and-15)
  - Scaleform fills come out as solid white or light grey sheets over the whole screen, hard-edged triangles and bands, and the menu text is missing (a language list or a title screen that is all white behind its button prompt). → [Vertex streams at addresses that are not 4-byte aligned](../reference/rendering.md#vertex-streams-at-addresses-that-are-not-4-byte-aligned)
@@ -2034,6 +2105,25 @@ index b643b5f..b6eb281 100644
  - scenes and characters black, only foliage, light shafts and the HUD drawn; pass dumps full of `Z … draw skipped: no program bound`. → [Programs bound per stage](../reference/rendering.md#programs-bound-per-stage)
  - `[RED] failed to create render pipeline (vertex 790573a52b9c5053_b fragment f39fb42850f50ecd_b): Fragment input(s) user(locn0),user(locn1) … not written by vertex shader`, once on entering the first investigation; `texture type mismatch: shader declares a cube, texture is 2D` (a pixel shader run with another pair's bindings). → [Composite program taken again after a replay state restore](../reference/rendering.md#composite-program-taken-again-after-a-replay-state-restore)
  - `no program bound before the draw`, `program has no vertex shader` (a draw after a dispatch is dropped); `the dispatched program has no compute shader` (a dispatch after a graphics bind). → [Compute programs bound apart from graphics programs](../reference/rendering.md#compute-programs-bound-apart-from-graphics-programs)
+diff --git a/docs/reference/nvn-objects.md b/docs/reference/nvn-objects.md
+index b0ab96f..9b4975f 100644
+--- a/docs/reference/nvn-objects.md
++++ b/docs/reference/nvn-objects.md
+@@ -125,6 +125,14 @@ The game may also write into an NVN object directly, without an NVN call, throug
+ - **Fix** (`hle_nvn.c`): the pool now grows on demand (256 KB segments, abort only beyond 1 GB; `hostseg_take`). A segment is released only when the game re-grants memory overlapping the guest bytes of the recording that jumped into it (`hostseg_release` in `AddCommandMemory`): the game records setup blocks once and keeps `CallCommands`-ing them for many frames, so recycling segments after a fixed number of frames would overwrite live recordings. An empty-pool grant of at most 4 KB outside a recording gets a 4 KB segment, a record larger than 256 KB gets a segment that holds it, and the cap counts every segment's bytes (`hostseg_size`).
+ - **Found on:** [Super Mario Bros. Wonder](../../dm/games/010015100B514000/README.md) (the many small command buffers: its opening course, per the comment at `HOSTSEG_SZ` in `hle_nvn.c`), [Super Mario Odyssey](../../dm/games/0100000000010000/README.md) (it hands out many 512-byte grants before recording, and with no recording to reclaim them by, 256 KB each reached the cap entering the Wooded Kingdom: the 4 KB segments).
+ 
++### Control-memory lifetime of host-only command recordings
++
++- **Symptom:** camera-dependent CPU frame times rise while GPU time stays around 12-15 ms, followed by `FATAL NVN command memory: ... host-lent segments reached 1024 MB ...`.
++- **Cause:** `AddControlMemory` was a no-op. An empty command-pool grant has no guest command bytes to anchor borrowed segments, even though its native handles belong to the control-memory range provided by the game. Such segments kept an unknown origin, accumulated permanently, and enlarged the allocator's linear searches. The fatal cap is demonstrated in the private device log; exact on-device CPU attribution remains unmeasured.
++- **Fix:** retain the control-memory grant on the command buffer. Host-only recordings inherit this range, and re-granting an overlapping control range releases its old segments. Ordinary command-memory origins remain authoritative for recording overflows. A new idle grant uses the current control owner instead of the previous host cursor's owner. Finalizing a command-buffer object or elapsed frame count never reclaims cached handles; unknown ownership remains conservative. The 1 GiB cap is unchanged.
++- **Check:** `python3 dm/tools/tests/run_command_memory_native.py --cc clang` compiles the actual production helper bodies and checks 200,000 re-grants bounded to two segments, cached handles with independent lifetimes, overlapping ranges, chained overflow, ordinary command origins, fresh control ownership, and malformed/unknown ranges. This is a single-thread CPU fixture, not gameplay/GPU acceptance. The pre-fix source fails the bounded re-grant assertion.
++- **Found on:** [Super Mario Odyssey](../../dm/games/0100000000010000/README.md), Wooded Kingdom on F6; the user reports F4.1 also performs poorly there. Exact-build local ARM64 inspection shows the game supplies control memory before the empty command-pool grants and keeps native handles after finalizing their command-buffer object. The host correction is general and uses no fixed game addresses.
++
+ ### What `GetCommandMemoryUsed` counts
+ 
+ Games read this count as a position in their own command memory and size their heaps and slots from it, so it must be what NVN counts.
 diff --git a/docs/reference/packing.md b/docs/reference/packing.md
 index 03669d3..c726be0 100644
 --- a/docs/reference/packing.md
@@ -2546,6 +2636,150 @@ new file mode 100644
 +    stats->listing_ms += (NSProcessInfo.processInfo.systemUptime - start) * 1000;
 +    return sources;
 +}
+diff --git a/dm/tools/tests/run_command_memory_native.py b/dm/tools/tests/run_command_memory_native.py
+new file mode 100644
+--- /dev/null
++++ b/dm/tools/tests/run_command_memory_native.py
+@@ -0,0 +1,139 @@
++#!/usr/bin/env python3
++"""Compile actual host segment/lifetime code; no Metal or game files required."""
++from pathlib import Path
++import argparse, json, os, re, shlex, shutil, subprocess, tempfile, zipfile
++ROOT = Path(__file__).resolve().parents[3]
++PREAMBLE = r"""
++#include <assert.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdarg.h>
++typedef void NVNdevice;
++typedef void (*PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC)(void);
++typedef int pthread_mutex_t;
++#define PTHREAD_MUTEX_INITIALIZER 0
++#define pthread_mutex_lock(p) ((void)(p))
++#define pthread_mutex_unlock(p) ((void)(p))
++static void fixture_log(const char *fmt, ...) { (void)fmt; }
++#define LOG fixture_log
++static void die(const char *fmt, ...) { fprintf(stderr,"%s\n",fmt); exit(2); }
++static uint64_t frame;
++uint64_t dm_nvn_frame_count(void) { return ++frame; }
++"""
++TEST = r"""
++int main(int argc, char **argv) {
++    (void)argv;
++    _Static_assert(offsetof(cmd_t,nvn_flag10)==0x10,"guest inline ABI moved");
++    _Static_assert(sizeof(cmd_t)<=160,"NVN command-buffer object overflow");
++    static unsigned char controls[4][512], guest[256];
++    cmd_t a={0}, b={0};
++    if (argc>1) {
++        for (int i=0;i<2048;i++) {
++            h_nvnCommandBufferAddControlMemory(&a,controls[0],512);
++            a.recording=0;
++            a.cur=hostseg_take(&a,HOSTSEG_SMALL);a.end=a.cur+HOSTSEG_SMALL;
++            a.cur[0]=0x35;
++        }
++        printf("BASELINE segments=%d bytes=%llu\n",g_nhostseg,(unsigned long long)g_hostseg_bytes);
++        assert(g_nhostseg==1); return 0;
++    }
++    // Independent native handles remain live despite finalize/reinitialization
++    // of their command-buffer object, many frames, and reuse of another block.
++    h_nvnCommandBufferAddControlMemory(&a,controls[0],512);
++    unsigned char *first=hostseg_take(&a,HOSTSEG_SMALL);memset(first,0x35,HOSTSEG_SMALL);
++    a=(cmd_t){0};
++    h_nvnCommandBufferAddControlMemory(&b,controls[1],512);
++    b.cur=hostseg_take(&b,HOSTSEG_SMALL);b.end=b.cur+HOSTSEG_SMALL;
++    assert(b.cur!=first);memset(b.cur,0x6a,HOSTSEG_SMALL);
++    for (int i=0;i<200000;i++) {
++        h_nvnCommandBufferAddControlMemory(&b,controls[1],512);
++        b.recording=0;
++        unsigned char *next=hostseg_take(&b,HOSTSEG_SMALL);
++        assert(next==b.cur && first[0]==0x35 && first[HOSTSEG_SMALL-1]==0x35);
++        b.cur=next;b.end=next+HOSTSEG_SMALL;
++    }
++    assert(g_nhostseg==2 && g_hostseg_bytes==2*HOSTSEG_SMALL);
++    // An overlap invalidates only that native control block's handles.
++    h_nvnCommandBufferAddControlMemory(&a,controls[0]+256,128);
++    a.cur=hostseg_take(&a,HOSTSEG_SMALL);a.end=a.cur+HOSTSEG_SMALL;
++    assert(a.cur==first);
++    // Chained host-only overflows inherit the same control owner.
++    a.recording=1;a.begin=a.cur;a.cur+=32;
++    unsigned char *chain=hostseg_take(&a,HOSTSEG_SZ);
++    int ci=g_nhostseg-1;
++    assert(chain==g_hostseg[ci].mem && g_hostseg[ci].org_lo==(uintptr_t)(controls[0]+256));
++    h_nvnCommandBufferAddControlMemory(&a,controls[0]+256,128);
++    assert(!g_hostseg[ci].busy);
++    // Valid command-memory origins remain authoritative while recording.
++    cmd_t c={0};h_nvnCommandBufferAddControlMemory(&c,controls[2],512);
++    c.recording=1;c.begin=guest;c.cur=guest+32;c.end=guest+sizeof guest;
++    unsigned char *gc=hostseg_take(&c,HOSTSEG_SZ);int gi=-1;
++    for (int i=0;i<g_nhostseg;i++) if(g_hostseg[i].mem==gc) gi=i;
++    assert(gi>=0 && g_hostseg[gi].org_lo==(uintptr_t)guest && g_hostseg[gi].org_hi==(uintptr_t)(guest+48));
++    h_nvnCommandBufferAddControlMemory(&c,controls[2],512);
++    assert(g_hostseg[gi].busy);
++    hostseg_release((uintptr_t)guest+16,(uintptr_t)guest+64);
++    assert(!g_hostseg[gi].busy);
++    // Idle empty-pool grant belongs to the NEW control block, never an old host cursor.
++    h_nvnCommandBufferAddControlMemory(&b,controls[3],512);b.recording=0;
++    unsigned char *fresh=hostseg_take(&b,HOSTSEG_SMALL);int fi=-1;
++    for(int i=0;i<g_nhostseg;i++) if(g_hostseg[i].mem==fresh) fi=i;
++    assert(fi>=0 && g_hostseg[fi].org_lo==(uintptr_t)controls[3]);
++    // Unknown ownership stays conservative. No frame-based recycling.
++    cmd_t u={0};unsigned char *unknown=hostseg_take(&u,HOSTSEG_SMALL);int ui=g_nhostseg-1;
++    assert(unknown==g_hostseg[ui].mem && !g_hostseg[ui].org_lo && g_hostseg[ui].busy);
++    h_nvnCommandBufferAddControlMemory(&u,(void *)(UINTPTR_MAX-1),8);
++    assert(!u.control && !u.control_size && g_hostseg[ui].busy);
++    h_nvnCommandBufferAddControlMemory(&u,NULL,512);
++    assert(!u.control && !u.control_size);
++    assert(hostseg_size(&u,1,512)==HOSTSEG_SMALL && HOSTSEG_CAP==(1u<<30));
++    size_t bytes=0;for(int i=0;i<g_nhostseg;i++){bytes+=g_hostseg[i].n;free(g_hostseg[i].mem);}assert(bytes==g_hostseg_bytes);free(g_hostseg);
++    puts("PASS actual production command-memory helpers: 200000 regrants bounded to 2 segments, cached handles, overlap, chain, command precedence, fresh owner, invalid and unknown ranges");return 0;
++}
++"""
++def source(text, objects):
++    start=objects.index('typedef struct {',objects.index('// Command buffer:'))
++    end=objects.index('} cmd_t;',start)+len('} cmd_t;')
++    declaration=objects[start:end]
++    if 'control_size' not in declaration:
++        declaration=declaration.replace('} cmd_t;','uint8_t *control; size_t control_size; } cmd_t;')
++    pool=text[text.index('#define HOSTSEG_SZ'):text.index('NVN(nvnCommandBufferAddCommandMemory,')]
++    start=text.index('NVN(nvnCommandBufferAddControlMemory,')
++    pos=text.index('{',start);depth=1;end=pos+1
++    while depth:
++        if text[end]=='{':depth+=1
++        elif text[end]=='}':depth-=1
++        end+=1
++    grant=text[start:end]
++    return PREAMBLE+declaration+'\ntypedef cmd_t NVNcommandBuffer;\n#define CB(c) ((cmd_t *)(c))\n#define NVN(name,ret,...) static ret h_##name(__VA_ARGS__)\n'+pool+grant+'\n'+TEST
++
++def main():
++    ap=argparse.ArgumentParser();ap.add_argument('--cc');ap.add_argument('--baseline',type=Path);ap.add_argument('--report',type=Path);args=ap.parse_args()
++    command=args.cc or os.environ.get('CC')
++    if command:cc=shlex.split(command,posix=os.name!='nt')
++    else:
++        name=next((shutil.which(n) for n in ('cc','clang','gcc','zig') if shutil.which(n)),None)
++        if not name:ap.error('No C compiler; pass --cc')
++        cc=[name]+(['cc'] if Path(name).stem.lower()=='zig' else [])
++    current=(ROOT/'dm/gfx/nvn/hle_nvn.c').read_text(encoding='utf-8');objects=(ROOT/'dm/gfx/nvn/nvn_obj.h').read_text(encoding='utf-8')
++    results=[]
++    with tempfile.TemporaryDirectory(prefix='command-memory-') as tmp:
++        tmp=Path(tmp);env=dict(os.environ)
++        if Path(cc[0]).stem.lower()=='zig':
++            env['ZIG_LIB_DIR']=str(Path(cc[0]).parent/'lib');env['ZIG_LOCAL_CACHE_DIR']=str(tmp/'local');env['ZIG_GLOBAL_CACHE_DIR']=str(tmp/'global')
++        variants=[('fixed',current,objects,[])]
++        if args.baseline:
++            with zipfile.ZipFile(args.baseline) as z:
++                variants.insert(0,('baseline',z.read('dm/gfx/nvn/hle_nvn.c').decode(),z.read('dm/gfx/nvn/nvn_obj.h').decode(),['baseline']))
++        for label,text,obj,extra in variants:
++            file=tmp/(label+'.c');exe=tmp/(label+('.exe' if os.name=='nt' else ''));file.write_text(source(text,obj),encoding='utf-8')
++            subprocess.run(cc+['-std=c11','-O1','-UNDEBUG','-Wall','-Wextra','-Werror','-Wno-unused-function',str(file),'-o',str(exe)],check=True,env=env,timeout=120)
++            r=subprocess.run([str(exe)]+extra,capture_output=True,text=True,timeout=30)
++            if label=='fixed':assert r.returncode==0,r.stdout+r.stderr
++            else:assert r.returncode!=0,'Baseline unexpectedly passed regression'
++            result={'variant':label,'returncode':r.returncode,'stdout':r.stdout.strip(),'stderr':r.stderr[-1200:].strip()};results.append(result);print(json.dumps(result))
++    if args.report:args.report.write_text(json.dumps({'scope':'Actual production helper C; single-thread synthetic lifetime tests; no GPU/device result','results':results},indent=2)+'\n',encoding='utf-8')
++if __name__=='__main__':main()
 diff --git a/dm/tools/tests/run_external_shaders_native.py b/dm/tools/tests/run_external_shaders_native.py
 new file mode 100644
 --- /dev/null

@@ -2,11 +2,11 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "dd791f44f3663503489bdafdee25128a3b7fa58d6dafab87c5c12698fd87da3b",
+  "patch_sha256": "e2f2e115336fab976a6dee38b464ad32cc1b25fd6f6b1ad0282a86d1641d1265",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
-      "normalized_sha256": "fd90ccf137886fdf80812ea52fdc4c16f16d3ee8fa27f306a6e76147442029cd"
+      "normalized_sha256": "54ca9cf75f0d1e188f25b21d1f45bc9e9a5b795a17837247cdeb023d1183c23e"
     },
     {
       "path": "dm/gfx/nvn/dm_shell_msl.h",
@@ -15,6 +15,10 @@
     {
       "path": "dm/gfx/nvn/dmsh_chain.h",
       "normalized_sha256": "1b09978f993d5ac43cc9c6b144c4feb2a49ef21df8af6754db54d0f1b331cebb"
+    },
+    {
+      "path": "dm/gfx/nvn/hle_nvn.c",
+      "normalized_sha256": "69e1b56107b3b6607c2e35afa8e3f487e35f6e14a61b29d49e7fd122c59d9ae8"
     },
     {
       "path": "dm/gfx/nvn/nvn_feedback.inc",
@@ -27,6 +31,10 @@
     {
       "path": "dm/gfx/nvn/nvn_mtl.m",
       "normalized_sha256": "bca897f790c829cb2e6f02f8da9a9262a7b00779d3d60cf351844e2ed61ebd3e"
+    },
+    {
+      "path": "dm/gfx/nvn/nvn_obj.h",
+      "normalized_sha256": "f4397351f11a1bbbba45b71b289a1f5e8c723afb5669d375a0923b06569e0287"
     },
     {
       "path": "dm/gfx/tests/run_nvn_resource_rebind_native.py",
@@ -129,6 +137,10 @@
       "normalized_sha256": "5126f742b8d7286c9553c0ab2c7bf64c254cc7694c4d98139ad4541d412365d7"
     },
     {
+      "path": "dm/tools/tests/run_command_memory_native.py",
+      "normalized_sha256": "e1782d56e267e15ded3850ed4619aff991e277c0f57bc5bc3c949a09a2fc7fb5"
+    },
+    {
       "path": "dm/tools/tests/run_external_shaders_native.py",
       "normalized_sha256": "3ceb3f796c596ece7a2d3391c35b995d67579667afaa320a22a3a6cf8604a9b2"
     },
@@ -158,7 +170,11 @@
     },
     {
       "path": "docs/agents/symptoms.md",
-      "normalized_sha256": "f00b71b6eac2073ef0ec5c475768ec7897d5a6ad905fd01a558c9b22c58033ce"
+      "normalized_sha256": "5fb36bc688cb50a28793acacfd189e0cd2cd42c6ed48b74023e2c01470092e11"
+    },
+    {
+      "path": "docs/reference/nvn-objects.md",
+      "normalized_sha256": "1150fe4b1ce98fc7b811ed0ddad745edd086729f6070dd5758c723712697963a"
     },
     {
       "path": "docs/reference/packing.md",
@@ -177,6 +193,6 @@
       "normalized_sha256": "4bff7b4ece816fde90f5cd73a6a0924b965197e2a093b70079519ef5e20f3d9c"
     }
   ],
-  "scope": "Game-free F5 baseline plus F6 compiled-pack startup, timing, bounded diagnostics and HUD validation; no game resources, generated shaders, keys or device logs",
+  "scope": "Game-free F5 baseline plus F6 compiled-pack startup, timing, bounded diagnostics, HUD validation and command/control-memory ownership; no game resources, generated shaders, keys or device logs",
   "device_validated": false
 }
