@@ -112,6 +112,7 @@ jobs:
           python3 dm/tools/tests/run_shell_identity_native.py
           python3 dm/tools/tests/run_external_shaders_native.py
           python3 dm/tools/tests/run_flicker_diagnostics_native.py --cc clang
+          python3 dm/tools/tests/run_light_probe_native.py --cc clang
           python3 dm/tools/tests/run_command_memory_native.py --cc clang
           python3 dm/tools/tests/run_odyssey_ui_native.py --cc clang
           python3 dm/tools/tests/run_fill_pattern_native.py
