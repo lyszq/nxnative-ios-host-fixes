@@ -2,11 +2,15 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "498b7c5d4022d338a1435b28ed752c2c4f4dcc61298f6ef10268521241a2f846",
+  "patch_sha256": "1d0c11939a9e3916c3919e808c53f1617da814dedb1e4437babf6ec32732abd6",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
-      "normalized_sha256": "cac7a050eba1d7f252f40aad27855871ab1974b55b05bdf7e91df76e9a1d55fd"
+      "normalized_sha256": "b06f6bf1bc71af34eb7aa0004c3aee2b7470ffe2361c72f2ca5a84106b34037a"
+    },
+    {
+      "path": "dm/gfx/nvn/dm_chain_probe.h",
+      "normalized_sha256": "3b816b06ed2bf8f7f7df115da136a7a1d746bce058d170b8d016ae6430e48d33"
     },
     {
       "path": "dm/gfx/nvn/dm_light_probe.h",
@@ -25,6 +29,10 @@
       "normalized_sha256": "69e1b56107b3b6607c2e35afa8e3f487e35f6e14a61b29d49e7fd122c59d9ae8"
     },
     {
+      "path": "dm/gfx/nvn/nvn_chain_probe.inc",
+      "normalized_sha256": "73b0c4e0fb9d9036c85124cd5426a4ee724f7fd35240c043a3cbcd9669fcc228"
+    },
+    {
       "path": "dm/gfx/nvn/nvn_feedback.inc",
       "normalized_sha256": "3bed92de38e5276a47a6cc4fac17f521a14535a0d197a2491886d80d4306e277"
     },
@@ -38,7 +46,7 @@
     },
     {
       "path": "dm/gfx/nvn/nvn_mtl.m",
-      "normalized_sha256": "ab57363f3d9e4e53a6e37b52337c63e2093d60ff9927637d51994a7bea890df4"
+      "normalized_sha256": "879c19af4ff7ff883ddc1ca7d646517a5b31ca59b6be7d4eab08e72a4cedbf90"
     },
     {
       "path": "dm/gfx/nvn/nvn_obj.h",
@@ -134,7 +142,7 @@
     },
     {
       "path": "dm/ios/Sources/dm_flicker_diagnostics.h",
-      "normalized_sha256": "90436a64a276ab14385244366f7987eee33b12c58772c495deb084ed702829c9"
+      "normalized_sha256": "557e20493a74e9220017bc5a1574f4ed0b632f2fdf64b30f206a9f4550fe055e"
     },
     {
       "path": "dm/ios/Sources/dm_shader_inventory.h",
@@ -162,7 +170,11 @@
     },
     {
       "path": "dm/tools/tests/run_attachment_store_native.py",
-      "normalized_sha256": "f1880078eb2b5a54746004a7d309e84dacf23b469768d53ce36d8c09ad1d9056"
+      "normalized_sha256": "8bea71ff41e13b0d2fa16057a750888628d94c91ae40fd3d5853c731011f2995"
+    },
+    {
+      "path": "dm/tools/tests/run_chain_probe_native.py",
+      "normalized_sha256": "2374521f6e599df7172418f4497e27ea3b1d1abd03d6b87685e2bdb578a4eb41"
     },
     {
       "path": "dm/tools/tests/run_command_memory_native.py",
@@ -178,7 +190,7 @@
     },
     {
       "path": "dm/tools/tests/run_flicker_diagnostics_native.py",
-      "normalized_sha256": "204b17fb214a9b9a6079986f49f054e863b4e566af082d149c529175cf1113f1"
+      "normalized_sha256": "a417eaf90a97fbbb677c666e1b1e2ded58192d90044e08cb09136a803865b672"
     },
     {
       "path": "dm/tools/tests/run_language_native.py",
@@ -210,7 +222,7 @@
     },
     {
       "path": "docs/agents/04-graphics.md",
-      "normalized_sha256": "bada5851efcd042122523f507925c6a39cc1eff74f091b5d95414e447f307601"
+      "normalized_sha256": "0043b64778e08db26d2769925c331eca1bf7feba7589ca95a7eb28496b9db004"
     },
     {
       "path": "docs/agents/symptoms.md",
@@ -237,6 +249,6 @@
       "normalized_sha256": "4bff7b4ece816fde90f5cd73a6a0924b965197e2a093b70079519ef5e20f3d9c"
     }
   ],
-  "scope": "Game-free accepted F9 host baseline plus opt-in bounded three-stage light measurements and native/Metal compilation checks; no game resources, generated game shaders, keys, original captures or device logs",
+  "scope": "Game-free accepted F9 host baseline plus bounded F10/F11 light and per-mip chain observations, grounded constant snapshots and native/Metal compilation checks; no game resources, generated game shaders, keys, original captures or device logs",
   "device_validated": false
 }
