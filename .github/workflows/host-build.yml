@@ -112,8 +112,7 @@ jobs:
           python3 dm/tools/tests/run_external_shaders_native.py
           python3 dm/tools/tests/run_sampler_mips_native.py
           python3 dm/tools/tests/run_sampler_lifetime_native.py
-          python3 dm/tools/tests/run_sampler_version_native.py --cc clang
-          python3 dm/tools/tests/run_sampler_version_gpu.py
+          python3 dm/tools/tests/run_sampler_f14_native.py --cc clang
           python3 dm/tools/tests/run_ios_controllers_native.py
           python3 dm/tools/tests/run_feedback_native.py
           python3 dm/tools/tests/run_command_memory_native.py --cc clang

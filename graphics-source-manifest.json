@@ -2,15 +2,11 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "b3d65b08fe21a41e898f69a22c9d071e60fef004cbadcf4d322586e568656491",
+  "patch_sha256": "cda5aab5c96a50d94516d99131133df67fc0cabdcfc4bf00b4167dd24a206e49",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
-      "normalized_sha256": "aa968e996a0ad6c766a2e1a4bc538a4c2508b1a1b9c1ca43992cebe2e427b148"
-    },
-    {
-      "path": "dm/gfx/nvn/dm_sampler_version.h",
-      "normalized_sha256": "28e3921204769903e2e7aca1517e6ef2f59d87cf974dbf1b99606ec156a4628f"
+      "normalized_sha256": "5f843681439417d143deb1c8ce94aecebdd8c8756fea671cadc6d9be1eec53be"
     },
     {
       "path": "dm/gfx/nvn/dm_shell_msl.h",
@@ -22,7 +18,7 @@
     },
     {
       "path": "dm/gfx/nvn/hle_nvn.c",
-      "normalized_sha256": "c5e20e72acc530cc3d20e8016d3b2c1d450e324f03533902ca9da21e5b05f475"
+      "normalized_sha256": "69e1b56107b3b6607c2e35afa8e3f487e35f6e14a61b29d49e7fd122c59d9ae8"
     },
     {
       "path": "dm/gfx/nvn/nvn_feedback.inc",
@@ -34,11 +30,11 @@
     },
     {
       "path": "dm/gfx/nvn/nvn_mtl.m",
-      "normalized_sha256": "42c27bcade49fac96b622ffc278b5bb9b3f4f91bb827bb6f2bdbd88ede77c7c5"
+      "normalized_sha256": "c7b89ed3abbc61a6b8391d66f44ae633c20c08591a25e82ade3d63db55fffb52"
     },
     {
       "path": "dm/gfx/nvn/nvn_obj.h",
-      "normalized_sha256": "3758ffa3297e8d31cfbda367b07d11c9bdcc11f5a9935713f891fb25b03af45a"
+      "normalized_sha256": "f4397351f11a1bbbba45b71b289a1f5e8c723afb5669d375a0923b06569e0287"
     },
     {
       "path": "dm/gfx/tests/run_nvn_resource_rebind_native.py",
@@ -154,7 +150,7 @@
     },
     {
       "path": "dm/ios/Sources/dm_odyssey_runtime.h",
-      "normalized_sha256": "91b61f9f49e340ed22f02d10319574ffdf090200f29aec0a65d7182deac3fa36"
+      "normalized_sha256": "8d7e9b4afe02b1b972420807d37fcde2dc311033897f17738ad9c547574325f8"
     },
     {
       "path": "dm/ios/Sources/dm_shader_inventory.h",
@@ -221,20 +217,16 @@
       "normalized_sha256": "1757fefc1755709febed03adaa42eef0002009a55290eb326e7aacc876ed3ae3"
     },
     {
+      "path": "dm/tools/tests/run_sampler_f14_native.py",
+      "normalized_sha256": "604d45ba621a6389d4d0ed39fcce0d59bc60d28bd48380a575436ba7193a88a3"
+    },
+    {
       "path": "dm/tools/tests/run_sampler_lifetime_native.py",
       "normalized_sha256": "a7a4fdb16a6a15c5910ca160761c82b3ed2c9c84c74da1abf1dedc8320d7d892"
     },
     {
       "path": "dm/tools/tests/run_sampler_mips_native.py",
       "normalized_sha256": "1af1c7396a353f594c2fedb4fc2e4cfd8d525b5f8f4311112917fe9707ee8b7a"
-    },
-    {
-      "path": "dm/tools/tests/run_sampler_version_gpu.py",
-      "normalized_sha256": "e0f70b0f99ec0d5a4ac1d81d000ac26cefe850c235f2a547ba4682f34264d728"
-    },
-    {
-      "path": "dm/tools/tests/run_sampler_version_native.py",
-      "normalized_sha256": "ee4e7817d3c6ac95f1e766b162941f42a0e0ef3e7e7bbc963310f4a4899cd3e0"
     },
     {
       "path": "dm/tools/tests/run_shell_msl_native.py",
@@ -281,6 +273,6 @@
       "normalized_sha256": "4bff7b4ece816fde90f5cd73a6a0924b965197e2a093b70079519ef5e20f3d9c"
     }
   ],
-  "scope": "Game-free accepted F16 sampler/display fixes, upstream6fe1927 vibration mount query and independent iOS controller routing; production bundle activation and retained regressions. Temporary light/chain/audit/screenshot diagnostics and failed multi-mip experiment removed. No game resources, generated game shaders, keys or device logs.",
+  "scope": "Game-free F14 sampler/command-binding rollback, retained F13 lifetime and later independent controller, HID, vertex/UBO, HUD/display fixes. No diagnostic capture, game resources, generated game shaders, keys or device logs.",
   "device_validated": false
 }
