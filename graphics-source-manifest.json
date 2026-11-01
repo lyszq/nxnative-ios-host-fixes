@@ -2,27 +2,11 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "3852ea185dd026ff39c93aaf2811aac5ee480cef5d5dde195c70743b7d6f81a2",
+  "patch_sha256": "ce1d0f4e93349feb47bd06fffa6ce10d37595cedf86b6bcfee8a73dc817fe12d",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
-      "normalized_sha256": "9579e7a64e002b52c284e4af70b2216ad04ca0e93eda9cf34fd161d7504f87fc"
-    },
-    {
-      "path": "dm/gfx/nvn/dm_chain_probe.h",
-      "normalized_sha256": "25a7e5aad209fb60a9004c86fdee0b6b9d3bf74bdabbd0f0892ff8ff16239c43"
-    },
-    {
-      "path": "dm/gfx/nvn/dm_chain_trigger.h",
-      "normalized_sha256": "0c972bca28fdde84aa94a02cf6bbc9b5ae10c5c2c6f33972471667710344f834"
-    },
-    {
-      "path": "dm/gfx/nvn/dm_light_probe.h",
-      "normalized_sha256": "0979eca2a07c1145f3074730768e95ed7cede965bb9c9b5c9d7063fa9fe8b44d"
-    },
-    {
-      "path": "dm/gfx/nvn/dm_sampler_audit.h",
-      "normalized_sha256": "5352b153704949de44b45734874408dca4c6186964142e3d0a585f1c90ab0d6f"
+      "normalized_sha256": "de7af949b121df7e6882dbba2c87f02123705dde82de455c7f6ba52a19efaad0"
     },
     {
       "path": "dm/gfx/nvn/dm_sampler_version.h",
@@ -38,11 +22,7 @@
     },
     {
       "path": "dm/gfx/nvn/hle_nvn.c",
-      "normalized_sha256": "e3d758b6ce8fc008971cbdee8e3fe77c93324b2155f7cd3159243327f633d9e6"
-    },
-    {
-      "path": "dm/gfx/nvn/nvn_chain_probe.inc",
-      "normalized_sha256": "68cb5c1cc728408fea47c5c94a96bceb289249aa66a8c934d95eed9277ce1de7"
+      "normalized_sha256": "39531de47fb6c9972ab28af14cb943ffb6cd2c10838da4ea622009fb3dbdb484"
     },
     {
       "path": "dm/gfx/nvn/nvn_feedback.inc",
@@ -53,16 +33,12 @@
       "normalized_sha256": "575fb4488597dae06e545cbfcf06afed1bcc22c77462ef96d422307e56d5c6a6"
     },
     {
-      "path": "dm/gfx/nvn/nvn_light_probe.inc",
-      "normalized_sha256": "a3be004d5a044f16dec1fade5eafb75b18844777d38d2387b7a7575cb72c31ba"
-    },
-    {
       "path": "dm/gfx/nvn/nvn_mtl.m",
-      "normalized_sha256": "a5256438935a960a5d9201157a75dc67f02a9ba0a7675194fd1fdfa2c6fec152"
+      "normalized_sha256": "01321ff2c50cdd00163bdac6151c42a586eaceecf0d863e42197e92cc79f1de0"
     },
     {
       "path": "dm/gfx/nvn/nvn_obj.h",
-      "normalized_sha256": "dde694dc90fb611095c58139c992c8d5dd09e77c54743bd9d75119519a8b2075"
+      "normalized_sha256": "5c3d75200943c1713a8031eeefb99190a568941d3cbf78da25934e63f2a1015e"
     },
     {
       "path": "dm/gfx/tests/run_nvn_resource_rebind_native.py",
@@ -74,7 +50,7 @@
     },
     {
       "path": "dm/gfx/tests/t_feedback.m",
-      "normalized_sha256": "74556aefe3d8e34d93d545e4287b22d43f16f1aef6ea03f830023ea6a4c43ddc"
+      "normalized_sha256": "d562c0aaa3063db156bdbba215b6dfec219bf57ac858f5bfca2a87aea6567b92"
     },
     {
       "path": "dm/gfx/tests/t_pull.m",
@@ -157,8 +133,8 @@
       "normalized_sha256": "a3ce53c95c3015fdb0539cc4ebb8daa8fb102d4d18fba1a7af2efc82670a1471"
     },
     {
-      "path": "dm/ios/Sources/dm_flicker_diagnostics.h",
-      "normalized_sha256": "05cb620cca48d3dd378ec0c9cc6bcf08ea5ec77e0b8055c9d0ed8a9bcb3c13c4"
+      "path": "dm/ios/Sources/dm_odyssey_runtime.h",
+      "normalized_sha256": "91b61f9f49e340ed22f02d10319574ffdf090200f29aec0a65d7182deac3fa36"
     },
     {
       "path": "dm/ios/Sources/dm_shader_inventory.h",
@@ -174,11 +150,15 @@
     },
     {
       "path": "dm/ios/Sources/front_ios.m",
-      "normalized_sha256": "15304e121ad4a312050afc5c818ea53e42185cc9844e27504d5063b0a7a19ea0"
+      "normalized_sha256": "0a1c53cefde490579c23d616e6fbd93c09c023d62bb89af9a3cbc79d8f11448d"
     },
     {
       "path": "dm/ios/Sources/main.m",
-      "normalized_sha256": "b777dc71513e4455c9282b8af66d2a52bda9794b9bb0eba3de138ecd9206f5ce"
+      "normalized_sha256": "011cf747e1dc4bca991210f06b6dfe67131fa867d3a8fa01f32c346cf5347890"
+    },
+    {
+      "path": "dm/ios/Sources/player_env.h",
+      "normalized_sha256": "4e71f3a6549edb8ba34ec279e7e082009d338478588f8308489640931493daab"
     },
     {
       "path": "dm/ios/tools/ios_metal.py",
@@ -189,14 +169,6 @@
       "normalized_sha256": "8bea71ff41e13b0d2fa16057a750888628d94c91ae40fd3d5853c731011f2995"
     },
     {
-      "path": "dm/tools/tests/run_chain_full_gpu.py",
-      "normalized_sha256": "ea6bfaa0a2b6a8e199f88a560ecea4ad688d0d23db9dbeb61a8407885493289a"
-    },
-    {
-      "path": "dm/tools/tests/run_chain_probe_native.py",
-      "normalized_sha256": "3870d9aed516b5933183632cbd9e72ed49ebb1c38c40b6314a8d384961ab7d20"
-    },
-    {
       "path": "dm/tools/tests/run_command_memory_native.py",
       "normalized_sha256": "e1782d56e267e15ded3850ed4619aff991e277c0f57bc5bc3c949a09a2fc7fb5"
     },
@@ -205,36 +177,24 @@
       "normalized_sha256": "3ceb3f796c596ece7a2d3391c35b995d67579667afaa320a22a3a6cf8604a9b2"
     },
     {
-      "path": "dm/tools/tests/run_feedback_mips_native.py",
-      "normalized_sha256": "22e62b857937d0ff34875b18e0a2e58c5305f87b81a3166491919838aefecb25"
+      "path": "dm/tools/tests/run_feedback_native.py",
+      "normalized_sha256": "53f2664b8f880107bb3ebbccdbbb6b1498d0659049c541379a46de3690a8be88"
     },
     {
       "path": "dm/tools/tests/run_fill_pattern_native.py",
       "normalized_sha256": "0b6c382cbf22edd7bb3771fcea66a4e8f412a52d44179b19b515936acfcee4a7"
     },
     {
-      "path": "dm/tools/tests/run_flicker_diagnostics_native.py",
-      "normalized_sha256": "c6b3769049fc22a1e407d170bf81386e01926b6a766fc4f58df96919d9ff0b82"
-    },
-    {
       "path": "dm/tools/tests/run_language_native.py",
       "normalized_sha256": "1ac48cb496c94d978f00cfed63458dfd75f10bd58961f2d66ab1bc2eef66aca1"
-    },
-    {
-      "path": "dm/tools/tests/run_light_probe_native.py",
-      "normalized_sha256": "a04f35738f34a432937560528d52ea80a7348f2ace43885305107003a7df8a09"
     },
     {
       "path": "dm/tools/tests/run_odyssey_ui_native.py",
       "normalized_sha256": "939874a0a2144861e958914d414fe096b25f5d83673ce9e19eab15cfc68c9621"
     },
     {
-      "path": "dm/tools/tests/run_sampler_audit_native.py",
-      "normalized_sha256": "443eecb63805c56c6bd752a5d3fa9c7dd86f52bc2066d025ef515bc787f0ea1e"
-    },
-    {
       "path": "dm/tools/tests/run_sampler_lifetime_native.py",
-      "normalized_sha256": "af5886c6bdf7ce966afeaa33c70816c7daaee4343b2acee1056b83951d445285"
+      "normalized_sha256": "a7a4fdb16a6a15c5910ca160761c82b3ed2c9c84c74da1abf1dedc8320d7d892"
     },
     {
       "path": "dm/tools/tests/run_sampler_mips_native.py",
@@ -246,7 +206,7 @@
     },
     {
       "path": "dm/tools/tests/run_sampler_version_native.py",
-      "normalized_sha256": "a35bea14af33108067162e878f982a6607682c8d840b9d27713813a24ce845d5"
+      "normalized_sha256": "953d8afcec3afec8546f1a35cad680b26481e7926140314bb7b51985dcaf55f0"
     },
     {
       "path": "dm/tools/tests/run_shell_msl_native.py",
@@ -266,7 +226,7 @@
     },
     {
       "path": "docs/agents/04-graphics.md",
-      "normalized_sha256": "a1de59a8f9dee07fc78f255efc54efd09b34a81d44df8e5f9bce53925298f224"
+      "normalized_sha256": "73433bbf9740a8c71e546f79b4a0be568a21db751e0617352f414a2018928a92"
     },
     {
       "path": "docs/agents/symptoms.md",
@@ -282,7 +242,7 @@
     },
     {
       "path": "docs/reference/rendering.md",
-      "normalized_sha256": "bc17116336118b32e2c3123085c1e0fe0260987f823a65ec820eabd93a7b971c"
+      "normalized_sha256": "4e45c4879ff3100b436e9c8958eba83ceb2b42bedc6f9be6d98597d06be56b2f"
     },
     {
       "path": "docs/reference/services.md",
@@ -293,6 +253,6 @@
       "normalized_sha256": "4bff7b4ece816fde90f5cd73a6a0924b965197e2a093b70079519ef5e20f3d9c"
     }
   ],
-  "scope": "Game-free accepted F9 host baseline and F13 sampler lifetime fix; screenshot-triggered bounded whole-target/sparse bloom observer, encoded-binding metadata, bounded sampler record/replay history, validated prefix-mip observation and opt-in immediate sampler versions with native/GPU tests; no game resources, generated game shaders, keys, screenshot pixels or device logs",
+  "scope": "Game-free accepted F16 sampler and display fixes; production bundle activation and retained regressions. Temporary light/chain/audit/screenshot diagnostics and failed multi-mip experiment removed. No game resources, generated game shaders, keys or device logs.",
   "device_validated": false
 }
