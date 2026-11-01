@@ -2,11 +2,11 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "ce1d0f4e93349feb47bd06fffa6ce10d37595cedf86b6bcfee8a73dc817fe12d",
+  "patch_sha256": "984639b96624a30ee2a8be5c27636d4b8edbbf9e37430fd529c647ce9eec6762",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
-      "normalized_sha256": "de7af949b121df7e6882dbba2c87f02123705dde82de455c7f6ba52a19efaad0"
+      "normalized_sha256": "a1bc6439240764dfd03a8f5e7817497e2242c1b52167fe46faa2202a136caf16"
     },
     {
       "path": "dm/gfx/nvn/dm_sampler_version.h",
@@ -97,12 +97,20 @@
       "normalized_sha256": "dc7faa1da4b5478db10cbb27c93519c641f05f8ace481aaed1a09d40849f02ce"
     },
     {
+      "path": "dm/host/dm_input.h",
+      "normalized_sha256": "43a9ca035c8ee8345bfdaccdd6ca7afb23e289202db6d154e1c4e18f4d3173fc"
+    },
+    {
       "path": "dm/host/dm_odyssey_ui.h",
       "normalized_sha256": "41d002c4e35591a5ed81c2d1c150cac5b68e9ee71c867c5220d01aabc0345c60"
     },
     {
       "path": "dm/host/dm_overlay_assets.h",
       "normalized_sha256": "7331e8d2546bf6941a4c2587cae44412089fc42a7ce852096556e139c0306f40"
+    },
+    {
+      "path": "dm/host/hle_hid.c",
+      "normalized_sha256": "025138f0bc0d852dbb113875eecadf45f2a29203b1b5afdd1c7501e86462c037"
     },
     {
       "path": "dm/host/hle_odyssey_display.c",
@@ -121,6 +129,10 @@
       "normalized_sha256": "624048f83bd755bdaffa31eeb3ca784747a5a3bf0148e5a5884887472ccce0fd"
     },
     {
+      "path": "dm/host/tests/t_hid.c",
+      "normalized_sha256": "a4a73f78471417bc5719107bd807952068dd69bb59d534944160f740f332c27b"
+    },
+    {
       "path": "dm/host/tests/t_language.c",
       "normalized_sha256": "eee3cbd5312c3dd182d078a3bbc7041e55b2c74e4c4d218f9a1df75af98d6d8b"
     },
@@ -129,8 +141,16 @@
       "normalized_sha256": "f6160b765c1ffd1befee4f3379562d3ddf9f46bc9530da612d7c7ab742155efc"
     },
     {
+      "path": "dm/ios/Sources/DmGamepad.m",
+      "normalized_sha256": "c9a1642e41a7dfa3f371062f5251fe14e9aa59452a345e23135de48eaf36cbba"
+    },
+    {
       "path": "dm/ios/Sources/dm_external_shaders.h",
       "normalized_sha256": "a3ce53c95c3015fdb0539cc4ebb8daa8fb102d4d18fba1a7af2efc82670a1471"
+    },
+    {
+      "path": "dm/ios/Sources/dm_ios_controllers.h",
+      "normalized_sha256": "54d9ced7ebdd6355222eb7febaf673a93f1bb3bd1df1aa3e059c2dbd9acb8912"
     },
     {
       "path": "dm/ios/Sources/dm_odyssey_runtime.h",
@@ -150,7 +170,7 @@
     },
     {
       "path": "dm/ios/Sources/front_ios.m",
-      "normalized_sha256": "0a1c53cefde490579c23d616e6fbd93c09c023d62bb89af9a3cbc79d8f11448d"
+      "normalized_sha256": "9ed3517cee3f85b2059e2d455cc435748765adea599d23e1280bd8b28036bb98"
     },
     {
       "path": "dm/ios/Sources/main.m",
@@ -161,12 +181,16 @@
       "normalized_sha256": "4e71f3a6549edb8ba34ec279e7e082009d338478588f8308489640931493daab"
     },
     {
+      "path": "dm/ios/tests/t_controller_routing.m",
+      "normalized_sha256": "30013d858451c187b04a12cd51501b31a4ccb8d07526fc79c72911311fb09bac"
+    },
+    {
       "path": "dm/ios/tools/ios_metal.py",
       "normalized_sha256": "5126f742b8d7286c9553c0ab2c7bf64c254cc7694c4d98139ad4541d412365d7"
     },
     {
       "path": "dm/tools/tests/run_attachment_store_native.py",
-      "normalized_sha256": "8bea71ff41e13b0d2fa16057a750888628d94c91ae40fd3d5853c731011f2995"
+      "normalized_sha256": "1716021f50ceb8738a6489a47b5aea3420d8f1d43d23c7c7ed978f3bbf9e01ed"
     },
     {
       "path": "dm/tools/tests/run_command_memory_native.py",
@@ -183,6 +207,10 @@
     {
       "path": "dm/tools/tests/run_fill_pattern_native.py",
       "normalized_sha256": "0b6c382cbf22edd7bb3771fcea66a4e8f412a52d44179b19b515936acfcee4a7"
+    },
+    {
+      "path": "dm/tools/tests/run_ios_controllers_native.py",
+      "normalized_sha256": "4871da4def475e031c225c440538dacd6f20e186c62152bdd2262ddda38126f0"
     },
     {
       "path": "dm/tools/tests/run_language_native.py",
@@ -230,7 +258,7 @@
     },
     {
       "path": "docs/agents/symptoms.md",
-      "normalized_sha256": "2310d9b9e51570e8d117da170f58c766620da55a08bcc98ddef295015578f818"
+      "normalized_sha256": "d76ac5ac903aa6749591089dd9fe9ae6be00386a06788d5f6ac8e28aaa6c879f"
     },
     {
       "path": "docs/reference/nvn-objects.md",
@@ -246,13 +274,13 @@
     },
     {
       "path": "docs/reference/services.md",
-      "normalized_sha256": "bc2f05af18fc3ea71a2bde836c30bcd01f891006571037927ddc1b212203e481"
+      "normalized_sha256": "5d93ef1667471aab59b466fffd570266308afad13bd760a5f31c7b858b31f22f"
     },
     {
       "path": "docs/reference/shaders.md",
       "normalized_sha256": "4bff7b4ece816fde90f5cd73a6a0924b965197e2a093b70079519ef5e20f3d9c"
     }
   ],
-  "scope": "Game-free accepted F16 sampler and display fixes; production bundle activation and retained regressions. Temporary light/chain/audit/screenshot diagnostics and failed multi-mip experiment removed. No game resources, generated game shaders, keys or device logs.",
+  "scope": "Game-free accepted F16 sampler/display fixes, upstream6fe1927 vibration mount query and independent iOS controller routing; production bundle activation and retained regressions. Temporary light/chain/audit/screenshot diagnostics and failed multi-mip experiment removed. No game resources, generated game shaders, keys or device logs.",
   "device_validated": false
 }
