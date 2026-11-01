@@ -117,6 +117,8 @@ jobs:
           python3 dm/tools/tests/run_sampler_mips_native.py
           python3 dm/tools/tests/run_sampler_lifetime_native.py
           python3 dm/tools/tests/run_sampler_audit_native.py --cc clang
+          python3 dm/tools/tests/run_sampler_version_native.py --cc clang
+          python3 dm/tools/tests/run_sampler_version_gpu.py
           python3 dm/tools/tests/run_feedback_mips_native.py
           python3 dm/tools/tests/run_command_memory_native.py --cc clang
           python3 dm/tools/tests/run_odyssey_ui_native.py --cc clang

@@ -2,11 +2,11 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "703778fb934f70f92c6435d3c0053644f744588a20c088952a63fc61a9e87ea6",
+  "patch_sha256": "edf5eb00362111b59e95e3f257f3226211dffa02651fc689350559b7cacc5eb6",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
-      "normalized_sha256": "a4044ab610791004ad0a1266c0548cb61186279c5fdae9c5062655610f2db465"
+      "normalized_sha256": "9579e7a64e002b52c284e4af70b2216ad04ca0e93eda9cf34fd161d7504f87fc"
     },
     {
       "path": "dm/gfx/nvn/dm_chain_probe.h",
@@ -25,6 +25,10 @@
       "normalized_sha256": "5352b153704949de44b45734874408dca4c6186964142e3d0a585f1c90ab0d6f"
     },
     {
+      "path": "dm/gfx/nvn/dm_sampler_version.h",
+      "normalized_sha256": "28e3921204769903e2e7aca1517e6ef2f59d87cf974dbf1b99606ec156a4628f"
+    },
+    {
       "path": "dm/gfx/nvn/dm_shell_msl.h",
       "normalized_sha256": "0b25bcd14e9b9f2ab9726a0e0989e121bf3d4bbaa3d3d7c8a2b90fcfdfeaa41d"
     },
@@ -34,7 +38,7 @@
     },
     {
       "path": "dm/gfx/nvn/hle_nvn.c",
-      "normalized_sha256": "0731f29370914b2091a0c5ca7e2b7c4539aa25b6a22941c2300673f8ea898d68"
+      "normalized_sha256": "e3d758b6ce8fc008971cbdee8e3fe77c93324b2155f7cd3159243327f633d9e6"
     },
     {
       "path": "dm/gfx/nvn/nvn_chain_probe.inc",
@@ -54,11 +58,11 @@
     },
     {
       "path": "dm/gfx/nvn/nvn_mtl.m",
-      "normalized_sha256": "0668658e74a8e27c19924d7b5b5b359176edf0d3e50ba4634ae44581d08a30b7"
+      "normalized_sha256": "a5256438935a960a5d9201157a75dc67f02a9ba0a7675194fd1fdfa2c6fec152"
     },
     {
       "path": "dm/gfx/nvn/nvn_obj.h",
-      "normalized_sha256": "fbb5f140ae4b8c6f985b8f2ca9912e98b0aad12ef0ad54e1fdf9526e8a12f10f"
+      "normalized_sha256": "dde694dc90fb611095c58139c992c8d5dd09e77c54743bd9d75119519a8b2075"
     },
     {
       "path": "dm/gfx/tests/run_nvn_resource_rebind_native.py",
@@ -154,7 +158,7 @@
     },
     {
       "path": "dm/ios/Sources/dm_flicker_diagnostics.h",
-      "normalized_sha256": "e8229edd985f937923368205b7095ef2cc0b96b6b4c7b86c4eeacc203eb8f2f8"
+      "normalized_sha256": "05cb620cca48d3dd378ec0c9cc6bcf08ea5ec77e0b8055c9d0ed8a9bcb3c13c4"
     },
     {
       "path": "dm/ios/Sources/dm_shader_inventory.h",
@@ -210,7 +214,7 @@
     },
     {
       "path": "dm/tools/tests/run_flicker_diagnostics_native.py",
-      "normalized_sha256": "9ff04591f3969027609eb73e95d4f46040f472e35b491437f9c4ea83a054fc63"
+      "normalized_sha256": "c6b3769049fc22a1e407d170bf81386e01926b6a766fc4f58df96919d9ff0b82"
     },
     {
       "path": "dm/tools/tests/run_language_native.py",
@@ -235,6 +239,14 @@
     {
       "path": "dm/tools/tests/run_sampler_mips_native.py",
       "normalized_sha256": "1af1c7396a353f594c2fedb4fc2e4cfd8d525b5f8f4311112917fe9707ee8b7a"
+    },
+    {
+      "path": "dm/tools/tests/run_sampler_version_gpu.py",
+      "normalized_sha256": "7cc50e86471fd8f1d48daaed8e341391966c1c4629e07d3a1f49c7cc14dcb81c"
+    },
+    {
+      "path": "dm/tools/tests/run_sampler_version_native.py",
+      "normalized_sha256": "a35bea14af33108067162e878f982a6607682c8d840b9d27713813a24ce845d5"
     },
     {
       "path": "dm/tools/tests/run_shell_msl_native.py",
@@ -281,6 +293,6 @@
       "normalized_sha256": "4bff7b4ece816fde90f5cd73a6a0924b965197e2a093b70079519ef5e20f3d9c"
     }
   ],
-  "scope": "Game-free accepted F9 host baseline and F13 sampler lifetime fix; screenshot-triggered bounded whole-target/sparse bloom observer, encoded-binding metadata, bounded sampler record/replay history, validated prefix-mip observation and native/GPU tests; no game resources, generated game shaders, keys, screenshot pixels or device logs",
+  "scope": "Game-free accepted F9 host baseline and F13 sampler lifetime fix; screenshot-triggered bounded whole-target/sparse bloom observer, encoded-binding metadata, bounded sampler record/replay history, validated prefix-mip observation and opt-in immediate sampler versions with native/GPU tests; no game resources, generated game shaders, keys, screenshot pixels or device logs",
   "device_validated": false
 }
