@@ -2,7 +2,7 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "09ac1607adf0656901ddd7a7dead1272e13c6c94eb6e46b7501df78e6ed68874",
+  "patch_sha256": "f8e73a6e389147f30b14493a01da3470ece34e3818db45d6a414727cff2ffd89",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
@@ -38,7 +38,7 @@
     },
     {
       "path": "dm/gfx/tests/run_nvn_resource_rebind_native.py",
-      "normalized_sha256": "535668aac1d77e955a46332f1f6bc7aedfb1a06a6d833a2385b96d24061c7eb0"
+      "normalized_sha256": "4f58abac01632d2c14a09cc6e02c91956098a163a85f621581d992b31caf4cfd"
     },
     {
       "path": "dm/gfx/tests/run_nvn_vbuf_bounds_native.py",
