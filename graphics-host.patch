@@ -4924,8 +4924,7 @@ new file mode 100644
 +-(instancetype)init {self=[super init];if(self) _identifier=++created;return self;}
 +-(void)dealloc {destroyed++;}
 +@end
-+// Observe through a separate C-returning frame: ARC may otherwise extend the
-+// temporary strong reference from a weak load across later checks in main.
++// Return only the numeric ID; this observer never transfers object ownership.
 +static __attribute__((noinline)) unsigned live_id(Sampler *__weak *ref) {
 + Sampler *value=*ref;return value.identifier;
 +}
@@ -4957,7 +4956,8 @@ new file mode 100644
 + }
 + // Repeated registration across two in-flight submissions retires each at its
 + // own completion; completing one must not free the newer raw ID.
-+ __weak Sampler *a,*b;
++ __weak Sampler *a;
++ __weak Sampler *b;
 + @autoreleasepool {install(17);a=(__bridge Sampler *)g_sview[17];}
 + @autoreleasepool {mtl_reg_samp(17,&p);}++g_fence;
 + @autoreleasepool {install(17);b=(__bridge Sampler *)g_sview[17];}

@@ -2,7 +2,7 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "5fe74657b7986abe1bdff00254660c18fafc87c207ace219df23fc9bbf38d1a0",
+  "patch_sha256": "2910d3a486d6ecaa81695f866150ca7f1cc476e1eae83f2ea789db58caf6025c",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
@@ -214,7 +214,7 @@
     },
     {
       "path": "dm/tools/tests/run_sampler_lifetime_native.py",
-      "normalized_sha256": "27e15c925fc7e50a02a864bd87be3f32ba3011555f8b3af7ce845cdbc6afae7a"
+      "normalized_sha256": "a7a4fdb16a6a15c5910ca160761c82b3ed2c9c84c74da1abf1dedc8320d7d892"
     },
     {
       "path": "dm/tools/tests/run_sampler_mips_native.py",
