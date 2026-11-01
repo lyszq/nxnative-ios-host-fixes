@@ -2,7 +2,7 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "3ff90f8caaa6ed23632f20607bc2025eb06aca7b57fbfbc3cd9f0c248da86bd1",
+  "patch_sha256": "01180b7b78170e524b2d3bdea99d3c907b5b0040573af8e50a35fc0ecbb752bb",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
@@ -34,7 +34,7 @@
     },
     {
       "path": "dm/gfx/nvn/nvn_mtl.m",
-      "normalized_sha256": "9dbb9adb10eb93a3202b02d595354f2ba682ce806179716da98d63f5c9814ec4"
+      "normalized_sha256": "42c27bcade49fac96b622ffc278b5bb9b3f4f91bb827bb6f2bdbd88ede77c7c5"
     },
     {
       "path": "dm/gfx/nvn/nvn_obj.h",
