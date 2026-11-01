@@ -3562,7 +3562,7 @@ new file mode 100644
 +    dm_haptics_apple_controller(p,c);
 +}
 +static uint32_t ios_controllers_update(NSArray<GCController *> *now,GCController *gone) {
-+    NSCAssert(NSThread.isMainThread,"controller routing requires the main queue");
++    NSCAssert(NSThread.isMainThread,@"controller routing requires the main queue");
 +    dm_pad_merge_unsupported(0); // P2 must not drive P1 while the game is in a one-player menu.
 +    for(int p=0;p<DM_PLAYERS;p++) if(g_ios_held[p]&&
 +        (g_ios_held[p]==gone||![now containsObject:g_ios_held[p]]||!g_ios_held[p].extendedGamepad)) {
@@ -3582,7 +3582,7 @@ new file mode 100644
 +    return mask;
 +}
 +static void ios_controllers_active(int active) {
-+    NSCAssert(NSThread.isMainThread,"controller focus requires the main queue");
++    NSCAssert(NSThread.isMainThread,@"controller focus requires the main queue");
 +    atomic_fetch_add(&g_ios_focus_epoch,1);atomic_store(&g_ios_input_active,active!=0);
 +    for(int p=0;p<DM_PLAYERS;p++) {
 +        if(active) {if(g_ios_held[p]) ios_controller_read(g_ios_held[p].extendedGamepad);}
@@ -3744,7 +3744,7 @@ new file mode 100644
 + TestMotion *m=[TestMotion new];m.hasRotationRate=YES;m.sensorsRequireManualActivation=YES;m.acceleration=(GCAcceleration){0,0,-1};m.rotationRate=(GCRotationRate){0,0,1};c.motion=(id)m;return c;
 +}
 +static void drain(void) {[[NSRunLoop mainRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.03]];}
-+static void emit(TestController *c) {if(c.extendedGamepad.valueChangedHandler)c.extendedGamepad.valueChangedHandler(c.extendedGamepad,nil);}
++static void emit(TestController *c) {if(c.extendedGamepad.valueChangedHandler)c.extendedGamepad.valueChangedHandler(c.extendedGamepad,(id)c.extendedGamepad.buttonA);}
 +int main(void) {@autoreleasepool {
 + unsetenv("DM_MOTION");
 + TestController *a=controller(),*b=controller();

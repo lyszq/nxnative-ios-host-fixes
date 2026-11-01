@@ -2,7 +2,7 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "984639b96624a30ee2a8be5c27636d4b8edbbf9e37430fd529c647ce9eec6762",
+  "patch_sha256": "f6a8569f5afcc87197d1556cdcc32d6f06be9d1bfde51951c1d4418a0d2218ef",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
@@ -150,7 +150,7 @@
     },
     {
       "path": "dm/ios/Sources/dm_ios_controllers.h",
-      "normalized_sha256": "54d9ced7ebdd6355222eb7febaf673a93f1bb3bd1df1aa3e059c2dbd9acb8912"
+      "normalized_sha256": "4f85da7a8df8e5795650c855a6d80bbc09d681d75258c19e58b312b26a7a9531"
     },
     {
       "path": "dm/ios/Sources/dm_odyssey_runtime.h",
@@ -182,7 +182,7 @@
     },
     {
       "path": "dm/ios/tests/t_controller_routing.m",
-      "normalized_sha256": "30013d858451c187b04a12cd51501b31a4ccb8d07526fc79c72911311fb09bac"
+      "normalized_sha256": "52da47e07760e9dae08ed5bccb246f78716e0201ec31b7e5d8a4a37a9717a094"
     },
     {
       "path": "dm/ios/tools/ios_metal.py",
