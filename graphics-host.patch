@@ -5792,7 +5792,7 @@ new file mode 100644
 + text=(ROOT/'dm/gfx/nvn/nvn_mtl.m').read_text(encoding='utf-8')
 + obj=(ROOT/'dm/gfx/nvn/nvn_obj.h').read_text(encoding='utf-8')
 + definition=re.search(r'typedef struct \{[^\n]+\} samp_par;',obj).group()
-+ factory=text[text.index('static id<MTLSamplerState> samp_make('):text.index('static id<MTLSamplerState> samp_by_id(')]
++ factory=text[text.index('static MTLSamplerAddressMode wrapm('):text.index('static id<MTLSamplerState> samp_by_id(')]
 + cache=text[text.index('// Small bounded value cache.'):text.index('static inline __attribute__((always_inline)) void *samp_fast')]
 + with tempfile.TemporaryDirectory(prefix='sampler-version-gpu-') as td:
 +  src=Path(td)/'test.m';exe=Path(td)/'test'

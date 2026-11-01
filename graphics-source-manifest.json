@@ -2,7 +2,7 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "cf40b7b2e2481f6b3d17e1685af4df13055d197f1c27efd1c3492f5b4a21eb3f",
+  "patch_sha256": "3852ea185dd026ff39c93aaf2811aac5ee480cef5d5dde195c70743b7d6f81a2",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
@@ -242,7 +242,7 @@
     },
     {
       "path": "dm/tools/tests/run_sampler_version_gpu.py",
-      "normalized_sha256": "7cc50e86471fd8f1d48daaed8e341391966c1c4629e07d3a1f49c7cc14dcb81c"
+      "normalized_sha256": "e0f70b0f99ec0d5a4ac1d81d000ac26cefe850c235f2a547ba4682f34264d728"
     },
     {
       "path": "dm/tools/tests/run_sampler_version_native.py",
