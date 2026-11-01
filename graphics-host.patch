@@ -2973,7 +2973,7 @@ new file mode 100644
 +static uint64_t g_chp_frame=UINT64_MAX;
 +static const char k_chp_msl[] =
 +"#include <metal_stdlib>\nusing namespace metal;\n"
-+"kernel void chain_probe(texture2d<float,access::read> t [[texture(0)]], device float4 *o [[buffer(0)]], uint i [[thread_position_in_grid]], uint lane [[thread_index_in_threadgroup]], uint3 group [[threadgroup_position_in_grid]]) {\n"
++"kernel void chain_probe(texture2d<float,access::read> t [[texture(0)]], device float4 *o [[buffer(0)]], uint i [[thread_position_in_grid]], uint lane [[thread_index_in_threadgroup]], uint group [[threadgroup_position_in_grid]]) {\n"
 +"uint2 p=uint2(i%16,i/16);uint2 n=uint2(t.get_width(),t.get_height());\n"
 +"uint2 q=min((p*2+1)*n/uint2(32,24),n-1);o[i]=t.read(q);\n"
 +"float3 sum=0,high=float3(-INFINITY);float peak=-INFINITY;uint good=0;\n"
@@ -2981,7 +2981,7 @@ new file mode 100644
 +"for(uint j=i;j<total;j+=192) {float3 c=t.read(uint2(j%n.x,j/n.x)).xyz;if(all(isfinite(c))) {sum+=c;high=max(high,c);peak=max(peak,dot(c,float3(.2126,.7152,.0722)));good++;}}\n"
 +"threadgroup float4 totals[64],peaks[64];totals[lane]=float4(sum,float(good));peaks[lane]=float4(high,peak);threadgroup_barrier(mem_flags::mem_threadgroup);\n"
 +"for(uint step=32;step;step>>=1) {if(lane<step) {totals[lane]+=totals[lane+step];peaks[lane]=max(peaks[lane],peaks[lane+step]);}threadgroup_barrier(mem_flags::mem_threadgroup);}\n"
-+"if(lane==0) {o[192+group.x*2]=totals[0];o[193+group.x*2]=peaks[0];}}\n";
++"if(lane==0) {o[192+group*2]=totals[0];o[193+group*2]=peaks[0];}}\n";
 +static int chp_on(void) {
 +    if(!g_chp_init) { g_chp_init=1;const char *e=getenv("DM_NVN_CHAIN_PROBE");
 +        if(e&&*e) {
