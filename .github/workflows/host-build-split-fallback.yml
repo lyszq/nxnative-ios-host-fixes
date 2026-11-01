@@ -114,6 +114,7 @@ jobs:
           python3 dm/tools/tests/run_flicker_diagnostics_native.py --cc clang
           python3 dm/tools/tests/run_light_probe_native.py --cc clang
           python3 dm/tools/tests/run_chain_probe_native.py --cc clang
+          python3 dm/tools/tests/run_chain_full_gpu.py
           python3 dm/tools/tests/run_sampler_mips_native.py
           python3 dm/tools/tests/run_sampler_lifetime_native.py
           python3 dm/tools/tests/run_feedback_mips_native.py
