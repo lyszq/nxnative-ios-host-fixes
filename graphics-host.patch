@@ -4891,7 +4891,7 @@ diff --git a/dm/tools/tests/run_sampler_lifetime_native.py b/dm/tools/tests/run_
 new file mode 100644
 --- /dev/null
 +++ b/dm/tools/tests/run_sampler_lifetime_native.py
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,114 @@
 +"""Run real sampler-registration/retirement bodies against a delayed GPU model.
 +
 +The GPU model holds numeric resource IDs, never sampler objects. The former
@@ -4924,6 +4924,11 @@ new file mode 100644
 +-(instancetype)init {self=[super init];if(self) _identifier=++created;return self;}
 +-(void)dealloc {destroyed++;}
 +@end
++// Observe through a separate C-returning frame: ARC may otherwise extend the
++// temporary strong reference from a weak load across later checks in main.
++static __attribute__((noinline)) unsigned live_id(Sampler *__weak *ref) {
++ Sampler *value=*ref;return value.identifier;
++}
 +static os_unfair_lock g_rmu=OS_UNFAIR_LOCK_INIT;
 +static samp_par *g_sreg;static uint8_t *g_sreg_ok;static void **g_sview;
 +static uint64_t *g_srid;static int g_nsreg;
@@ -4942,13 +4947,13 @@ new file mode 100644
 +  uint64_t encoded=g_srid[17];unsigned generation=(unsigned)g_reg_gen;
 +  p.lod_min=p.lod_max=(float)(i%5);@autoreleasepool {mtl_reg_samp(17,&p);}
 +  assert(!g_sview[17]&&!g_srid[17]&&g_sreg[17].lod_min==p.lod_min&&g_reg_gen==generation+1);
-+  @autoreleasepool {if(!old) {fprintf(stderr,"FAIL: encoded sampler retired before GPU completion\n");return 1;}assert(old.identifier==encoded);}
++  @autoreleasepool {if(!live_id(&old)) {fprintf(stderr,"FAIL: encoded sampler retired before GPU completion\n");return 1;}assert(live_id(&old)==encoded);}
 +  // Even draining while the CPU is still recording must keep this raw ID live.
-+  @autoreleasepool {defer_drain();assert(old&&g_deferred.count==1);}
++  @autoreleasepool {defer_drain();assert(live_id(&old)&&g_deferred.count==1);}
 +  ++g_fence;
-+  @autoreleasepool {defer_drain();assert(old&&g_deferred.count==1);}
++  @autoreleasepool {defer_drain();assert(live_id(&old)&&g_deferred.count==1);}
 +  g_done=g_fence;@autoreleasepool {defer_drain();}
-+  @autoreleasepool {assert(!old&&g_deferred.count==0);}
++  @autoreleasepool {assert(!live_id(&old)&&g_deferred.count==0);}
 + }
 + // Repeated registration across two in-flight submissions retires each at its
 + // own completion; completing one must not free the newer raw ID.
@@ -4958,9 +4963,9 @@ new file mode 100644
 + @autoreleasepool {install(17);b=(__bridge Sampler *)g_sview[17];}
 + @autoreleasepool {mtl_reg_samp(17,&p);}++g_fence;
 + g_done=g_fence-1;@autoreleasepool {defer_drain();}
-+ @autoreleasepool {assert(!a&&b&&g_deferred.count==1);}
++ @autoreleasepool {assert(!live_id(&a)&&live_id(&b)&&g_deferred.count==1);}
 + g_done=g_fence;@autoreleasepool {defer_drain();}
-+ @autoreleasepool {if(a||b||g_deferred.count) fprintf(stderr,"partial completion: a=%d b=%d queue=%lu created=%u destroyed=%u\n",a!=nil,b!=nil,(unsigned long)g_deferred.count,created,destroyed);assert(!a&&!b&&!g_deferred.count);}
++ @autoreleasepool {assert(!live_id(&a)&&!live_id(&b)&&!g_deferred.count);}
 + // A burst of replaced descriptors remains bounded by outstanding work, then
 + // releases fully rather than accumulating a permanent sampler cache.
 + for(unsigned i=0;i<512;i++) {@autoreleasepool {install(17);mtl_reg_samp(17,&p);}}
