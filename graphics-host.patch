@@ -4940,7 +4940,7 @@ new file mode 100644
 +  __weak Sampler *old;
 +  @autoreleasepool {install(17);old=(__bridge Sampler *)g_sview[17];}
 +  uint64_t encoded=g_srid[17];unsigned generation=(unsigned)g_reg_gen;
-+  p.lod_min=p.lod_max=(float)(i%5);mtl_reg_samp(17,&p);
++  p.lod_min=p.lod_max=(float)(i%5);@autoreleasepool {mtl_reg_samp(17,&p);}
 +  assert(!g_sview[17]&&!g_srid[17]&&g_sreg[17].lod_min==p.lod_min&&g_reg_gen==generation+1);
 +  @autoreleasepool {if(!old) {fprintf(stderr,"FAIL: encoded sampler retired before GPU completion\n");return 1;}assert(old.identifier==encoded);}
 +  // Even draining while the CPU is still recording must keep this raw ID live.
@@ -4954,13 +4954,13 @@ new file mode 100644
 + // own completion; completing one must not free the newer raw ID.
 + __weak Sampler *a,*b;
 + @autoreleasepool {install(17);a=(__bridge Sampler *)g_sview[17];}
-+ mtl_reg_samp(17,&p);++g_fence;
++ @autoreleasepool {mtl_reg_samp(17,&p);}++g_fence;
 + @autoreleasepool {install(17);b=(__bridge Sampler *)g_sview[17];}
-+ mtl_reg_samp(17,&p);++g_fence;
++ @autoreleasepool {mtl_reg_samp(17,&p);}++g_fence;
 + g_done=g_fence-1;@autoreleasepool {defer_drain();}
 + @autoreleasepool {assert(!a&&b&&g_deferred.count==1);}
 + g_done=g_fence;@autoreleasepool {defer_drain();}
-+ @autoreleasepool {assert(!a&&!b&&!g_deferred.count);}
++ @autoreleasepool {if(a||b||g_deferred.count) fprintf(stderr,"partial completion: a=%d b=%d queue=%lu created=%u destroyed=%u\n",a!=nil,b!=nil,(unsigned long)g_deferred.count,created,destroyed);assert(!a&&!b&&!g_deferred.count);}
 + // A burst of replaced descriptors remains bounded by outstanding work, then
 + // releases fully rather than accumulating a permanent sampler cache.
 + for(unsigned i=0;i<512;i++) {@autoreleasepool {install(17);mtl_reg_samp(17,&p);}}
