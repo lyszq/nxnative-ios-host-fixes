@@ -2,11 +2,11 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "f6a8569f5afcc87197d1556cdcc32d6f06be9d1bfde51951c1d4418a0d2218ef",
+  "patch_sha256": "3ff90f8caaa6ed23632f20607bc2025eb06aca7b57fbfbc3cd9f0c248da86bd1",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
-      "normalized_sha256": "a1bc6439240764dfd03a8f5e7817497e2242c1b52167fe46faa2202a136caf16"
+      "normalized_sha256": "aa968e996a0ad6c766a2e1a4bc538a4c2508b1a1b9c1ca43992cebe2e427b148"
     },
     {
       "path": "dm/gfx/nvn/dm_sampler_version.h",
@@ -22,7 +22,7 @@
     },
     {
       "path": "dm/gfx/nvn/hle_nvn.c",
-      "normalized_sha256": "39531de47fb6c9972ab28af14cb943ffb6cd2c10838da4ea622009fb3dbdb484"
+      "normalized_sha256": "67e8e72097ebef9cbb0d44d74bf8f673f05644714cb3d5d06492b788d18ee6e0"
     },
     {
       "path": "dm/gfx/nvn/nvn_feedback.inc",
@@ -34,11 +34,11 @@
     },
     {
       "path": "dm/gfx/nvn/nvn_mtl.m",
-      "normalized_sha256": "01321ff2c50cdd00163bdac6151c42a586eaceecf0d863e42197e92cc79f1de0"
+      "normalized_sha256": "9dbb9adb10eb93a3202b02d595354f2ba682ce806179716da98d63f5c9814ec4"
     },
     {
       "path": "dm/gfx/nvn/nvn_obj.h",
-      "normalized_sha256": "5c3d75200943c1713a8031eeefb99190a568941d3cbf78da25934e63f2a1015e"
+      "normalized_sha256": "3758ffa3297e8d31cfbda367b07d11c9bdcc11f5a9935713f891fb25b03af45a"
     },
     {
       "path": "dm/gfx/tests/run_nvn_resource_rebind_native.py",
@@ -194,7 +194,7 @@
     },
     {
       "path": "dm/tools/tests/run_command_memory_native.py",
-      "normalized_sha256": "e1782d56e267e15ded3850ed4619aff991e277c0f57bc5bc3c949a09a2fc7fb5"
+      "normalized_sha256": "f1154c2414d4e575c43c9313d3aa3915dff68a41d747240bc2af1ab54b5ea337"
     },
     {
       "path": "dm/tools/tests/run_external_shaders_native.py",
@@ -218,7 +218,7 @@
     },
     {
       "path": "dm/tools/tests/run_odyssey_ui_native.py",
-      "normalized_sha256": "939874a0a2144861e958914d414fe096b25f5d83673ce9e19eab15cfc68c9621"
+      "normalized_sha256": "1757fefc1755709febed03adaa42eef0002009a55290eb326e7aacc876ed3ae3"
     },
     {
       "path": "dm/tools/tests/run_sampler_lifetime_native.py",
@@ -234,7 +234,7 @@
     },
     {
       "path": "dm/tools/tests/run_sampler_version_native.py",
-      "normalized_sha256": "953d8afcec3afec8546f1a35cad680b26481e7926140314bb7b51985dcaf55f0"
+      "normalized_sha256": "ee4e7817d3c6ac95f1e766b162941f42a0e0ef3e7e7bbc963310f4a4899cd3e0"
     },
     {
       "path": "dm/tools/tests/run_shell_msl_native.py",
