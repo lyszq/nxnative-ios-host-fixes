@@ -1039,7 +1039,7 @@ index f7011f3..ec3d61d 100644
  uint64_t nvn_new_serial(void);
 diff --git a/dm/gfx/tests/run_nvn_resource_rebind_native.py b/dm/gfx/tests/run_nvn_resource_rebind_native.py
 new file mode 100644
-index 0000000..487c36a
+index 0000000..7c9d8ab
 --- /dev/null
 +++ b/dm/gfx/tests/run_nvn_resource_rebind_native.py
 @@ -0,0 +1,150 @@
@@ -1085,7 +1085,7 @@ index 0000000..487c36a
 +    if not lod:
 +        raise RuntimeError("production sampler LOD-bias assignment is missing")
 +    signature = "if (@available(macOS 26.0, iOS 26.0, tvOS 26.0, *))"
-+    if signature not in source[source.index("static id<MTLSamplerState> samp_by_id"):source.index("static inline __attribute__((always_inline)) void *samp_fast")]:
++    if signature not in source[source.index("static id<MTLSamplerState> samp_make"):source.index("static inline __attribute__((always_inline)) void *samp_fast")]:
 +        raise RuntimeError("the Metal 26 LOD-bias property must have an availability guard")
 +    return r'''
 +#include <stdint.h>
