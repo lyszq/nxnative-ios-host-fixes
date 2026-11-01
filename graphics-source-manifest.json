@@ -2,11 +2,11 @@
   "source_local_commit": "77d2fd1ad8b569054d89c3afc317db5e8585ed4f",
   "source_worktree_dirty": true,
   "base_local_commit": "7abaef53a9c0f914b6a073c63a3b6c906a02bf78",
-  "patch_sha256": "6d127f35f2e4cb31e37ebe6a3d161508471bb7666828c032a695bf9b204ee236",
+  "patch_sha256": "6a48e52518c157c8a09e3db41caa09fff2f3c45c12db6403337ae4bb9ec8f56c",
   "files": [
     {
       "path": "dm/games/0100000000010000/README.md",
-      "normalized_sha256": "2e1f1b285af2554f11e00671315bb567828800a5265c762d34a8a70adb019958"
+      "normalized_sha256": "f81f2f0bb0eef9e958d6a4f53e3753ef2ae908d9ebb80dfd219eb11041f3027a"
     },
     {
       "path": "dm/gfx/nvn/dm_chain_probe.h",
@@ -46,7 +46,7 @@
     },
     {
       "path": "dm/gfx/nvn/nvn_mtl.m",
-      "normalized_sha256": "c110b48302c6ad82a9a9af5ed7477fce42eb860be4a35e3db899a3b4ff938db9"
+      "normalized_sha256": "5129e5595b57ff68af46f6a58e71477e73cbc1ddc96fdcbb56bbe7f0d009e435"
     },
     {
       "path": "dm/gfx/nvn/nvn_obj.h",
@@ -213,6 +213,10 @@
       "normalized_sha256": "939874a0a2144861e958914d414fe096b25f5d83673ce9e19eab15cfc68c9621"
     },
     {
+      "path": "dm/tools/tests/run_sampler_lifetime_native.py",
+      "normalized_sha256": "fb26015f01df1c73b5aac3d56cabca8ab964bfa8748b6277fa01d073cdd48dc8"
+    },
+    {
       "path": "dm/tools/tests/run_sampler_mips_native.py",
       "normalized_sha256": "1af1c7396a353f594c2fedb4fc2e4cfd8d525b5f8f4311112917fe9707ee8b7a"
     },
@@ -238,7 +242,7 @@
     },
     {
       "path": "docs/agents/symptoms.md",
-      "normalized_sha256": "c795ff4e6cd3a331700e74b4675b20aaf705452fec85a98c4d3b6a848bf38257"
+      "normalized_sha256": "2310d9b9e51570e8d117da170f58c766620da55a08bcc98ddef295015578f818"
     },
     {
       "path": "docs/reference/nvn-objects.md",
@@ -250,7 +254,7 @@
     },
     {
       "path": "docs/reference/rendering.md",
-      "normalized_sha256": "d7cd22ad91a6c95f7c08afd8096dff11e2dff05231478c5b566904afb28d3534"
+      "normalized_sha256": "bc17116336118b32e2c3123085c1e0fe0260987f823a65ec820eabd93a7b971c"
     },
     {
       "path": "docs/reference/services.md",
@@ -261,6 +265,6 @@
       "normalized_sha256": "4bff7b4ece816fde90f5cd73a6a0924b965197e2a093b70079519ef5e20f3d9c"
     }
   ],
-  "scope": "Game-free accepted F9 host baseline plus bounded light/per-mip observations, grounded constant snapshots and explicit optional multi-mip read-isolation candidate with native/GPU contract tests; no game resources, generated game shaders, keys, original captures or device logs",
+  "scope": "Game-free accepted F9 host baseline, completion-gated sampler descriptor lifetime correction, bounded light/per-mip observations, optional read-isolation diagnostic and native/GPU contract tests; no game resources, generated game shaders, keys, original captures or device logs",
   "device_validated": false
 }

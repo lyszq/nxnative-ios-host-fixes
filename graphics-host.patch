@@ -1,5 +1,5 @@
 diff --git a/dm/games/0100000000010000/README.md b/dm/games/0100000000010000/README.md
-index bf60f53..eba5fa6 100644
+index bf60f53..17121f6 100644
 --- a/dm/games/0100000000010000/README.md
 +++ b/dm/games/0100000000010000/README.md
 @@ -8,21 +8,22 @@ Update 1.4.1 (v393216) over the base game, SDK 7.3.2. Nintendo EPD's sead / agl
@@ -57,16 +57,18 @@ index bf60f53..eba5fa6 100644
  - **Storage-write tracking follow-up:** [A size-zero storage write needlessly invalidates every partial uniform shadow](../../../docs/reference/rendering.md#a-size-zero-storage-write-needlessly-invalidates-every-partial-uniform-shadow). The upstream host correction is ported and tested with synthetic native bookkeeping; Odyssey GPU behavior and performance remain unmeasured.
  - **Shader build sidecars:** [AppleDouble files are not shader build outputs](../../../docs/reference/packing.md#appledouble-files-are-not-shader-build-outputs). Exact output-name filtering preserves the existing shader/cache identity.
  
-@@ -87,6 +90,8 @@ General host and tool changes first needed here; each applies to every game:
+@@ -87,6 +90,10 @@ General host and tool changes first needed here; each applies to every game:
  
  ## Open
  
++**F12 log-9 / sampler lifetime follow-up (open):** user confirms unchanged FPS and continuing flashes with the multi-mip snapshot intervention active. All 16800 records cover 1200 frames 9000-10199, 14 passes/frame, no skipped/capped/nonfinite samples. First-downsample pulses remain (including F9627-9628); isolation was not a cure. A source audit found [premature release of re-registered samplers](../../../docs/reference/rendering.md#replaced-sampler-descriptors-release-live-gpu-resource-ids). The generic completion-gated lifetime correction is distinct from attributing the physical flash. F13 uses ordinary `bloom:9000:1200` observation, leaving the failed multi-mip intervention off. Device flicker acceptance is still required; do not claim a permanent cure from source tests.
++
 +- **F5 split delivery:** the user reported that the 733 MB all-in-one IPA could not be sideloaded. A small IPA plus an unchanged external shader ZIP is supported by [separate iOS shader delivery](../../../docs/reference/packing.md#separate-ios-shader-delivery). This does not establish the precise sideloader failure cause; device acceptance remains pending.
 +
  - The three thunder geometry shaders do not translate.
  - The silent first minute of sound.
  - development.md calls SDK 7.3.2 "the oldest so far"; Mario Kart 8 Deluxe (SDK 4.4.0) is older now.
-@@ -102,3 +107,26 @@ An explicit stock/off selection leaves the register frame and existing overlays
+@@ -102,3 +109,26 @@ An explicit stock/off selection leaves the register frame and existing overlays
  **F3 device observation, 2026-10-29:** the user reports working resolution switching and smooth native 2732x2048 gameplay on an 8 GB iPad Air M2, with high RAM use and little perceived improvement over 1080p. The 4:3 world view is reported correct; text and main-menu proportions remain distorted. Bloom/lighting flashes and short first-encounter hitches remain. These are user observations, not controlled frame-time, memory, or visual A/B measurements.
  
  **F4 default:** 1080p is recommended for memory efficiency and is the default for an unset supported display selection. Saved native, 1440p and stock values and explicit environment overrides retain precedence. When the launcher is skipped, the host adopts 1080p only for the exact docked build with complete display gates and validated assets; the standalone policy parser still treats an absent choice as stock. The 4:3 option stays off by default. A 4:3 1080p target is 1440x1080; wide 1080p is 1920x1080. No F4 device result is claimed.
@@ -233,7 +235,7 @@ index dd159ac..42773e2 100644
      vconv_bind(re, j->vs, 1, &j->vertex_range, NULL);
      args_dirty_all(); encode_args(re, j->vs, 0, 1); enc_r_vbuf(re, 13, j->capture_info);
 diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
-index 8e032ea..bc0db74 100644
+index 8e032ea..eadef25 100644
 --- a/dm/gfx/nvn/nvn_mtl.m
 +++ b/dm/gfx/nvn/nvn_mtl.m
 @@ -1290,8 +1290,19 @@ void mtl_sub_fill(uint64_t dst, uint64_t n, uint32_t value) {
@@ -308,7 +310,24 @@ index 8e032ea..bc0db74 100644
      pg_render(pd, (NSUInteger)R.rt.n);
      { void td_note(id pd, NSUInteger nc); td_note(pd, (NSUInteger)R.rt.n);
        void ts_note(id pd, NSUInteger nc); ts_note(pd, (NSUInteger)R.rt.n);
-@@ -4456,6 +4472,8 @@ static id<MTLSamplerState> samp_by_id(int sid) {   // Caller holds g_rmu
+@@ -4222,7 +4238,15 @@ void mtl_reg_samp(int sid, const samp_par *sp) {
+     os_unfair_lock_lock(&g_rmu);
+     if (id_ >= g_nsreg) { int n = id_ + 256; g_sreg = realloc(g_sreg, n * sizeof *g_sreg); g_sreg_ok = realloc(g_sreg_ok, n); g_sview = realloc(g_sview, n * sizeof *g_sview); g_srid = realloc(g_srid, n * sizeof *g_srid);
+         memset(g_sreg_ok + g_nsreg, 0, n - g_nsreg); memset(g_sview + g_nsreg, 0, (n - g_nsreg) * sizeof *g_sview); memset(g_srid + g_nsreg, 0, (n - g_nsreg) * sizeof *g_srid); g_nsreg = n; }
+-    if (g_sview[id_]) { CFRelease(g_sview[id_]); g_sview[id_] = NULL; g_srid[id_] = 0; }
++    // Encoded argument buffers contain only a raw sampler GPU resource ID.
++    // Metal4 does not retain that object: replacing a descriptor must keep the
++    // old sampler alive through queued/current work, just as texture views do.
++    if (g_sview[id_]) {
++        defer_obj_unref((__bridge id)g_sview[id_]); CFRelease(g_sview[id_]); g_sview[id_] = NULL; g_srid[id_] = 0;
++        static uint64_t retired; retired++;
++        if (retired == 1 || retired == 10 || retired % 10000 == 0)
++            MLOG("sampler lifetime: replaced descriptor #%llu sid=%d retained through fence %llu", (unsigned long long)retired, id_, (unsigned long long)(g_fence + 1));
++    }
+     g_reg_gen++;
+     g_sreg[id_] = *sp; g_sreg_ok[id_] = 1;
+     os_unfair_lock_unlock(&g_rmu);
+@@ -4456,6 +4480,8 @@ static id<MTLSamplerState> samp_by_id(int sid) {   // Caller holds g_rmu
      d.mipFilter = p.minf <= 1 ? MTLSamplerMipFilterNotMipmapped : (p.minf == 2 || p.minf == 3) ? MTLSamplerMipFilterNearest : MTLSamplerMipFilterLinear;
      d.sAddressMode = wrapm(p.ws); d.tAddressMode = wrapm(p.wt); d.rAddressMode = wrapm(p.wr);
      d.lodMinClamp = p.lod_min < 0 ? 0 : p.lod_min; d.lodMaxClamp = p.lod_max;
@@ -317,7 +336,7 @@ index 8e032ea..bc0db74 100644
      d.maxAnisotropy = p.aniso < 1 ? 1 : p.aniso > 16 ? 16 : (NSUInteger)p.aniso;
      if (p.cmp_mode) d.compareFunction = (MTLCompareFunction)(p.cmp_func - 1);
      // Reduction (NVN 1 min / 2 max): the minimum or maximum of the texels a filtered sample covers, per channel (Metal 26). Pokémon Legends: Z-A builds its depth pyramid with a min sampler
-@@ -4548,31 +4566,38 @@ static void ubd_dirty(uint64_t lo, uint64_t hi) {
+@@ -4548,31 +4574,38 @@ static void ubd_dirty(uint64_t lo, uint64_t hi) {
  // NVN permits byte-aligned vertex streams; Metal drops the low two address bits. Keep an aligned copy in the submission arena.
  // A CPU copy is safe only without GPU writers (including earlier submissions and sparse aliases). Otherwise copy on the GPU before
  // opening the draw's encoder. Guest writes and pool remaps invalidate reuse; scratch copies themselves do not change guest memory.
@@ -368,7 +387,7 @@ index 8e032ea..bc0db74 100644
      else {
          g_blit_alias = 1;
          id<MTL4ComputeCommandEncoder> e = blit();   // lands deferred updates and orders all preceding GPU writes, including aliases
-@@ -4583,11 +4608,41 @@ static uint64_t vbuf_unaligned(uint64_t addr, uint64_t size, int prepare) {
+@@ -4583,11 +4616,41 @@ static uint64_t vbuf_unaligned(uint64_t addr, uint64_t size, int prepare) {
      if (!c) { c = malloc(sizeof *c); if (!c) MDIE("cannot allocate vertex copy cache entry"); nvn_hm_put(&g_vbuf_unaligned, key, c); }
      *c = (vbuf_copy){ab.gpuAddress + off, g_wr_epoch, g_vbuf_write_epoch, g_sbw_gen, g_npend}; return c->gpu;
  }
@@ -412,7 +431,7 @@ index 8e032ea..bc0db74 100644
      sub = g_sub_serial; gen = pool_gen; sparse = sparse_gen;
  }
  // Resolved guest streams are separate from the table cache: vconv_bind may overwrite a stream's table slot.
-@@ -4598,7 +4653,7 @@ static void bind_vbufs(id<MTL4RenderCommandEncoder> en) {
+@@ -4598,7 +4661,7 @@ static void bind_vbufs(id<MTL4RenderCommandEncoder> en) {
      for (int s = 0; s < 16; s++) {
          uint64_t addr = S.vbuf[s].address, gpu;
          if (!addr) continue;
@@ -421,7 +440,7 @@ index 8e032ea..bc0db74 100644
          if (g_vbuf_cache && cache[s].addr == addr && cache[s].gen == gen) { gpu = cache[s].gpu; g_vbuf_reuse++; }
          else {
              void *mb; uint64_t mo; g_vbuf_resolve++;
-@@ -4623,7 +4678,9 @@ static void pull_layout_fill(pull_layout *Lp) {
+@@ -4623,7 +4686,9 @@ static void pull_layout_fill(pull_layout *Lp) {
      pull_layout L; memset(&L, 0, sizeof L); uint32_t lo[16] = {0};
      for (int st = 0; st < 16; st++) {
          uint64_t addr = S.vbuf[st].address, gpu; void *mb; uint64_t mo;
@@ -432,7 +451,7 @@ index 8e032ea..bc0db74 100644
          L.s[st].base = gpu & ~3ull; lo[st] = (uint32_t)(gpu & 3); L.s[st].stride = S.stream[st].stride; L.s[st].divisor = S.stream[st].divisor;
      }
      for (int a = 0; a < 16 && a < S.nattr; a++) {
-@@ -5032,7 +5089,7 @@ static void vc_stat(void) {   // every 3600 submissions
+@@ -5032,7 +5097,7 @@ static void vc_stat(void) {   // every 3600 submissions
      g_vc_stat = g_sub_serial; g_vc_conv = g_vc_whole = 0;
  }
  // Per submission, one conversion per (range, format, layout): KTGL draws the same mesh several times a frame (depth, shadow, G-buffer)
@@ -441,7 +460,7 @@ index 8e032ea..bc0db74 100644
  static void vconv_bind(id<MTL4RenderCommandEncoder> en, NvShader *vs, int tf, const p_draw *dw, const p_draw_idx *di) {   // tf: a transform feedback capture (no shadow inputs)
      const nvn_refl *rf = &vs->rf; int slot = VCONV_SLOT0, vc = vc_on(), rk = -1, on = vin_on(vs, NULL, tf); int64_t rlo = 0, rhi = 0;   // rk: the draw's vertex range is known (-1 = not looked up yet)
      vc_stat();
-@@ -5040,24 +5097,31 @@ static void vconv_bind(id<MTL4RenderCommandEncoder> en, NvShader *vs, int tf, co
+@@ -5040,24 +5105,31 @@ static void vconv_bind(id<MTL4RenderCommandEncoder> en, NvShader *vs, int tf, co
          if (!vconv_wanted(rf, v, NULL, on) || rf->v[v].nvn >= S.nattr) continue;
          int a = rf->v[v].nvn, st = S.attr[a].stream, f = S.attr[a].fmt; uint32_t off = S.attr[a].offset, stride = st < 16 ? S.stream[st].stride : 0;
          uint64_t addr = st < 16 ? S.vbuf[st].address : 0, size = st < 16 ? S.vbuf[st].size : 0, gpu = 0;
@@ -479,7 +498,7 @@ index 8e032ea..bc0db74 100644
          }
          if (gpu) enc_r_vbuf(en, (NSUInteger)slot, gpu - v0 * 16);   // vertex id v0 reads the first converted element
          slot++;
-@@ -5684,8 +5748,8 @@ extern int dm_shader_learn_enabled(void);
+@@ -5684,8 +5756,8 @@ extern int dm_shader_learn_enabled(void);
  // that one declaration in the shader's own source, converts the values written to it, compiles the source again and
  // builds the pipeline from the result. The row is kept in Documents, so the next launch's shader preparation compiles it
  // that way from the start and this never runs for that shader again.
@@ -490,7 +509,7 @@ index 8e032ea..bc0db74 100644
  static NSMutableDictionary<NSString *, id> *g_learn_fn;   // key -> LearnFn: a function built from the rewritten source
  static os_unfair_lock g_learn_lock = OS_UNFAIR_LOCK_INIT;
  @interface LearnFn : NSObject { @public id<MTLFunction> fn; unsigned mask; } @end
-@@ -5720,8 +5784,12 @@ static id<MTLFunction> learn_fn(NvShader *fs, unsigned mask) {
+@@ -5720,8 +5792,12 @@ static id<MTLFunction> learn_fn(NvShader *fs, unsigned mask) {
      // fs->key is a char[24], not an object: "%@" on it hands CFString a bare pointer and the format machinery sends
      // respondsToSelector to the characters themselves (SIGTRAP in objc_opt_respondsToSelector). "%s" it is.
      NSString *path = [NSString stringWithFormat:@"%@/%s.metallib", g_msl_dir, fs->key];
@@ -504,7 +523,7 @@ index 8e032ea..bc0db74 100644
      if (![txt hasPrefix:@"#"]) { MLOG("[RED] shader %s: %s is a compiled library, not source: its output types cannot be rewritten", fs->key, path.lastPathComponent.UTF8String); return nil; }
      size_t on = 0;
      char *w = dm_shader_learn_rewrite(txt.UTF8String, strlen(txt.UTF8String), mask, &on);
-@@ -6657,12 +6725,14 @@ static int img_atomic_ok(id<MTLTexture> t, const nvn_rbind *b) {
+@@ -6657,12 +6733,14 @@ static int img_atomic_ok(id<MTLTexture> t, const nvn_rbind *b) {
  static uint64_t g_draw_seq, g_fb_seq, g_fb_count; static int g_fb_n, g_fb_rebind;
  static __unsafe_unretained id<MTLTexture> g_fb_src[4]; static __strong id<MTLTexture> g_fb_use[4]; static uint64_t g_fb_rid[4];
  static uint8_t g_args_dirty[6] = {1, 1, 1, 1, 1, 1};
@@ -523,7 +542,7 @@ index 8e032ea..bc0db74 100644
      }
  }
  static NSUInteger g_args_mesh;   // nonzero: geometry-stage arguments go to this slot of the vertex table, which the mesh stage shares (geo_mesh_draw)
-@@ -6709,12 +6779,14 @@ static uint32_t g_dispatch_dim[3];   // the current dispatch's workgroup counts
+@@ -6709,12 +6787,14 @@ static uint32_t g_dispatch_dim[3];   // the current dispatch's workgroup counts
  static uint32_t g_draw_binst;   // the current draw's base instance (draw), for c0 + 0x644
  static __unsafe_unretained id<MTLBuffer> g_c0_dim_buf; static size_t g_c0_dim_off;   // where encode_args put them for this dispatch (nil: the shader reads no c0); an indirect dispatch copies its GPU-written counts there
  static uint64_t g_geo_bind[5];
@@ -539,7 +558,7 @@ index 8e032ea..bc0db74 100644
          bind_args(en, nvn_stage, metal_vertex, sh->ab_buf, sh->ab_gpu, sh->ab_off, sh->rf.abi);
          g_stat_args_reuse++;
          return 1;
-@@ -6737,10 +6809,27 @@ static int encode_args_(id<MTLCommandEncoder> en, NvShader *sh, int nvn_stage, i
+@@ -6737,10 +6817,27 @@ static int encode_args_(id<MTLCommandEncoder> en, NvShader *sh, int nvn_stage, i
              if (!u || !u->addr || !mtl_gpu_addr(u->addr, 1, &mb, &mo, &gpu)) {   // reads 0 (the all-zero bank), as an unbound texture slot does, instead of through a null pointer
                  RED_ONCE(16, "stage %d cb%d has no uniform buffer bound", nvn_stage, reg); slots[aid] = zero_bank_gpu(); USE(zero_bank(), MTLResourceUsageRead); continue; }
              uint64_t ul = cb_len(sh, reg, u->size);   // what the shader can read of it
@@ -569,7 +588,7 @@ index 8e032ea..bc0db74 100644
              if (bl) {
                  PD("B %llu st%d cb reg%d addr=%#llx size=%llu pool=%#llx+%#llx f=%g,%g,%g,%g", g_stat_pass, nvn_stage, reg, (unsigned long long)u->addr, (unsigned long long)u->size,
                     (unsigned long long)(u->addr - mo), (unsigned long long)mo, ((float *)u->addr)[0], ((float *)u->addr)[1], ((float *)u->addr)[2], ((float *)u->addr)[3]);
-@@ -6799,6 +6888,7 @@ static int encode_args_(id<MTLCommandEncoder> en, NvShader *sh, int nvn_stage, i
+@@ -6799,6 +6896,7 @@ static int encode_args_(id<MTLCommandEncoder> en, NvShader *sh, int nvn_stage, i
                  else tex_mis_note(sh, nvn_stage, b->kind == NVN_RB_TEX ? reg : -1, tid, t, (MTLTextureType)b->dtt, "bound as is"); }
              if (!t) { t = dummy_tex(b->dtt, b->dpf); trid = g_dummy_tex_rid[b->dtt & 7][b->dpf & 3]; }
              else if (b->dtt == (uint8_t)MTLTextureTypeTextureBuffer) t = tbuf_shadow(t, &trid);   // see tbuf_shadow
@@ -577,7 +596,7 @@ index 8e032ea..bc0db74 100644
              slots[aid] = trid;
              USE(t, MTLResourceUsageRead);
          } else if (b->kind == NVN_RB_IMG) {   // Writable texture: NVN image slot r (BindImages) ↔ D3D u_r
-@@ -7084,11 +7174,12 @@ static int sdx_decide(uint8_t st[9]);   // Store lookahead decision (for the ind
+@@ -7084,11 +7182,12 @@ static int sdx_decide(uint8_t st[9]);   // Store lookahead decision (for the ind
  static void sd_finish(void) {
      if (!g_nsd) return;
      uint8_t nst[9];
@@ -592,7 +611,7 @@ index 8e032ea..bc0db74 100644
          // A color attachment written in the same pass as the window texture does not enter the ledger: it is a link in the present chain, not a transient attachment that is 'reset every frame before use'.
          // The in-run 'upscale' pass writes two textures at once - scene texture + window texture - and the UI composite was merged into the same pass, so in-run nobody reads back the scene texture; as soon as the game stops drawing 3D (loading screen)
          // a separate composite pass samples it afterwards instead. 'About to enter the loading screen' is only known after the previous frame was submitted, so prediction cannot stop it: on iPad true fullscreen every install hits it once on the first act change
-@@ -7098,10 +7189,11 @@ static void sd_finish(void) {
+@@ -7098,10 +7197,11 @@ static void sd_finish(void) {
                                          && !xv_disabled(xtag = xv_tag_pass(R.rt.color[t->idx], t->lv, t->idx, &R.rt));
          int xvdead = xvcand && xv_trial_get(xtag, 0) >= XV_TRIAL;   // Only after the trial period is the write-back really skipped
          if (xvcand && !xvdead) xv_set(t->ser, t->lv, t->sl, XV_PROBE, xtag);   // Trial period: write back as usual, only track the next touch
@@ -606,7 +625,7 @@ index 8e032ea..bc0db74 100644
          if (!t->state) t->why = 5;
          PD("Z %llu %s ser=%llu lv%u sl%u %s why=%d by=%s slot=%d", g_stat_pass, t->depth == 1 ? "d" : t->depth == 2 ? "s" : "c", (unsigned long long)t->ser, t->lv, t->sl, xvdead ? "dontcare-xv" : dead ? "dontcare" : "store", dead ? 0 : t->why, t->why == 1 && t->wkey ? t->wkey : "-", t->wslot);
          if (udc_on()) PD("U %llu %s ser=%llu lv%u sl%u runtime=%s reason=%s state=%d load=%d", g_stat_pass, t->depth == 1 ? "d" : t->depth == 2 ? "s" : "c", (unsigned long long)t->ser, t->lv, t->sl, t->wrote ? "written" : "unwritten", t->wwhy == 1 ? "image_write" : t->wwhy == 2 ? "color_write_mask" : t->wwhy == 3 ? "fragment_output" : t->wwhy == 4 ? "depth_write" : t->wwhy == 5 ? "stencil_write" : "none", t->state, t->load);
-@@ -8534,7 +8626,7 @@ void ms_after(void) {
+@@ -8534,7 +8634,7 @@ void ms_after(void) {
  // on Metal, writing and sampling the same attachment within one render pass is undefined: the Mac happens to read correctly, while the iPhone (A20 Pro) now and then reads whole 16x16 blocks as (1,0,1) and FXAA carries them into the picture - the magenta squares in 1-1
  // (measured with DM_NVN_MAGSCAN: the squares first appear on this attachment, and still appear with the particle dropped).
  // The fix: before this draw opens its render pass, end the current render pass (the attachment lands in memory), copy that level and layer into a snapshot texture in the replay stream, make this draw sample the snapshot; later draws reopen the render pass as usual (loading the attachment).
@@ -615,7 +634,7 @@ index 8e032ea..bc0db74 100644
  // Which fragment shaders get it: the game profile's feedback_snap (key prefixes, space-separated); DM_NVN_FB_SNAP=0 none, all every shader, <keys,...> another list. The cost of doing all:
  // Breath of the Wild has over a thousand draws a frame sampling the G-buffer of their own pass (frame time 16.6 -> 36.6 ms) and Mario Wonder's submit time went 1.4 -> 4.0 ms, so only shaders seen to break are listed
  static char g_fb_keys[16][20]; static int g_fb_nk = -1, g_fb_all;
-@@ -8547,13 +8639,18 @@ static int fb_want(const char *key) {
+@@ -8547,13 +8647,18 @@ static int fb_want(const char *key) {
      for (int i = 0; i < g_fb_nk; i++) if (!strncmp(key, g_fb_keys[i], strlen(g_fb_keys[i]))) return 1;
      return 0;
  }
@@ -639,7 +658,7 @@ index 8e032ea..bc0db74 100644
      return t;
  }
  // Called before the draw opens its render pass: if a snapshot is needed, end the current render pass, copy the snapshot and register the substitution (used by this draw's argument encoding)
-@@ -8573,23 +8670,24 @@ static void fb_prepare(NvProg *pr) {
+@@ -8573,23 +8678,24 @@ static void fb_prepare(NvProg *pr) {
              int dup = 0; for (int q = 0; q < g_fb_n; q++) dup |= g_fb_src[q] == t; if (dup) continue;
              id<MTLTexture> base = t.parentTexture ? t.parentTexture : t; NSUInteger tl = t.parentTexture ? t.parentRelativeLevel : 0, ts = t.parentTexture ? t.parentRelativeSlice : 0;
              if (tl + t.mipmapLevelCount <= (NSUInteger)lv || tl > (NSUInteger)lv) continue;   // the sampled levels do not include the attachment's level (mip generation etc.): not feedback
@@ -671,7 +690,7 @@ index 8e032ea..bc0db74 100644
              PD("N %llu same-pass feedback sampling: attachment %d ser=%llu level %d layer %d copied into a snapshot; this draw samples the snapshot", g_stat_pass + !g_enc, k, (unsigned long long)ser, lv, sl);
          } }
      if (g_fb_n) { g_fb_seq = g_draw_seq; args_dirty_all(); g_fb_rebind = 1; }
-@@ -9203,7 +9301,7 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
+@@ -9203,7 +9309,7 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
      if (g_enc && g_pass.layered != g_rp_layered) rp_end();   // a layered pass only for layer-writing vertex shaders (see rp_begin_ex)
      if (g_enc && g_sm_pass && draw_samples_rt(pr)) { PD("M %llu a draw in the slice-merged pass samples its attachment; split here", g_stat_pass); rp_end(); }
      if (!g_enc && mode == 0 && !g_rp_layered && !defer_q_draw && g_exec_next && !tbdr_on() && !g_geo_program && sm_on()) sm_plan(pr);
@@ -680,7 +699,7 @@ index 8e032ea..bc0db74 100644
      id<MTLRenderCommandEncoder> en = rp_begin_ex(mode);
      g_rp_layered = 0; g_sm_plan.on = 0;
      g_fd_dw = NULL; g_fd_di = NULL;
-@@ -9213,7 +9311,7 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
+@@ -9213,7 +9319,7 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
          // A replayed draw may have ended Q's encoder to align a GPU-written stream. Restore this draw's streams and encoder.
          g_rp_layered = pr->sh[0] && pr->sh[0]->layer_out;
          if (g_enc && g_pass.layered != g_rp_layered) rp_end();
@@ -689,7 +708,7 @@ index 8e032ea..bc0db74 100644
          if (!en) return;
      }
      if (skip_d) { g_stat_ds_omit++; if (mode == 3) g_stat_s_only++; else if (mode == 4) g_stat_d_only++; }
-@@ -9280,6 +9378,14 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
+@@ -9280,6 +9386,14 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
      g_kd_force = kd_draw(pr, dw, di);
      if (pr->sh[0]) encode_args(en, pr->sh[0], 0, 1);
      if (pr->sh[1] && !S.rast_discard) encode_args(en, pr->sh[1], 1, 0);
@@ -704,7 +723,7 @@ index 8e032ea..bc0db74 100644
      // Parameter binding captures the actual resources under the registry lock; if the version changed between the eligibility check and the binding, split and retry before any GPU draw.
      if (g_rt_range_active && (g_pass.reg_gen != g_reg_gen || g_pass.ser_gen != g_ser_gen || g_pass.range_dirty != nvn_dirty_now())) { rp_end(); draw(dw, di); return; }
      int prim = dw ? dw->prim : di->prim;
-@@ -9304,6 +9410,8 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
+@@ -9304,6 +9418,8 @@ static void draw_(const p_draw *dw, const p_draw_idx *di) {
          }
      }
      g_stat_draw++;
@@ -713,7 +732,7 @@ index 8e032ea..bc0db74 100644
      if (enc_label_on() && !g_el_draws++ && pr->sh[1]) { memcpy(g_el_key, pr->sh[1]->key, 8); g_el_key[8] = 0; }
      if (passdump()) {   // Characteristics of a render pass's first draw (to judge whether the load can be omitted: full screen, no blending, writes all channels, does not depend on depth); with DM_NVN_PASSDUMP_ALL every draw is recorded
          static uint64_t last_pass = ~0ull; static int all = -1; if (all < 0) all = getenv("DM_NVN_PASSDUMP_ALL") != NULL;
-@@ -10688,7 +10796,10 @@ static id<MTLTexture> present_raw_src(id<MTLTexture> src) {
+@@ -10688,7 +10804,10 @@ static id<MTLTexture> present_raw_src(id<MTLTexture> src) {
  // The rectangle of the canvas (dw x dh) the picture (cw x ch) is drawn into: the picture's aspect ratio kept and centred, black bars in the rest (no stretching when the screen's ratio
  // differs from the game's, e.g. iPhone about 19.5:9 against the game's 16:9); when the ratios differ by under 1 % (the remainder from a game width that is a multiple of 8 in the
  // full-screen setup, e.g. 1952x900 against 2868x1320 differs by 0.17 %) the whole canvas, leaving no border of a few pixels
@@ -724,7 +743,7 @@ index 8e032ea..bc0db74 100644
      double s = fmin(dw / cw, dh / ch);
      MTLViewport vp = {floor((dw - cw * s) / 2), floor((dh - ch * s) / 2), round(cw * s), round(ch * s), 0, 1};
      if (fabs((dw / dh) / (cw / ch) - 1) < 0.01) vp = (MTLViewport){0, 0, dw, dh, 0, 1};
-@@ -10873,9 +10984,11 @@ static void present_gpu_note(double s, int fx) {
+@@ -10873,9 +10992,11 @@ static void present_gpu_note(double s, int fx) {
      n[fx] = 0;
  }
  static double g_link_it_tin;   // Enqueue time of the frame the display-link callback is presenting (read and written only on the display-link thread)
@@ -737,7 +756,7 @@ index 8e032ea..bc0db74 100644
      if (bootprof() && (g_present_n == 1 || g_present_n % 120 == 0)) {
          if (g_present_n == 1) g_bp_first_present = bp_now() - g_bp_t0;
          MLOG("[bootprof] t=%.3f s present #%llu: metallibs loaded %llu / %.1f ms; pipelines created %llu / %.1f ms (all synchronous on the submit thread); prewarmed and used: shaders %llu / render pipelines %llu / compute pipelines %llu; "
-@@ -10999,14 +11112,14 @@ static int present_now(const tex_t *t, double period, uint64_t frame, uint64_t t
+@@ -10999,14 +11120,14 @@ static int present_now(const tex_t *t, double period, uint64_t frame, uint64_t t
  // Swapchain texture return: before AcquireTexture gets a texture it waits for the ticket of that texture's previous present to be processed (mtl_present_wait), after which the commands the game draws into it
  // are necessarily ordered after that blit on the GPU queue.
  #define PQ 8
@@ -754,7 +773,7 @@ index 8e032ea..bc0db74 100644
  static double g_link_vperiod, g_link_vhalf;   // virtual ticks (link_range): seconds per counted tick (0 = every callback is a tick) and half a refresh of the screen
  
  @interface NvMetalDisplayLinkDelegate : NSObject <CAMetalDisplayLinkDelegate>
-@@ -11072,7 +11185,7 @@ __attribute__((weak)) uint64_t dm_focus_in_since(void) { return 0; }
+@@ -11072,7 +11193,7 @@ __attribute__((weak)) uint64_t dm_focus_in_since(void) { return 0; }
      pthread_mutex_unlock(&g_pq_mu);
      int submitted;
      ext_wait(it.ev_val); snap_commit_wait(it.snap_v);
@@ -763,7 +782,7 @@ index 8e032ea..bc0db74 100644
      g_link_hold_until = submitted && it.period > 0.025 ? update.targetPresentationTimestamp + it.period : 0;
      if (!submitted) {
          pthread_mutex_lock(&g_pq_mu);
-@@ -11192,7 +11305,7 @@ static void *present_main(void *arg) {
+@@ -11192,7 +11313,7 @@ static void *present_main(void *arg) {
          pthread_mutex_unlock(&g_pq_mu);
          int submitted;
          ext_wait(it.ev_val); snap_commit_wait(it.snap_v);
@@ -772,7 +791,7 @@ index 8e032ea..bc0db74 100644
          pthread_mutex_lock(&g_pq_mu); g_classic_busy = 0; pthread_cond_broadcast(&g_pq_cv); pthread_mutex_unlock(&g_pq_mu);
          if (!submitted) {
              pthread_mutex_lock(&g_pq_mu);
-@@ -11324,6 +11437,7 @@ static uint64_t snap_take(const tex_t *t) {
+@@ -11324,6 +11445,7 @@ static uint64_t snap_take(const tex_t *t) {
      return g_snap[k].serial;
  }
  static uint64_t present_enqueue(const tex_t *t, double period, const int crop[4], uint64_t ev_val) {
@@ -780,7 +799,7 @@ index 8e032ea..bc0db74 100644
      atomic_store(&dm_present_ns, now_ns());
      if (g_classic || atomic_load(&g_present_discard)) return 0;   // Ticket number 0 = no pending present; the swapchain texture acquire does not wait (g_classic: no Metal 4 queue to present on)
      if (t) { xv_check(t->serial, 0, 0, "present"); if (g_xv_npresent < 128) g_xv_present[g_xv_npresent++] = t->serial; }
-@@ -11343,7 +11457,7 @@ static uint64_t present_enqueue(const tex_t *t, double period, const int crop[4]
+@@ -11343,7 +11465,7 @@ static uint64_t present_enqueue(const tex_t *t, double period, const int crop[4]
      }
      pthread_mutex_lock(&g_pq_mu);
      while (g_pq_in - g_pq_done >= PQ) pthread_cond_wait(&g_pq_cv, &g_pq_mu);   // Wait only when the queue is full; normally AcquireTexture blocks first
@@ -2546,7 +2565,7 @@ index 6e40b47..ab6bc12 100644
  | `DM_NVN_UB_DEFER=0` | End the render pass at every inline uniform update (`nvnCommandBufferUpdateUniformBuffer`), as before. By default an update inside an open pass is deferred to the pass end; the draws after it read a shadow made of the deferred updates when they cover all the shader can read of the binding (`cb_extent.tsv`), or of memory and the updates queued in the submission when they cover part of it (`DM_NVN_UB_PARTIAL`), and the pass still ends first for a draw that needs more (the data read as vertices, indices, indirect arguments or a storage buffer, or a partly covered block memory cannot give). The `residency set` line counts deferred updates, shadows read from memory and early ends |
  | `DM_NVN_UB_PARTIAL=0` | A uniform block the deferred updates cover only in part ends the pass, as before. By default its shadow starts from memory and takes every inline update queued in the submission, newest last, when nothing else can have written the range by the time the pass runs: no copy, fill or transform-feedback write queued in the submission, no storage buffer a shader may write (every one but the slots `cb_extent.tsv` proves unwritten) and no texture→buffer copy over it in the submission, and no GPU write or counter report of an earlier submission still running (by 4 KB page). A counter report of the same submission does not count: the host writes reports on the CPU after the whole submission completes. The `residency set` line splits the refusals by reason |
 diff --git a/docs/agents/symptoms.md b/docs/agents/symptoms.md
-index b643b5f..38d8ec4 100644
+index b643b5f..4ff1349 100644
 --- a/docs/agents/symptoms.md
 +++ b/docs/agents/symptoms.md
 @@ -11,6 +11,8 @@ One line per symptom in the [subsystem references](../reference/): what you see
@@ -2574,7 +2593,7 @@ index b643b5f..38d8ec4 100644
  - frames stop after about 15 s; a game thread spins in its command-memory callback (a ring allocator at `main+0x9cc120` waiting for fences that have all signalled). → [What `GetCommandMemoryUsed` counts](../reference/nvn-objects.md#what-getcommandmemoryused-counts)
  - `CRASH sig=10` in `mtl_exec` after minutes of play, the fault address equal to `x19` and shaped like `0x1000000003`. → [Prerecorded lists in slots of their measured size](../reference/nvn-objects.md#prerecorded-lists-in-slots-of-their-measured-size)
  - the title showed one stretched 64×64 icon over the 3D scene, a new game a white screen; post-process passes with stale texture handles; `[RED] bind record … overwritten after recording`. → [Recorded commands patched in place by the game (`OP_BIND_TEX1`)](../reference/nvn-objects.md#recorded-commands-patched-in-place-by-the-game-op_bind_tex1)
-@@ -346,6 +350,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+@@ -346,9 +350,11 @@ One line per symptom in the [subsystem references](../reference/): what you see
  - red stub lines for NVN calls. → [NVN calls that were red stubs](../reference/nvn-objects.md#nvn-calls-that-were-red-stubs)
  - `nvnWindowGetPresentInterval`, `nvnCommandBufferSetCopyImageStride` missing. → [SDK 8 window and copy-stride entry points](../reference/nvn-objects.md#sdk-8-window-and-copy-stride-entry-points)
  - `[RED] texture bound to an image slot lacks the shader-write usage`, and compute image writes go to a dummy texture. → [Image bindings supply shader-write intent](../reference/nvn-objects.md#image-bindings-supply-shader-write-intent)
@@ -2582,7 +2601,11 @@ index b643b5f..38d8ec4 100644
  
  ## Rendering
  
-@@ -408,6 +413,8 @@ One line per symptom in the [subsystem references](../reference/): what you see
++- an already encoded argument buffer can refer to a sampler object that descriptor re-registration has released. Incorrect sampling, intermittent imagery or invalid IDs are possible; Odyssey's observed flash has not yet been attributed to this defect. → [Replaced sampler descriptors release live GPU resource IDs](../reference/rendering.md#replaced-sampler-descriptors-release-live-gpu-resource-ids)
+ - clang reports null dereferences in `nvnWindowInitialize` and `clear_tex`; clearing a null texture crashes with `DM_NVN_PASSDUMP=1`. → [Null textures in diagnostic logs](../reference/rendering.md#null-textures-in-diagnostic-logs)
+ - Metal aborts on a texture descriptor with an absurd size (`height (1869367126) greater than … 16384`). → [Texture objects copied into command records](../reference/rendering.md#texture-objects-copied-into-command-records)
+ - a decoded movie stays black even though its YUV textures contain the picture; disabling its depth test makes it visible. → [New textures start as zero](../reference/rendering.md#new-textures-start-as-zero)
+@@ -408,6 +414,8 @@ One line per symptom in the [subsystem references](../reference/): what you see
  - `vertex attribute format … not mapped` (printed once). → [Vertex formats Metal lacks](../reference/rendering.md#vertex-formats-metal-lacks)
  - the assertion `buffer index (31) must be < 31`. → [Vertex streams 14 and 15 at Metal slots 14 and 15](../reference/rendering.md#vertex-streams-14-and-15-at-metal-slots-14-and-15)
  - Scaleform fills come out as solid white or light grey sheets over the whole screen, hard-edged triangles and bands, and the menu text is missing (a language list or a title screen that is all white behind its button prompt). → [Vertex streams at addresses that are not 4-byte aligned](../reference/rendering.md#vertex-streams-at-addresses-that-are-not-4-byte-aligned)
@@ -2591,7 +2614,7 @@ index b643b5f..38d8ec4 100644
  - scenes and characters black, only foliage, light shafts and the HUD drawn; pass dumps full of `Z … draw skipped: no program bound`. → [Programs bound per stage](../reference/rendering.md#programs-bound-per-stage)
  - `[RED] failed to create render pipeline (vertex 790573a52b9c5053_b fragment f39fb42850f50ecd_b): Fragment input(s) user(locn0),user(locn1) … not written by vertex shader`, once on entering the first investigation; `texture type mismatch: shader declares a cube, texture is 2D` (a pixel shader run with another pair's bindings). → [Composite program taken again after a replay state restore](../reference/rendering.md#composite-program-taken-again-after-a-replay-state-restore)
  - `no program bound before the draw`, `program has no vertex shader` (a draw after a dispatch is dropped); `the dispatched program has no compute shader` (a dispatch after a graphics bind). → [Compute programs bound apart from graphics programs](../reference/rendering.md#compute-programs-bound-apart-from-graphics-programs)
-@@ -449,7 +456,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
+@@ -449,7 +457,7 @@ One line per symptom in the [subsystem references](../reference/): what you see
  - the NSP script took the game for an OpenGL one (`main imports EGL and names glShaderSource`), the GL shader capture found no shader, and the capture boot stopped with `[nvn-mtl] FATAL cannot read the shader map` from `h_nvnQueueSubmitCommands` called in an NRO (`nro8+0xc10d0`). → [NVN in NROs under an SDL main that names GL](../reference/rendering.md#nvn-in-nros-under-an-sdl-main-that-names-gl)
  - a jump to address 0 right after `glGetFloatv(0xb12)` (`lr=main+0x2d58c4`). → [Which GL functions a game calls](../reference/rendering.md#which-gl-functions-a-game-calls)
  - in a capture run every program links with no uniforms; the game's first `Shader:send` raises a Lua error and, on the Switch, its error handler quits (Any Lua error quits a LÖVE game). → [GL shaders put together at run time and captured](../reference/rendering.md#gl-shaders-put-together-at-run-time-and-captured)
@@ -2658,10 +2681,26 @@ index 03669d3..c726be0 100644
  
  ### NSZ decompression rejects `--keys`
 diff --git a/docs/reference/rendering.md b/docs/reference/rendering.md
-index 77b2067..ffe8100 100644
+index 77b2067..5b4ebc5 100644
 --- a/docs/reference/rendering.md
 +++ b/docs/reference/rendering.md
-@@ -505,6 +505,21 @@ The replay on Metal (`dm/gfx/nvn/nvn_mtl.m`) and the Vulkan and OpenGL layers. E
+@@ -4,6 +4,15 @@ The replay on Metal (`dm/gfx/nvn/nvn_mtl.m`) and the Vulkan and OpenGL layers. E
+ 
+ ## Textures and formats
+ 
++### Replaced sampler descriptors release live GPU resource IDs
++
++- **Symptom:** an already encoded argument buffer can refer to a sampler object that descriptor re-registration has released. Incorrect sampling, intermittent imagery or invalid IDs are possible; Odyssey's observed flash has not yet been attributed to this defect.
++- **Cause:** `mtl_reg_samp` dropped the registry's retained reference immediately. The argument buffer stores only `gpuResourceID`; `USE` performs optional residency diagnostics and does not retain the sampler. Metal4 command buffers do not create strong resource references. Samplers are not resident `MTLResource` allocations, so texture residency cannot protect them.
++- **Fix:** transfer an extra reference to the existing completion-gated deferred-unref queue before dropping the registry reference. Future binds get the replacement descriptor and old encoded IDs keep their object through current/queued work. Retired samplers drain after completion; no permanent sampler cache or rendering clamp is introduced.
++- **Check:** `run_sampler_lifetime_native.py` executes the actual registration and deferred-retirement bodies against a Foundation model whose pending GPU work keeps only numeric IDs. The former registration body is a required failing control. Cases cover recording before submission, delayed and partial completion, 4000 replacements and a 512-descriptor burst with complete reclamation. This is a lifecycle contract test, not physical GPU fault reproduction.
++- **Contract:** [Understanding the Metal4 core API](https://developer.apple.com/documentation/metal/understanding-the-metal-4-core-api) describes application-managed object lifetimes.
++- **Found on:** source audit following [Odyssey's bloom observation](../../dm/games/0100000000010000/README.md); visible flicker causality remains open.
++
+ ### Null textures in diagnostic logs
+ 
+ - **Symptom:** clang reports null dereferences in `nvnWindowInitialize` and `clear_tex`; clearing a null texture crashes with `DM_NVN_PASSDUMP=1`.
+@@ -505,6 +514,21 @@ The replay on Metal (`dm/gfx/nvn/nvn_mtl.m`) and the Vulkan and OpenGL layers. E
  - **Fix:** `bind_vbufs` copies a stream whose address is not 4-byte aligned into the submission's arena (`vbuf_unaligned`; one copy per address and size until guest writes or pool mappings change, up to 64 MB) and binds the copy. CPU copies require a host-readable, non-sparse range without pending GPU writers in this or an earlier submission; otherwise `vbuf_prepare` encodes an ordered GPU copy before the render encoder, including feedback and geometry captures. Submissions and pool mappings invalidate copies; buffer and shader writes invalidate the copies they can overlap, so unrelated uniform updates keep their vertex copies. The log's `vertex bindings` line counts the copies; `t_vbuf` checks byte-aligned readbacks, reuse, queued writes, writes between draws and pool replacement. The index buffers at addresses 2 mod 4 (16-bit indices) needed nothing.
  - **Found on:** Batman: Arkham Knight (`0100ACD0163D0000`; its profile and note are in a PR of their own) (Scaleform GFx; 2–13 copies of 3–18 MB a frame in the menus and at the title, which the draws' vertex ranges could narrow). With the copy the language menu and the title screen draw right.
  
@@ -2683,7 +2722,7 @@ index 77b2067..ffe8100 100644
  ### Programs bound per stage
  
  - **Symptom:** scenes and characters black, only foliage, light shafts and the HUD drawn; pass dumps full of `Z … draw skipped: no program bound`.
-@@ -927,11 +942,12 @@ Digimon Story Cyber Sleuth: Complete Edition (Media.Vision's MVGL engine, SDK 6.
+@@ -927,11 +951,12 @@ Digimon Story Cyber Sleuth: Complete Edition (Media.Vision's MVGL engine, SDK 6.
  
  ### Unwritten attachment stores without lookahead
  
@@ -4848,6 +4887,120 @@ new file mode 100644
 +        subprocess.run(cc+['-std=c11','-O1','-UNDEBUG','-Wall','-Wextra','-Werror','-Wno-unused-function',str(src),'-o',str(exe)],check=True,env=env,timeout=120)
 +        subprocess.run([str(exe)],check=True,timeout=20)
 +if __name__=='__main__':main()
+diff --git a/dm/tools/tests/run_sampler_lifetime_native.py b/dm/tools/tests/run_sampler_lifetime_native.py
+new file mode 100644
+--- /dev/null
++++ b/dm/tools/tests/run_sampler_lifetime_native.py
+@@ -0,0 +1,109 @@
++"""Run real sampler-registration/retirement bodies against a delayed GPU model.
++
++The GPU model holds numeric resource IDs, never sampler objects. The former
++registration body is a required failing control. This is not device gameplay.
++"""
++from pathlib import Path
++import re
++import subprocess
++import tempfile
++
++ROOT = Path(__file__).resolve().parents[3]
++PRE = r'''
++#import <Foundation/Foundation.h>
++#import <CoreFoundation/CoreFoundation.h>
++#include <os/lock.h>
++#include <pthread.h>
++#include <stdint.h>
++#include <assert.h>
++#define MLOG(...) ((void)0)
++@protocol MTLResource <NSObject> @end
++static NSMutableSet *g_res_objects;
++static pthread_mutex_t g_res_mu=PTHREAD_MUTEX_INITIALIZER;
++static uint64_t g_fence,g_done,g_reg_gen;
++static unsigned created,destroyed;
++static void res_remove(id obj) { (void)obj;abort(); } // Samplers are not resident MTLResources.
++@interface Sampler:NSObject
++@property unsigned identifier;
++@end
++@implementation Sampler
++-(instancetype)init {self=[super init];if(self) _identifier=++created;return self;}
++-(void)dealloc {destroyed++;}
++@end
++static os_unfair_lock g_rmu=OS_UNFAIR_LOCK_INIT;
++static samp_par *g_sreg;static uint8_t *g_sreg_ok;static void **g_sview;
++static uint64_t *g_srid;static int g_nsreg;
++static void install(int sid) {
++ Sampler *s=[Sampler new];g_sview[sid]=(void *)CFBridgingRetain(s);g_srid[sid]=s.identifier;
++}
++'''
++TEST = r'''
++int main(void) {@autoreleasepool {
++ g_res_objects=[NSMutableSet set];samp_par p={.lod_min=0,.lod_max=0,.aniso=1};
++ unsigned before_gen=(unsigned)g_reg_gen;mtl_reg_samp(-1,&p);assert(g_reg_gen==before_gen);
++ mtl_reg_samp(17,&p);assert(g_nsreg>17&&g_sreg_ok[17]);
++ for(unsigned i=0;i<4000;i++) {
++  __weak Sampler *old;
++  @autoreleasepool {install(17);old=(__bridge Sampler *)g_sview[17];}
++  uint64_t encoded=g_srid[17];unsigned generation=(unsigned)g_reg_gen;
++  p.lod_min=p.lod_max=(float)(i%5);mtl_reg_samp(17,&p);
++  assert(!g_sview[17]&&!g_srid[17]&&g_sreg[17].lod_min==p.lod_min&&g_reg_gen==generation+1);
++  @autoreleasepool {if(!old) {fprintf(stderr,"FAIL: encoded sampler retired before GPU completion\n");return 1;}assert(old.identifier==encoded);}
++  // Even draining while the CPU is still recording must keep this raw ID live.
++  @autoreleasepool {defer_drain();assert(old&&g_deferred.count==1);}
++  ++g_fence;
++  @autoreleasepool {defer_drain();assert(old&&g_deferred.count==1);}
++  g_done=g_fence;@autoreleasepool {defer_drain();}
++  @autoreleasepool {assert(!old&&g_deferred.count==0);}
++ }
++ // Repeated registration across two in-flight submissions retires each at its
++ // own completion; completing one must not free the newer raw ID.
++ __weak Sampler *a,*b;
++ @autoreleasepool {install(17);a=(__bridge Sampler *)g_sview[17];}
++ mtl_reg_samp(17,&p);++g_fence;
++ @autoreleasepool {install(17);b=(__bridge Sampler *)g_sview[17];}
++ mtl_reg_samp(17,&p);++g_fence;
++ g_done=g_fence-1;@autoreleasepool {defer_drain();}
++ @autoreleasepool {assert(!a&&b&&g_deferred.count==1);}
++ g_done=g_fence;@autoreleasepool {defer_drain();}
++ @autoreleasepool {assert(!a&&!b&&!g_deferred.count);}
++ // A burst of replaced descriptors remains bounded by outstanding work, then
++ // releases fully rather than accumulating a permanent sampler cache.
++ for(unsigned i=0;i<512;i++) {@autoreleasepool {install(17);mtl_reg_samp(17,&p);}}
++ assert(g_deferred.count==512);g_done=++g_fence;@autoreleasepool {defer_drain();}
++ assert(!g_deferred.count&&created==destroyed&&g_res_objects.count==0);
++ printf("PASS actual sampler registration/deferred retirement: %u replacements; recording, delayed and partial completion; no retained sampler leak\n",created);
++}}
++'''
++
++
++def main():
++    text = (ROOT/'dm/gfx/nvn/nvn_mtl.m').read_text(encoding='utf-8')
++    obj = (ROOT/'dm/gfx/nvn/nvn_obj.h').read_text(encoding='utf-8')
++    definition = re.search(r'typedef struct \{[^\n]+\} samp_par;', obj).group()
++    deferred = text[text.index('@interface NvDeferredRelease'):text.index('static pthread_mutex_t g_bf_want_mu')]
++    registration = text[text.index('void mtl_reg_samp('):text.index('// Handles of deferred binds')]
++    needle = 'defer_obj_unref((__bridge id)g_sview[id_]); '
++    assert registration.count(needle) == 1
++    variants = [('baseline', registration.replace(needle, '')), ('fixed', registration)]
++    with tempfile.TemporaryDirectory(prefix='sampler-life-') as td:
++        td = Path(td)
++        for name, body in variants:
++            src, exe = td/(name+'.m'), td/name
++            src.write_text(definition+'\n'+PRE+'\n'+deferred+'\n'+body+'\n'+TEST, encoding='utf-8')
++            # The real typedef uses standard C types; its declaration follows
++            # the imports, just before the test's sampler table declarations.
++            s = src.read_text(encoding='utf-8').replace(definition+'\n', '', 1)
++            src.write_text(s.replace('static samp_par *g_sreg;', definition+'\nstatic samp_par *g_sreg;'), encoding='utf-8')
++            subprocess.run(['xcrun','clang','-fobjc-arc','-UNDEBUG','-O1',str(src),
++                            '-framework','Foundation','-o',str(exe)], check=True, timeout=120)
++            r = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
++            print(name, r.returncode, r.stdout.strip(), r.stderr.strip())
++            if name == 'baseline':
++                assert r.returncode != 0 and 'encoded sampler retired before GPU completion' in r.stderr
++            else:
++                assert r.returncode == 0 and 'PASS actual sampler' in r.stdout
++
++
++if __name__ == '__main__':
++    main()
 diff --git a/dm/tools/tests/run_sampler_mips_native.py b/dm/tools/tests/run_sampler_mips_native.py
 new file mode 100644
 --- /dev/null
